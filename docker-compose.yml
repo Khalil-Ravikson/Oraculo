@@ -1,261 +1,33 @@
-
-
-# =============================================================================
-# docker-compose.yml — Bot UEMA v4.0 (Assíncrono com Celery)
-# =============================================================================
-
-networks:
-  uema:
-    driver: bridge
-    name: uema_network
-
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oraculo_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: oraculo
+    # Mudamos a porta do Host de 5432 para 5433
+    ports:
+      - "5433:5432"
+    # Nome do volume explicitamente com prefixo
+    volumes:
+      - oraculo_postgres_data:/var/lib/postgresql/data
 
-  # ---------------------------------------------------------------------------
-  # 1. Redis Stack
-  # ---------------------------------------------------------------------------
   redis:
     image: redis/redis-stack:latest
-    container_name: redis-stack
-    restart: unless-stopped
-    networks:
-      - uema
+    container_name: oraculo_redis
+    restart: always
+    # Mudamos as portas do Host para não baterem com o meubotrag
     ports:
-      - "6379:6379"
-      - "8001:8001"
-    environment:
-      - TZ=America/Sao_Paulo
+      - "6380:6379" # Redis
+      - "8002:8001" # Redis Insight (Painel)
     volumes:
-      - redis-data:/data
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-    command: >
-      redis-stack-server
-      --maxmemory 2gb
-      --maxmemory-policy allkeys-lru
-      --save 60 1
-      --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
-  # ---------------------------------------------------------------------------
-  # 2. PostgreSQL — EXCLUSIVO da Evolution API
-  # ---------------------------------------------------------------------------
-  evolution-postgres:
-    image: postgres:16-alpine
-    container_name: evolution-postgres
-    restart: unless-stopped
-    networks:
-      - uema
+      - oraculo_redis_data:/data
     environment:
-      - POSTGRES_DB=evolution
-      - POSTGRES_USER=evolution
-      - POSTGRES_PASSWORD=${EVOLUTION_DB_PASS:-evo_pass_2024}
-      - TZ=America/Sao_Paulo
-    volumes:
-      - evolution-pg-data:/var/lib/postgresql/data
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+      - REDIS_ARGS=--appendonly yes
 
-  # ---------------------------------------------------------------------------
-  # 3. Evolution API v2
-  # ---------------------------------------------------------------------------
-  evolution-api:
-    build:
-      context: https://github.com/EvolutionAPI/evolution-api.git#2.3.7 
-      dockerfile: ./Dockerfile
-    image: evolution-api-local:2.3.7  
-    container_name: evolution-api
-    restart: unless-stopped
-    networks:
-      - uema
-    ports:
-      - "8080:8080"
-    environment:
-      - SERVER_URL=http://localhost:8080
-      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
-      - TZ=America/Sao_Paulo
-
-      # PostgreSQL
-      - DATABASE_ENABLED=true
-      - DATABASE_PROVIDER=postgresql
-      - DATABASE_CONNECTION_URI=postgresql://evolution:${EVOLUTION_DB_PASS:-evo_pass_2024}@evolution-postgres:5432/evolution
-      - DATABASE_CONNECTION_CLIENT_NAME=evolution_api
-      - DATABASE_SAVE_DATA_INSTANCE=true
-      - DATABASE_SAVE_DATA_NEW_MESSAGE=false
-      - DATABASE_SAVE_MESSAGE_UPDATE=false
-      - DATABASE_SAVE_DATA_CONTACTS=false
-      - DATABASE_SAVE_DATA_CHATS=false
-
-      # Cache Redis DB 1
-      - CACHE_REDIS_ENABLED=true
-      - CACHE_REDIS_URI=redis://redis:6379/1
-      - CACHE_REDIS_PREFIX_KEY=evolution
-      - CACHE_REDIS_SAVE_INSTANCES=false
-
-      # Webhook
-      - WEBHOOK_GLOBAL_URL=http://bot:9000/webhook
-      - WEBHOOK_GLOBAL_ENABLED=true
-      - WEBHOOK_EVENTS_MESSAGES_UPSERT=true
-      - WEBHOOK_EVENTS_CONNECTION_UPDATE=true
-      - CONFIG_SESSION_PHONE_VERSION=2.3000.1032691661
-
-    volumes:
-      - ./evolution_instances:/evolution/instances
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-    depends_on:
-      redis:
-        condition: service_healthy
-      evolution-postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/ || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  # ---------------------------------------------------------------------------
-  # 4. Bot RAG (Rececionista Webhook)
-  # ---------------------------------------------------------------------------
-  bot:
-    build: .
-    container_name: bot
-    restart: unless-stopped
-    networks:
-      - uema
-    depends_on:
-      redis:
-        condition: service_healthy
-      evolution-api:
-        condition: service_started
-    ports:
-      - "9000:9000"
-    volumes:
-      - ./dados:/app/dados
-      - ./src:/app/src
-      - ./tests:/app/tests
-      - ./static:/app/static        # adicione
-      - ./templates:/app/templates
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - EVOLUTION_BASE_URL=http://evolution-api:8080
-      - WHATSAPP_HOOK_URL=http://bot:9000/webhook
-      - TZ=America/Sao_Paulo
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9000/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
-
-  # ---------------------------------------------------------------------------
-  # 5. Celery Worker (Processamento Pesado em Background V4)
-  # ---------------------------------------------------------------------------
-  celery-worker:
-    build: .
-    container_name: celery-worker
-    restart: unless-stopped
-    networks:
-      - uema
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./dados:/app/dados
-      - ./src:/app/src
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - EVOLUTION_BASE_URL=http://evolution-api:8080
-      - TZ=America/Sao_Paulo
-    command: celery -A src.infrastructure.celery_app.celery_app worker --loglevel=info --concurrency=2
-  # ---------------------------------------------------------------------------
-  # 6. NOVO — Celery Beat — agendador de tarefas periódicas
-  # ---------------------------------------------------------------------------
-  # IMPORTANTE: Deve existir APENAS UMA instância do Beat em produção.
-  # Múltiplos Beats causariam disparo duplicado de notificações.
-  # Por isso não usamos restart=unless-stopped em produção de alta escala,
-  # mas para o nosso caso (1 servidor) está correto.
-  celery-beat:
-    build: .
-    container_name: celery-beat
-    restart: unless-stopped
-    networks: [uema]
-    depends_on:
-      redis:
-        condition: service_healthy
-      bot:
-        condition: service_healthy   # aguarda o bot estar pronto (ingestão concluída)
-    volumes:
-      - ./dados:/app/dados
-      - ./src:/app/src
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - EVOLUTION_BASE_URL=http://evolution-api:8080
-      - TZ=America/Sao_Paulo
-    command: >
-      celery -A src.infrastructure.celery_app.celery_app beat
-      --loglevel=info
-      --scheduler celery.beat:PersistentScheduler
-      --schedule /tmp/celery_beat_schedule
- 
-  # ---------------------------------------------------------------------------
-  # 7. NOVO — Celery Notif Worker — processa fila de notificações em lote
-  # ---------------------------------------------------------------------------
-  # Worker separado para não bloquear o processamento de mensagens WhatsApp.
-  # Concurrency=1: notificações são enviadas sequencialmente com delay de 1.2s
-  # entre mensagens (respeita limites da Evolution API e evita ban do WhatsApp).
-  celery-notif:
-    build: .
-    container_name: celery-notif
-    restart: unless-stopped
-    networks: [uema]
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./dados:/app/dados
-      - ./src:/app/src
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - EVOLUTION_BASE_URL=http://evolution-api:8080
-      - TZ=America/Sao_Paulo
-    command: >
-      celery -A src.infrastructure.celery_app.celery_app worker
-      --loglevel=info
-      --concurrency=1
-      --queues=notificacoes
-      --hostname=notif@%h
- 
+# Volumes nomeados de forma única para não sobrescrever os dados antigos
 volumes:
-  redis-data:
-    driver: local
-  evolution-pg-data:
-    driver: local
+  oraculo_postgres_data:
+  oraculo_redis_data:

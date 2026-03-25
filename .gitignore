@@ -1,6 +1,8 @@
 # Segurança (NUNCA REMOVA ISSO)
 .env
 .env.local
+!.env.example
+.env.*
 
 # Sessões do WhatsApp e Dados do Banco
 waha-data/

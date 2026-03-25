@@ -1,4 +1,3 @@
-from __future__ import annotations
 import json
 import logging
 from typing import Any, Type, TypeVar
@@ -13,8 +12,7 @@ from tenacity import (
     before_sleep_log,
 )
 
-# Apenas o contrato e as settings importam aqui
-from src.domain.ports.llm_provider import ILLMProvider, LLMResponse
+from src.domain.ports.llm_Provider import ILLMProvider, LLMResponse
 from src.infrastructure.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -22,48 +20,35 @@ logger = logging.getLogger(__name__)
 T = TypeVar('T', bound=BaseModel)
 
 def _is_retryable(exc: BaseException) -> bool:
-    """Decide se o Tenacity deve fazer retry neste erro."""
     err = str(exc).lower()
-    return any(term in err for term in ["429", "quota", "rate limit", "503", "overloaded", "timeout", "connection"])
+    return any(term in err for term in ["429", "quota", "rate limit", "503", "overloaded", "timeout"])
 
 class GeminiProvider(ILLMProvider):
-    """
-    Implementação concreta do ILLMProvider usando a API Gemini.
-    """
     MODELO_PRIMARIO = "gemini-3.1-flash-lite-preview"
-    MODELO_FALLBACK = "gemini-2.5-flash" # Atualizado para um nome de fallback válido
 
-    def __init__(self, api_key: str | None = None, model_name: str | None = None):
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY não configurada")
         
-        self.model_name = model_name or self.MODELO_PRIMARIO
         self.client = genai.Client(api_key=self.api_key)
-        logger.info("✅ Cliente Gemini inicializado | modelo=%s", self.model_name)
+        logger.info("✅ GeminiProvider Assíncrono inicializado.")
 
     @retry(
         retry=retry_if_exception(_is_retryable),
-        wait=wait_exponential(multiplier=2, min=2, max=16),
-        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=2, min=2, max=10),
+        stop=stop_after_attempt(3),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    def _chamada_interna_com_retry(
-        self,
-        prompt: str,
-        system_instruction: str,
-        temperatura: float,
-        max_tokens: int,
-        modelo_alvo: str,
-        response_schema: Type[BaseModel] | None = None
+    async def _chamada_interna_async(
+        self, prompt: str, system_instruction: str, temperatura: float, 
+        max_tokens: int, response_schema: Type[BaseModel] | None = None
     ) -> LLMResponse:
-        """Método privado que faz a requisição real à API do Google."""
         
         config_kwargs: dict[str, Any] = {
             "temperature": temperatura,
             "max_output_tokens": max_tokens,
-            # Configurações de segurança resumidas para brevidade
         }
 
         if system_instruction:
@@ -75,83 +60,45 @@ class GeminiProvider(ILLMProvider):
 
         config = types.GenerateContentConfig(**config_kwargs)
 
-        resposta = self.client.models.generate_content(
-            model=modelo_alvo,
+        # Usando aio (async) da nova SDK do Google
+        resposta = await self.client.aio.models.generate_content(
+            model=self.MODELO_PRIMARIO,
             contents=prompt,
             config=config,
         )
 
         usage = getattr(resposta, "usage_metadata", None)
-        input_tok = getattr(usage, "prompt_token_count", 0) if usage else 0
-        output_tok = getattr(usage, "candidates_token_count", 0) if usage else 0
-        conteudo = resposta.text or ""
-
         return LLMResponse(
-            conteudo=conteudo,
-            model=modelo_alvo,
-            input_tokens=input_tok,
-            output_tokens=output_tok,
+            conteudo=resposta.text or "",
+            model=self.MODELO_PRIMARIO,
+            input_tokens=getattr(usage, "prompt_token_count", 0) if usage else 0,
+            output_tokens=getattr(usage, "candidates_token_count", 0) if usage else 0,
             sucesso=True
         )
 
-    # ==========================================
-    # IMPLEMENTAÇÃO DOS MÉTODOS DO CONTRATO
-    # ==========================================
-
-    def gerar_resposta(
-        self,
-        prompt: str,
-        system_instruction: str = "",
-        temperatura: float = 0.2,
-        max_tokens: int = 1024,
+    async def gerar_resposta_async(
+        self, prompt: str, system_instruction: str = "", temperatura: float = 0.2, max_tokens: int = 1024,
     ) -> LLMResponse:
-        """Implementa a assinatura obrigatória do ILLMProvider."""
-        
         try:
-            # Tenta o modelo primário
-            return self._chamada_interna_com_retry(
-                prompt, system_instruction, temperatura, max_tokens, self.model_name
-            )
+            return await self._chamada_interna_async(prompt, system_instruction, temperatura, max_tokens)
         except Exception as e:
-            logger.warning("🔄 Tenacity esgotado para %s → tentando fallback %s", self.model_name, self.MODELO_FALLBACK)
-            try:
-                # Tenta o fallback
-                return self._chamada_interna_com_retry(
-                    prompt, system_instruction, temperatura, max_tokens, self.MODELO_FALLBACK
-                )
-            except Exception as e_fallback:
-                logger.error("❌ Fallback também falhou: %s", e_fallback)
-                return LLMResponse(conteudo="", model=self.model_name, erro=str(e_fallback)[:300], sucesso=False)
+            logger.error("❌ Falha no Gemini: %s", e)
+            return LLMResponse(conteudo="", model=self.MODELO_PRIMARIO, erro=str(e), sucesso=False)
 
-
-    def gerar_resposta_estruturada(
-        self,
-        prompt: str,
-        response_schema: Type[T],
-        system_instruction: str = "",
-        temperatura: float = 0.0,
+    async def gerar_resposta_estruturada_async(
+        self, prompt: str, response_schema: Type[T], system_instruction: str = "", temperatura: float = 0.0,
     ) -> T | None:
-        """Implementa a assinatura obrigatória para JSON."""
-        
         try:
-            resposta_llm = self._chamada_interna_com_retry(
-                prompt=prompt,
-                system_instruction=system_instruction,
-                temperatura=temperatura,
-                max_tokens=1024,
-                modelo_alvo=self.model_name,
-                response_schema=response_schema
+            resposta_llm = await self._chamada_interna_async(
+                prompt, system_instruction, temperatura, max_tokens=1024, response_schema=response_schema
             )
             
             if not resposta_llm.sucesso or not resposta_llm.conteudo:
                 return None
                 
-            # A API do Gemini já garante o JSON perfeito quando usamos response_schema
-            dict_resposta = json.loads(resposta_llm.conteudo)
-            
-            # Converte o dict de volta para a classe Pydantic pedida pelo usuário
-            return response_schema(**dict_resposta)
-            
+            # O Gemini nos garante um JSON aqui. O Pydantic (response_schema) faz a validação final!
+            dict_dados = json.loads(resposta_llm.conteudo)
+            return response_schema(**dict_dados)
         except Exception as e:
-            logger.error("❌ Erro na geração estruturada: %s", e)
+            logger.error("❌ Erro estruturado: %s", e)
             return None

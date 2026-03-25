@@ -3,12 +3,12 @@ from typing import Protocol, Type, TypeVar, Any
 from dataclasses import dataclass
 from pydantic import BaseModel
 
-# Criamos um tipo genérico para o schema estruturado
+# T é um tipo genérico que representa "Qualquer classe que herde de BaseModel"
 T = TypeVar('T', bound=BaseModel)
 
 @dataclass
 class LLMResponse:
-    """Objeto de resposta padronizado, agnóstico de provedor."""
+    """Envelope padrão para qualquer resposta de texto livre de qualquer LLM."""
     conteudo:      str
     model:         str
     input_tokens:  int  = 0
@@ -22,21 +22,20 @@ class LLMResponse:
 
 class ILLMProvider(Protocol):
     """
-    Contrato que qualquer LLM (Gemini, Groq, OpenAI) deve respeitar.
-    O AgentCore conversará apenas com esta interface.
+    O 'Oráculo' só conversa com esta interface. Ele não sabe se é Gemini ou Groq.
     """
     
-    def gerar_resposta(
+    async def gerar_resposta_async(
         self,
         prompt: str,
         system_instruction: str = "",
         temperatura: float = 0.2,
         max_tokens: int = 1024,
     ) -> LLMResponse:
-        """Gera texto livre (ex: resposta final para o aluno)."""
+        """Gera texto livre assíncrono (ex: resposta final para o aluno)."""
         ...
 
-    def gerar_resposta_estruturada(
+    async def gerar_resposta_estruturada_async(
         self,
         prompt: str,
         response_schema: Type[T],
@@ -44,7 +43,7 @@ class ILLMProvider(Protocol):
         temperatura: float = 0.0,
     ) -> T | None:
         """
-        Gera JSON estruturado baseado num Pydantic Model.
-        Útil para extração de fatos e transformação de queries.
+        Gera um JSON validado e devolve instanciado como um objeto Pydantic (T).
+        É aqui que entra o "Global". Qualquer provedor tem que saber devolver isso!
         """
         ...

@@ -65,15 +65,26 @@ import re
 from dataclasses import dataclass, field
 from pydantic import BaseModel
 from src.memory.long_term_memory import Fato, fatos_como_string
-from src.providers.gemini_provider import (
-    PROMPT_QUERY_REWRITE,
-    QueryRewriteSchema,
-    chamar_gemini_estruturado,
-)
+from src.domain.ports.llm_Provider import ILLMProvider
+
 
 logger = logging.getLogger(__name__)
 
+class QueryRewriteSchema(BaseModel):
+    query_reescrita: str
+    palavras_chave: list[str]
 
+async def transformar_query_async(pergunta: str, llm: ILLMProvider) -> str:
+    # Usamos o provedor genérico, injetando o nosso schema específico!
+    resultado = await llm.gerar_resposta_estruturada_async(
+        prompt=f"Reescreva a query: {pergunta}",
+        response_schema=QueryRewriteSchema, # Passamos a classe Pydantic!
+        temperatura=0.0
+    )
+    
+    if resultado:
+        return resultado.query_reescrita
+    return pergunta # Fallback
 # ─────────────────────────────────────────────────────────────────────────────
 # Constantes
 # ─────────────────────────────────────────────────────────────────────────────
