@@ -31,7 +31,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.models import Pessoa, RoleEnum, StatusMatriculaEnum
-from src.repositories.pessoa_repository import PessoaRepository
+from src.infrastructure.repositories.pessoa_repository import PessoaRepository
 
 logger = logging.getLogger(__name__)
 

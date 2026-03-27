@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 
 from src.domain.entities import Mensagem
-from src.application.handle_message import handle_message
+from src.application.use_cases.handle_message import handle_message
 from src.middleware.dev_guard import DevGuard
 from src.services.evolution_service import EvolutionService
 

@@ -7,7 +7,7 @@ Testável com outputs mockados — sem I/O.
 from __future__ import annotations
 from dataclasses import dataclass
 from src.agent.state import AgentState
-from src.application.graph.prompts import OUTPUTS_INVALIDOS, MSG_NAO_ENCONTRADO
+from src.agent.prompts import OUTPUTS_INVALIDOS, MSG_NAO_ENCONTRADO
 
 
 @dataclass

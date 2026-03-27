@@ -175,7 +175,7 @@ def _garantir_agente_inicializado() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _processar_async(identity: dict) -> None:
-    from src.application.use_cases.handle_message import handle_message
+    from src.application.handle_message import handle_message
     from src.domain.entities import Mensagem
 
     mensagem = Mensagem(

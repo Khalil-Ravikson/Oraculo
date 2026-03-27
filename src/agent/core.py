@@ -94,7 +94,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from src.agent.prompts import (
+from src.application.graph.prompts import (
     PROMPT_AVALIAR_RELEVANCIA,
     PROMPT_PRECISA_RAG,
     SYSTEM_UEMA,

@@ -49,7 +49,7 @@ from src.infrastructure.settings import settings
 
 # Importa prompts de agent/prompts.py — FONTE ÚNICA DE VERDADE
 # Re-exportamos aqui para manter compatibilidade com imports existentes em core.py
-from src.agent.prompts import (
+from src.application.graph.prompts import (
     SYSTEM_UEMA,
     montar_prompt_geracao,
     PROMPT_QUERY_REWRITE,

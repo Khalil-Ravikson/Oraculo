@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from src.memory.long_term_memory import Fato, fatos_como_string
 from src.domain.ports.llm_provider import ILLMProvider
-from src.agent.prompts import PROMPT_QUERY_REWRITE # Certifique-se de importar o prompt de onde ele vive!
+from src.application.graph.prompts import PROMPT_QUERY_REWRITE # Certifique-se de importar o prompt de onde ele vive!
 
 logger = logging.getLogger(__name__)
 

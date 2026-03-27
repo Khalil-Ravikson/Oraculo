@@ -283,7 +283,7 @@ async def query_rag(request: Request):
             yield _evento("step_start", {"step": "geracao", "label": "4 — Geração (Gemini Flash)"})
             t0 = time.monotonic()
             from src.providers.gemini_provider import chamar_gemini
-            from src.agent.prompts import SYSTEM_UEMA, montar_prompt_geracao
+            from src.application.graph.prompts import SYSTEM_UEMA, montar_prompt_geracao
 
             prompt = montar_prompt_geracao(
                 pergunta     = pergunta,

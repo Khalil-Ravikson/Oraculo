@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from src.domain.ports.llm_provider import ILLMProvider
 from src.memory.working_memory import get_ultimos_n_turns, get_sinais, set_sinal
 from src.memory.long_term_memory import guardar_fatos_batch
-from src.agent.prompts import PROMPT_EXTRACAO_FATOS
+from src.application.graph.prompts import PROMPT_EXTRACAO_FATOS
 
 logger = logging.getLogger(__name__)
 

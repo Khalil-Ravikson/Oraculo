@@ -1,41 +1,75 @@
-# src/api/webhook.py
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+import logging
+from fastapi import APIRouter, Depends, Request, BackgroundTasks
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.middleware.dev_guard import DevGuard
-from src.application.use_cases.process_message import ProcessMessageUseCase
-from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
-from src.infrastructure.adapters.redis_cache_lock import RedisCacheLock
-from src.infrastructure.repositories.postgres_user_repository import (
-    PostgresUserRepository,
-)
-from src.infrastructure.database.connection import AsyncSessionLocal
+# Imports da nossa arquitetura
+from src.infrastructure.database.session import get_db_session
+from src.infrastructure.repositories.postgres_user_repository import PostgresUserRepository
+from src.infrastructure.adapters.redis_cache_lock import acquire_lock, release_lock
+from src.application.use_cases.messages import MSG_CADASTRO_NECESSARIO
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_gateway = EvolutionAdapter()
-_lock    = RedisCacheLock()
+async def processar_mensagem_background(phone: str, text: str, user_data: dict):
+    """
+    Simula o processamento em background (LangGraph).
+    Na Fase 3, chamaremos o Celery ou o Grafo aqui.
+    """
+    try:
+        logger.info(f"🧠 [LANGGRAPH] Processando mensagem de {phone}: '{text}'")
+        # Aqui entrará: app_graph.ainvoke({"user_phone": phone, "current_input": text, ...})
+    finally:
+        # Só liberamos o lock quando o bot terminar de processar e responder
+        await release_lock(phone)
+        logger.info(f"🔓 [LOCK] Trava liberada para {phone}")
 
-@router.post("/webhook")
-async def webhook(request: Request):
-    payload = await request.json()
+@router.post("/evolution/webhook")
+async def evolution_webhook(
+    request: Request, 
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db_session)
+):
+    print("📍 [WEBHOOK] 1. Requisição chegou na rota (Banco Conectado com sucesso)!")
+    
+    try:
+        payload = await request.json()
+        data = payload.get("data", {})
+        remote_jid = data.get("key", {}).get("remoteJid", "")
+        phone = remote_jid.split("@")[0]
+        text = data.get("message", {}).get("conversation", "")
+        print(f"📍 [WEBHOOK] 2. Payload extraído: Telefone {phone} | Msg: '{text}'")
+    except Exception as e:
+        print(f"❌ Erro no payload: {e}")
+        return {"status": "ok"}
 
-    # DevGuard existente — não muda
-    from src.infrastructure.redis_client import get_redis_text
-    guard = DevGuard(get_redis_text())
-    is_valid, identity = await guard.validar(payload)
+    print("📍 [WEBHOOK] 3. Tentando adquirir Lock no Redis...")
+    try:
+        lock_acquired = await acquire_lock(phone, ttl_seconds=60)
+        print(f"📍 [WEBHOOK] 4. Lock adquirido? {lock_acquired}")
+        if not lock_acquired:
+            return {"status": "locked_ignored"}
+    except Exception as e:
+        print(f"❌ [WEBHOOK] O Redis travou: {e}")
+        return {"status": "error"}
 
-    if not is_valid:
-        return JSONResponse({"status": "ok"})
+    try:
+        print("📍 [WEBHOOK] 5. Indo buscar no PostgreSQL...")
+        user_repo = PostgresUserRepository(db)
+        student = await user_repo.get_by_phone(phone)
 
-    # Use Case com injeção de dependência
-    async with AsyncSessionLocal() as session:
-        repo    = PostgresUserRepository(session)
-        use_case = ProcessMessageUseCase(
-            user_repo=repo,
-            gateway=_gateway,
-            lock=_lock,
-        )
-        await use_case.execute(identity)
+        if not student:
+            print("📍 [WEBHOOK] 6. [GUEST] Número não cadastrado!")
+            await release_lock(phone)
+            return {"status": "onboarding_started"}
 
-    return JSONResponse({"status": "ok"})
+        print(f"📍 [WEBHOOK] 6. [ACESSO LIBERADO] Aluno: {student.nome}")
+        background_tasks.add_task(processar_mensagem_background, phone, text, {"curso": student.curso})
+
+    except Exception as e:
+        print(f"❌ [WEBHOOK] Ocorreu um erro ao consultar o banco: {e}")
+        await release_lock(phone)
+        return {"status": "error"}
+
+    print("📍 [WEBHOOK] 7. Requisição HTTP encerrada com sucesso.")
+    return {"status": "processing_started"}

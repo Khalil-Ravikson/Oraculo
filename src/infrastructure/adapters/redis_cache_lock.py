@@ -1,19 +1,36 @@
-# src/infrastructure/adapters/redis_cache_lock.py
-from src.domain.ports.cache_lock import ICacheLock
-from src.infrastructure.redis_client import get_redis_text
+import logging
+import redis.asyncio as redis
+from src.infrastructure.settings import settings
 
-class RedisCacheLock(ICacheLock):
+logger = logging.getLogger(__name__)
 
-    async def is_locked(self, key: str) -> bool:
-        r = get_redis_text()
-        return bool(r.exists(f"lock:chat:{key}"))
+# Pega a URL do Redis (tenta minúsculo ou maiúsculo dependendo de como está no seu settings.py)
+REDIS_URL = getattr(settings, "redis_url", getattr(settings, "REDIS_URL", "redis://localhost:6380/0"))
 
-    async def acquire(self, key: str, timeout: int = 90) -> bool:
-        r = get_redis_text()
-        # SET NX EX — atômico, sem race condition
-        result = r.set(f"lock:chat:{key}", "1", nx=True, ex=timeout)
-        return result is True
+# Inicializa o cliente Redis assíncrono para o Lock
+redis_client = redis.from_url(str(REDIS_URL), decode_responses=True)
 
-    async def release(self, key: str) -> None:
-        r = get_redis_text()
-        r.delete(f"lock:chat:{key}")
+async def acquire_lock(phone: str, ttl_seconds: int = 60) -> bool:
+    """
+    Tenta criar uma chave no Redis. 
+    Se a chave já existir, retorna False (O usuário está travado).
+    Se não existir, cria com um TTL (Time-to-Live) e retorna True.
+    """
+    try:
+        lock_key = f"lock:whatsapp:{phone}"
+        # nx=True garante que só seta se não existir (evita race conditions)
+        # ex=ttl_seconds define a expiração automática
+        is_acquired = await redis_client.set(lock_key, "1", nx=True, ex=ttl_seconds)
+        return bool(is_acquired)
+    except Exception as e:
+        logger.error(f"Erro ao tentar adquirir lock no Redis para {phone}: {e}")
+        # Em caso de queda do Redis, retornamos True para não travar o bot inteiro
+        return True
+
+async def release_lock(phone: str):
+    """Libera a trava manualmente."""
+    try:
+        lock_key = f"lock:whatsapp:{phone}"
+        await redis_client.delete(lock_key)
+    except Exception as e:
+        logger.error(f"Erro ao liberar lock no Redis para {phone}: {e}")
