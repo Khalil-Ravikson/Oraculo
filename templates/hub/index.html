@@ -1,0 +1,102 @@
+{% extends "hub/_base.html" %}
+
+{% block content %}
+<header>
+  <div class="logo">
+    <div class="logo-icon">⬡</div>
+    <div class="logo-text">
+      <h1>Oráculo UEMA</h1>
+      <span>SISTEMA CENTRAL DE CONTROLO // v6.0</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-pill">
+      <div class="dot green" id="dot-system"></div>
+      <span id="sys-status">VERIFICANDO...</span>
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+</header>
+
+<div class="boot-banner">
+  <div class="boot-line">[ BOOT ] Oráculo UEMA v6.0 — Assistente Acadêmico Inteligente</div>
+  <div class="boot-line">[ INIT ] Redis Stack ▸ PostgreSQL ▸ Gemini 2.0 Flash ▸ Evolution API</div>
+  <div class="boot-line">[ RAG  ] Busca híbrida BM25+Vetor ▸ CRAG ▸ Self-RAG ▸ HyDE Routing</div>
+  <div class="boot-line">[ REDY ] Todos os subsistemas ativos. Selecione um módulo abaixo.</div>
+</div>
+
+<main>
+  <div class="section-label">// módulos principais</div>
+
+  <div class="primary-grid">
+    <a class="card" href="/monitor/" target="_blank">
+      <div class="card-corner">01</div>
+      <div class="card-number">// MONITOR</div>
+      <span class="card-icon">📊</span>
+      <div class="card-title">Dashboard</div>
+      <div class="card-subtitle">Métricas de conversas em tempo real.<br>Tokens, latência, rotas RAG e logs.</div>
+      <div class="card-tags"><span class="tag">SSE Live</span><span class="tag">Redis</span></div>
+      <span class="card-arrow">↗</span>
+    </a>
+
+    <a class="card" href="/eval/" target="_blank">
+      <div class="card-corner">02</div>
+      <div class="card-number">// AVALIAÇÃO RAG</div>
+      <span class="card-icon">🔬</span>
+      <div class="card-title">RAG Eval</div>
+      <div class="card-subtitle">Terminal ao vivo da pipeline RAG.<br>Chunks recuperados, CRAG score.</div>
+      <div class="card-tags"><span class="tag">Pipeline</span><span class="tag">Logs SSE</span></div>
+      <span class="card-arrow">↗</span>
+    </a>
+
+    <a class="card" href="/admin/" target="_blank">
+      <div class="card-corner">03</div>
+      <div class="card-number">// ADMINISTRAÇÃO</div>
+      <span class="card-icon">⚙️</span>
+      <div class="card-title">Admin Portal</div>
+      <div class="card-subtitle">Gestão completa do sistema.<br>Redis, PostgreSQL, ingestão, config.</div>
+      <div class="card-tags"><span class="tag">RBAC</span><span class="tag">Auth</span></div>
+      <span class="card-arrow">↗</span>
+    </a>
+
+    <a class="card" href="/docs" target="_blank">
+      <div class="card-corner">04</div>
+      <div class="card-number">// API</div>
+      <span class="card-icon">📡</span>
+      <div class="card-title">API Docs</div>
+      <div class="card-subtitle">Swagger UI automático do FastAPI.<br>Todos os endpoints documentados.</div>
+      <div class="card-tags"><span class="tag">OpenAPI 3</span><span class="tag">FastAPI</span></div>
+      <span class="card-arrow">↗</span>
+    </a>
+  </div>
+
+  <div class="section-label" style="margin-top:40px">// estado dos serviços</div>
+  <div class="status-grid" id="status-grid">
+    <div class="status-item"><div class="dot" id="dot-redis"></div><div class="status-info"><div class="status-name">Redis Stack</div><div class="status-value" id="val-redis">--</div></div></div>
+    <div class="status-item"><div class="dot" id="dot-postgres"></div><div class="status-info"><div class="status-name">PostgreSQL</div><div class="status-value" id="val-postgres">--</div></div></div>
+    <div class="status-item"><div class="dot" id="dot-agent"></div><div class="status-info"><div class="status-name">Agente RAG</div><div class="status-value" id="val-agent">--</div></div></div>
+    <div class="status-item"><div class="dot" id="dot-gemini"></div><div class="status-info"><div class="status-name">Modelo LLM</div><div class="status-value" id="val-gemini">--</div></div></div>
+    <div class="status-item"><div class="dot" id="dot-evolution"></div><div class="status-info"><div class="status-name">WhatsApp API</div><div class="status-value" id="val-evolution">--</div></div></div>
+  </div>
+
+  <div class="section-label" style="margin-top:40px">// acesso rápido</div>
+  <div class="quick-row">
+    <a class="quick-link" href="/health"><span class="quick-link-icon">💚</span> /health — JSON saúde</a>
+    <a class="quick-link" href="/metrics"><span class="quick-link-icon">📈</span> /metrics — métricas</a>
+    <a class="quick-link" href="/logs"><span class="quick-link-icon">📋</span> /logs — erros recentes</a>
+    <a class="quick-link" href="/banco/sources"><span class="quick-link-icon">🗃️</span> /banco/sources</a>
+    <a class="quick-link" href="/pessoas/"><span class="quick-link-icon">👥</span> /pessoas — utilizadores</a>
+  </div>
+</main>
+
+<div class="terminal-bar">
+  <span class="term-prompt">oraculo@uema:~$</span>
+  <span class="term-text" id="term-msg">sistema pronto — seleccione um módulo</span>
+  <span class="term-blink"></span>
+  <span class="term-version">UEMA // CTIC // v6.0</span>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/hub/app.js"></script>
+{% endblock %}
