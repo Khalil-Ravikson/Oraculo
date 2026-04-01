@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, Depends, Request, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-
+import asyncio # Não se esqueça de importar o asyncio no topo do ficheiro!
 # Imports da nossa arquitetura
 from src.infrastructure.database.session import get_db_session
 from src.infrastructure.repositories.postgres_user_repository import PostgresUserRepository
@@ -18,7 +18,10 @@ async def processar_mensagem_background(phone: str, text: str, user_data: dict):
     """
     try:
         logger.info(f"🧠 [LANGGRAPH] Processando mensagem de {phone}: '{text}'")
+        await asyncio.sleep(4)
         # Aqui entrará: app_graph.ainvoke({"user_phone": phone, "current_input": text, ...})
+
+    
     finally:
         # Só liberamos o lock quando o bot terminar de processar e responder
         await release_lock(phone)
@@ -62,14 +65,24 @@ async def evolution_webhook(
             print("📍 [WEBHOOK] 6. [GUEST] Número não cadastrado!")
             await release_lock(phone)
             return {"status": "onboarding_started"}
-
+    
         print(f"📍 [WEBHOOK] 6. [ACESSO LIBERADO] Aluno: {student.nome}")
-        background_tasks.add_task(processar_mensagem_background, phone, text, {"curso": student.curso})
-
+        # 1. Abre a "gaveta" JSON onde guardamos os detalhes do aluno
+        contexto = getattr(student, 'llm_context', {}) or {}
+        
+        # 2. Monta o pacote de dados limpo para enviar ao LangGraph
+        student_data = {
+            "nome": student.nome,
+            "curso": contexto.get("curso", "Não informado"),
+            "periodo": contexto.get("periodo", 1)
+        }
+        
+        # 3. Despacha para o cérebro sem travar a requisição do WhatsApp
+        background_tasks.add_task(processar_mensagem_background, phone, text, student_data)
     except Exception as e:
-        print(f"❌ [WEBHOOK] Ocorreu um erro ao consultar o banco: {e}")
-        await release_lock(phone)
-        return {"status": "error"}
-
+            print(f"❌ [WEBHOOK] Ocorreu um erro ao consultar o banco: {e}")
+            await release_lock(phone)
+            return {"status": "error"}
+        
     print("📍 [WEBHOOK] 7. Requisição HTTP encerrada com sucesso.")
     return {"status": "processing_started"}

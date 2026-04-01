@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 # Dimensão do modelo BAAI/bge-m3 (mantemos o mesmo para compatibilidade)
 # Se mudar o modelo, mude AQUI e re-ingira tudo.
-VECTOR_DIM = 1024
+VECTOR_DIM = 3072
 
 # Prefixos das chaves no Redis
 PREFIX_CHUNKS = "rag:chunk:"       # Chave: rag:chunk:{source}:{hash_id}
