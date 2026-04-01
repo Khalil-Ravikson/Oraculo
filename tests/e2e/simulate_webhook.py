@@ -1,17 +1,15 @@
-# tests/simulate_webhook.py
-
-# lembrar de uvicorn src.main:app --reload
-
+# tests/e2e/simulate_webhook.py
 
 import json
 import urllib.request
 import urllib.error
+import time
 
-# URL do nosso webhook local
+# URL do nosso webhook local (o "Porteiro")
 WEBHOOK_URL = "http://127.0.0.1:8000/api/v1/evolution/webhook"
 
 def enviar_mensagem(telefone: str, texto: str):
-    """Monta o payload da Evolution API e envia para o Oráculo."""
+    """Simula a Evolution API disparando uma mensagem do WhatsApp para o nosso backend."""
     payload = {
         "data": {
             "key": {"remoteJid": f"{telefone}@s.whatsapp.net"},
@@ -19,15 +17,8 @@ def enviar_mensagem(telefone: str, texto: str):
         }
     }
     
-    # Converte o dicionário para JSON em formato de bytes (UTF-8)
     data = json.dumps(payload).encode('utf-8')
-    
-    # Prepara a requisição HTTP
-    req = urllib.request.Request(
-        WEBHOOK_URL, 
-        data=data, 
-        headers={'Content-Type': 'application/json; charset=utf-8'}
-    )
+    req = urllib.request.Request(WEBHOOK_URL, data=data, headers={'Content-Type': 'application/json; charset=utf-8'})
     
     print(f"🚀 Enviando de {telefone}: '{texto}'")
     
@@ -36,22 +27,45 @@ def enviar_mensagem(telefone: str, texto: str):
             resposta = json.loads(response.read().decode('utf-8'))
             print(f"✅ Resposta da API: {resposta}\n")
     except urllib.error.URLError as e:
-        print(f"❌ Erro ao conectar com a API: {e.reason}\n(O servidor Uvicorn está rodando?)\n")
+        print(f"❌ Erro ao conectar com a API (O Uvicorn está rodando?): {e}\n")
 
 if __name__ == "__main__":
-    print("="*50)
+    print("="*60)
     print("🤖 SIMULADOR DA EVOLUTION API - ORÁCULO UEMA")
-    print("="*50)
+    print("="*60)
     
-    # Teste 1: Um usuário comum mandando mensagem com acento
-    print("\n--- TESTE 1: Usuário Novo (Guest) ---")
-    enviar_mensagem("5598999999999", "Olá, Oráculo! Como faço minha matrícula?")
+    # ---------------------------------------------------------
+    # TESTE 1: O VISITANTE DESCONHECIDO
+    # ---------------------------------------------------------
+    # OBJETIVO: Testar se o banco de dados barra números não cadastrados.
+    # RESULTADO ESPERADO: O webhook deve devolver 'onboarding_started' para iniciar o cadastro.
+    print("\n[ TESTE 1: Visitante sem cadastro (GUEST) ]")
+    enviar_mensagem("5598999999999", "Olá, como faço matrícula na UEMA?")
+    time.sleep(1) # Pausa rápida para facilitar a leitura no terminal
 
-    # Teste 2: Testando a Trava do Redis (Lock Antispam)
-    print("\n--- TESTE 2: Simulação de Spam (Testando o Redis) ---")
-    telefone_spammer = "5598888888888"
-    enviar_mensagem(telefone_spammer, "Primeira mensagem!")
+
+    # ---------------------------------------------------------
+    # TESTE 2: O ALUNO VIP (ACESSO LIBERADO)
+    # ---------------------------------------------------------
+    # OBJETIVO: Testar se o número mockado passa pela validação do Pydantic.
+    # RESULTADO ESPERADO: O webhook deve processar e enviar a mensagem para o LangGraph no background.
+    print("\n[ TESTE 2: Aluno VIP Cadastrado ]")
+    telefone_vip = "5598777777777" 
     
-    # Mandamos a segunda mensagem instantaneamente (o Redis deve bloquear)
-    print("⏳ Mandando outra mensagem logo em seguida para o mesmo número...")
-    enviar_mensagem(telefone_spammer, "Oi? Alguém aí?")
+    # Esta mensagem entra! O LangGraph (que demora 4s no mock) começará a "pensar".
+    enviar_mensagem(telefone_vip, "Quais são as regras do Restaurante Universitário (RU)?")
+    
+
+    # ---------------------------------------------------------
+    # TESTE 3: O TESTE DE SPAM (O LOCK DO REDIS)
+    # ---------------------------------------------------------
+    # OBJETIVO: Testar o Redis. Se o Aluno VIP mandar mensagem enquanto o bot "pensa", ele deve ser barrado.
+    # RESULTADO ESPERADO: O webhook deve devolver 'locked_ignored' para proteger os tokens da IA.
+    print("\n[ TESTE 3: Tentativa de Spam (Lock do Redis) ]")
+    print("⏳ O aluno mandou outra mensagem ANTES do bot terminar de responder...")
+    
+    # Esta mensagem bate na porta e encontra o Lock do Redis fechado.
+    enviar_mensagem(telefone_vip, "Ei, Oráculo! Responde logo!!")
+    
+    print("\n🎉 Bateria de testes concluída. Verifique os logs do servidor Uvicorn!")
+    print("="*60)
