@@ -2,11 +2,11 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-# O nosso novo Webhook!
+# 1. Importação dos Roteadores (Certifique-se que os arquivos existem em src/api/)
 from src.api.webhook import router as webhook_router
-
-# Se você já tiver os routers de admin ou hub, pode importar aqui também:
-# from src.api.hub import router as hub_router
+from src.api.admin_portal import router as admin_router
+from src.api.hub import router as hub_router
+from src.api.monitor import router as monitor_router
 
 app = FastAPI(
     title="Oráculo UEMA API",
@@ -14,17 +14,19 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# 1. Monta os arquivos estáticos (CSS, JS) da pasta que você criou
+# 2. Configuração de Arquivos Estáticos e Templates
+# Verifique se as pastas 'static' e 'templates' estão na raiz do projeto Oraculo/
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# (Opcional) Instância do Jinja2 para quando formos configurar as rotas HTML
 templates = Jinja2Templates(directory="templates")
 
-# 2. Registra a nossa rota de webhook do WhatsApp
+# 3. Registro das Rotas (A fiação que estava faltando)
+# Webhook do WhatsApp/Evolution
 app.include_router(webhook_router, prefix="/api/v1", tags=["Webhook"])
 
-# (Opcional) Incluir os outros routers do Hub depois
-# app.include_router(hub_router, prefix="/hub", tags=["Hub"])
+# Portais HTML (Onde estavam dando os 404s)
+app.include_router(admin_router, prefix="/admin", tags=["Admin"])
+app.include_router(hub_router, prefix="/hub", tags=["Hub"])
+app.include_router(monitor_router, prefix="/monitor", tags=["Monitor"])
 
 @app.get("/health")
 async def health_check():

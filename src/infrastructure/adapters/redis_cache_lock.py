@@ -1,36 +1,28 @@
 import logging
-import redis.asyncio as redis
-from src.infrastructure.settings import settings
+from src.infrastructure.database.redis_connection import get_async_redis
 
 logger = logging.getLogger(__name__)
 
-# Pega a URL do Redis (tenta minúsculo ou maiúsculo dependendo de como está no seu settings.py)
-REDIS_URL = getattr(settings, "redis_url", getattr(settings, "REDIS_URL", "redis://localhost:6380/0"))
-
-# Inicializa o cliente Redis assíncrono para o Lock
-redis_client = redis.from_url(str(REDIS_URL), decode_responses=True)
-
-async def acquire_lock(phone: str, ttl_seconds: int = 60) -> bool:
+async def acquire_lock(lock_name: str, acquire_timeout: int = 10, lock_timeout: int = 10) -> bool:
     """
-    Tenta criar uma chave no Redis. 
-    Se a chave já existir, retorna False (O usuário está travado).
-    Se não existir, cria com um TTL (Time-to-Live) e retorna True.
+    Adquire uma trava no Redis de forma assíncrona para evitar processamento duplicado.
     """
     try:
-        lock_key = f"lock:whatsapp:{phone}"
-        # nx=True garante que só seta se não existir (evita race conditions)
-        # ex=ttl_seconds define a expiração automática
-        is_acquired = await redis_client.set(lock_key, "1", nx=True, ex=ttl_seconds)
-        return bool(is_acquired)
+        r = await get_async_redis()
+        # NX = Só define se não existir | EX = Expira em X segundos
+        lock_key = f"lock:{lock_name}"
+        return await r.set(lock_key, "locked", ex=lock_timeout, nx=True)
     except Exception as e:
-        logger.error(f"Erro ao tentar adquirir lock no Redis para {phone}: {e}")
-        # Em caso de queda do Redis, retornamos True para não travar o bot inteiro
-        return True
+        logger.error(f"❌ Erro ao adquirir lock {lock_name}: {e}")
+        return False
 
-async def release_lock(phone: str):
-    """Libera a trava manualmente."""
+async def release_lock(lock_name: str):
+    """
+    Libera a trava no Redis.
+    """
     try:
-        lock_key = f"lock:whatsapp:{phone}"
-        await redis_client.delete(lock_key)
+        r = await get_async_redis()
+        lock_key = f"lock:{lock_name}"
+        await r.delete(lock_key)
     except Exception as e:
-        logger.error(f"Erro ao liberar lock no Redis para {phone}: {e}")
+        logger.error(f"❌ Erro ao liberar lock {lock_name}: {e}")

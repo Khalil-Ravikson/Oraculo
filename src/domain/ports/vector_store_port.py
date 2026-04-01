@@ -2,18 +2,24 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 
 class IVectorStorePort(ABC):
-    """Porta para o Banco de Dados Vetorial (Ex: Redis Stack, PGVector)."""
-
+    """
+    Porta (Interface) para comunicação com o Banco Vetorial.
+    Garante que o domínio não saiba se estamos a usar Redis, Postgres, Pinecone, etc.
+    """
+    
     @abstractmethod
     async def salvar_chunks(self, chunks: List[Dict[str, Any]]) -> None:
-        """
-        Salva uma lista de chunks no banco vetorial.
-        O formato esperado do dict é: 
-        {'chunk_id': str, 'content': str, 'source': str, 'doc_type': str, 'metadata': dict}
-        """
+        """Salva os blocos de texto e os seus embeddings no banco."""
         pass
 
     @abstractmethod
-    async def buscar_hibrido(self, query: str, k_vector: int, k_text: int, source_filter: str = None) -> List[Dict[str, Any]]:
-        """Busca combinando Vetores (Semântica) e Palavras-Chave (BM25)."""
+    async def buscar_contexto(self, query_text: str, k: int, source_filter: str = None) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Retorna os resultados CRUS da busca.
+        Deve devolver um dicionário exatamente com este formato:
+        {
+            "vetorial": [{"id": "...", "content": "...", "source": "..."}, ...],
+            "textual": [{"id": "...", "content": "...", "source": "..."}, ...]
+        }
+        """
         pass

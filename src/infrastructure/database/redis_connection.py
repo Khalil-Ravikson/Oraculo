@@ -1,27 +1,41 @@
+import os
 import logging
-from redis.asyncio import Redis, ConnectionPool
-from src.infrastructure.settings import settings
+import redis.asyncio as redis
+from dotenv import load_dotenv
 
+load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Singleton para o Pool de Conexões
-_async_pool = None
+# Variável global para manter o Pool de Conexões vivo (Singleton)
+_redis_async_client = None
 
-async def get_async_redis() -> Redis:
+async def get_async_redis() -> redis.Redis:
     """
-    Gere o pool de ligações assíncronas ao Redis Stack.
-    Configurado para otimizar a RAM disponível (16GB).
+    Retorna uma conexão assíncrona única (Singleton) com o Redis.
+    Perfeita para lidar com as múltiplas requisições paralelas do RAG.
     """
-    global _async_pool
+    global _redis_async_client
     
-    if _async_pool is None:
-        logger.info("⏳ A abrir autoestrada assíncrona para o Redis Stack...")
-        _async_pool = ConnectionPool.from_url(
-            settings.REDIS_URL,
-            decode_responses=False,  # Necessário para os bytes dos vectores
-            max_connections=30,      # Equilíbrio para não sobrecarregar a CPU
-            socket_connect_timeout=5,
-            socket_timeout=10
+    if _redis_async_client is None:
+        # Puxa a URL do .env ou usa o padrão do Docker
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6380/0")
+        
+        logger.info(f"🔌 Abrindo nova autoestrada assíncrona para o Redis: {redis_url}")
+        
+        # IMPORTANTE: decode_responses=False porque nós precisamos trafegar 
+        # os bytes crus dos vetores (struct.pack) para o RediSearch!
+        _redis_async_client = redis.from_url(
+            redis_url, 
+            decode_responses=False,
+            max_connections=100  # Aguenta muita concorrência do Celery/FastAPI
         )
-    
-    return Redis(connection_pool=_async_pool)
+        
+    return _redis_async_client
+
+async def close_async_redis():
+    """Fecha a conexão elegantemente ao desligar o servidor."""
+    global _redis_async_client
+    if _redis_async_client is not None:
+        await _redis_async_client.aclose()
+        _redis_async_client = None
+        logger.info("🔌 Conexão assíncrona com Redis encerrada.")

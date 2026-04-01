@@ -1,3 +1,5 @@
+version: '3.8' # É sempre uma boa prática colocar a versão no topo
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -20,8 +22,8 @@ services:
     restart: always
     # Mudamos as portas do Host para não baterem com o meubotrag
     ports:
-      - "6380:6379" # Redis
-      - "8002:8001" # Redis Insight (Painel)
+      - "6380:6379" # Porta do Banco de Dados Redis
+      - "8002:8001" # Porta do RedisInsight (Painel Visual Embutido)
     volumes:
       - oraculo_redis_data:/data
     environment:
