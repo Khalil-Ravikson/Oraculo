@@ -196,16 +196,17 @@ async def overview(auth=None):
     except Exception as e:
         result["services"]["evolution"] = {"status": "down", "error": str(e)[:80]}
 
-    # AgentCore
+    # Novo Agent (LangGraph)
     try:
-        from src.agent.core import agent_core
+        from src.application.graph.builder import get_compiled_graph
+        grafo = get_compiled_graph()
         result["services"]["agent"] = {
-            "status": "ready" if agent_core._inicializado else "not_ready",
-            "tools":  len(agent_core._tools),
+            "status": "ready" if grafo else "not_ready",
+            "tools":  len(grafo.nodes), # Mostra quantos nós o grafo tem
         }
     except Exception as e:
         result["services"]["agent"] = {"status": "error", "error": str(e)[:80]}
-
+        
     # Métricas gerais
     try:
         from src.infrastructure.redis_client import get_redis_text

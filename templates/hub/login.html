@@ -1,0 +1,85 @@
+{% extends "hub/_base.html" %}
+
+{% block title %}Oráculo UEMA — Acesso Restrito{% endblock %}
+
+{% block extra_css %}
+<style>
+  .login-container {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 80vh;
+  }
+  .login-box {
+    background: var(--bg2, #111418);
+    border: 1px solid var(--border, #2a3140);
+    padding: 40px; width: 100%; max-width: 400px;
+    position: relative;
+    box-shadow: 0 0 40px rgba(255, 107, 53, 0.05);
+  }
+  .login-box::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--accent, #ff6b35);
+  }
+  .login-title {
+    color: var(--accent, #ff6b35); font-family: 'Share Tech Mono', monospace; font-size: 24px;
+    text-transform: uppercase; margin-bottom: 24px; letter-spacing: 2px;
+  }
+  .input-group { margin-bottom: 20px; }
+  .input-label {
+    display: block; font-size: 11px; color: var(--muted, #6b7a8d);
+    margin-bottom: 8px; letter-spacing: 1px; text-transform: uppercase;
+  }
+  .auth-input {
+    width: 100%; background: var(--surf, #1a1f28); border: 1px solid var(--border, #38465a);
+    color: var(--txt, #d4dbe8); padding: 12px; font-family: monospace;
+    outline: none; transition: border-color 0.2s; box-sizing: border-box;
+  }
+  .auth-input:focus { border-color: var(--accent, #ff6b35); }
+  .auth-btn {
+    width: 100%; background: rgba(255, 107, 53, 0.1); border: 1px solid var(--accent, #ff6b35);
+    color: var(--accent, #ff6b35); padding: 12px; font-family: 'Rajdhani', sans-serif;
+    font-size: 16px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 2px; cursor: pointer; transition: all 0.2s; margin-top: 10px;
+  }
+  .auth-btn:hover { background: var(--accent, #ff6b35); color: #000; }
+  .error-msg {
+    color: #e84040; font-size: 12px; margin-top: 16px;
+    letter-spacing: 1px; text-align: center;
+  }
+  .terminal-bar {
+    position: fixed; bottom: 0; left: 0; right: 0; padding: 10px 20px;
+    background: #0a0c0e; border-top: 1px solid #2a3140; font-family: monospace; font-size: 12px; color: #6b7a8d;
+  }
+  .term-prompt { color: #ff6b35; margin-right: 8px; }
+  .term-blink { display: inline-block; width: 6px; height: 12px; background: #ff6b35; animation: blink 1s step-end infinite; vertical-align: middle; margin-left: 4px;}
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="login-container">
+  <div class="login-box">
+    <div class="login-title">// AUTENTICAÇÃO NECESSÁRIA</div>
+    <form method="post" action="/hub/login">
+      <div class="input-group">
+        <label class="input-label" for="username">USERNAME</label>
+        <input type="text" id="username" name="username" class="auth-input" placeholder="Admin do .env" autofocus required autocomplete="off">
+      </div>
+      <div class="input-group">
+        <label class="input-label" for="password">PASSWORD</label>
+        <input type="password" id="password" name="password" class="auth-input" placeholder="••••••••" required autocomplete="off">
+      </div>
+      <button type="submit" class="auth-btn">INICIAR SESSÃO</button>
+      
+      {% if erro %}
+      <div class="error-msg">[ ERRO ] {{ erro }}</div>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+<div class="terminal-bar">
+  <span class="term-prompt">oraculo@uema:~$</span>
+  <span class="term-text">aguardando credenciais administrativas...</span>
+  <span class="term-blink"></span>
+</div>
+{% endblock %}

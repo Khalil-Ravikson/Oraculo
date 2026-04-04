@@ -1,0 +1,72 @@
+{% extends "hub/_base.html" %}
+
+{% block title %}Dashboard — Oráculo UEMA{% endblock %}
+
+{% block content %}
+<header>
+  <div class="logo">
+    <div class="logo-icon">⬡</div>
+    <div class="logo-text">
+      <h1>Oráculo UEMA</h1>
+      <span>SISTEMA CENTRAL DE CONTROLO // v6.0</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-pill" style="display:flex; align-items:center; gap:10px;">
+      <span style="color:var(--muted); font-size:12px;">Logado como: <strong style="color:var(--accent);">{{ username }}</strong></span>
+      <a href="/hub/logout" style="color: #e84040; text-decoration: none; font-size: 12px; border: 1px solid #e84040; padding: 2px 6px; border-radius: 4px;">SAIR</a>
+    </div>
+  </div>
+</header>
+
+<div class="boot-banner" style="margin: 20px; padding: 15px; background: var(--surf, #1a1f28); border-left: 3px solid var(--accent, #ff6b35); font-family: monospace; font-size: 12px; color: var(--txt);">
+  <div class="boot-line">[ BOOT ] Oráculo UEMA v6.0 — Assistente Acadêmico Inteligente</div>
+  <div class="boot-line">[ INIT ] Redis Stack ▸ PostgreSQL ▸ Modelo: <strong>{{ modelo }}</strong> ▸ Dev Mode: <strong>{{ dev_mode }}</strong></div>
+  <div class="boot-line">[ RAG  ] Busca híbrida BM25+Vetor ▸ Roteamento Semântico</div>
+  <div class="boot-line">[ REDY ] Autenticação confirmada. Selecione um módulo abaixo.</div>
+</div>
+
+<main style="padding: 0 20px;">
+  <div class="section-label" style="font-family: 'Share Tech Mono'; color: var(--accent); margin-bottom: 15px;">// módulos principais</div>
+
+  <div class="primary-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+    <a class="card" href="/hub/metrics" target="_blank" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block;">
+      <div style="font-family: monospace; color: #666; font-size: 10px;">01</div>
+      <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// MONITOR</div>
+      <div style="font-size: 24px; margin-bottom: 10px;">📊</div>
+      <div style="font-weight: bold; margin-bottom: 5px;">Dashboard Live</div>
+      <div style="font-size: 12px; color: #888;">Métricas em tempo real via SSE. Tokens e latência.</div>
+    </a>
+
+    <a class="card" href="/hub/audit" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block;">
+      <div style="font-family: monospace; color: #666; font-size: 10px;">02</div>
+      <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// AUDITORIA</div>
+      <div style="font-size: 24px; margin-bottom: 10px;">📋</div>
+      <div style="font-weight: bold; margin-bottom: 5px;">Audit Log</div>
+      <div style="font-size: 12px; color: #888;">Registo de ações críticas e comandos do Admin.</div>
+    </a>
+
+    <a class="card" href="/hub/users" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block;">
+      <div style="font-family: monospace; color: #666; font-size: 10px;">03</div>
+      <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// UTILIZADORES</div>
+      <div style="font-size: 24px; margin-bottom: 10px;">👥</div>
+      <div style="font-weight: bold; margin-bottom: 5px;">Gestão de Acessos</div>
+      <div style="font-size: 12px; color: #888;">Listar alunos e permissões do PostgreSQL.</div>
+    </a>
+
+    <a class="card" href="/api/docs" target="_blank" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block;">
+      <div style="font-family: monospace; color: #666; font-size: 10px;">04</div>
+      <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// API</div>
+      <div style="font-size: 24px; margin-bottom: 10px;">📡</div>
+      <div style="font-weight: bold; margin-bottom: 5px;">API Docs</div>
+      <div style="font-size: 12px; color: #888;">Swagger UI automático. Endpoints documentados.</div>
+    </a>
+  </div>
+</main>
+
+<div class="terminal-bar" style="position: fixed; bottom: 0; left: 0; right: 0; padding: 10px 20px; background: #0a0c0e; border-top: 1px solid #2a3140; font-family: monospace; font-size: 12px; color: #6b7a8d;">
+  <span style="color: #ff6b35; margin-right: 8px;">oraculo@uema:~$</span>
+  <span id="term-msg">sessão estabelecida — privilégios de administrador concedidos</span>
+  <span style="display: inline-block; width: 6px; height: 12px; background: #ff6b35; animation: blink 1s step-end infinite; vertical-align: middle; margin-left: 4px;"></span>
+</div>
+{% endblock %}
