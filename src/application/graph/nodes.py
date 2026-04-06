@@ -260,7 +260,7 @@ async def node_rag(state: "OracleState") -> dict:
     contexto_rag = ""
     crag_score   = 0.0
     try:
-        from src.application.use_cases.retrieve_context import RetrieveContextUseCase
+        from src.application.use_cases.retrieve_context_use_case import RetrieveContextUseCase
         from src.infrastructure.adapters.redis_vector_adapter import RedisVectorAdapter
         from src.rag.query_transform import QueryTransformada
 
@@ -376,7 +376,7 @@ async def node_exec_tool(state: "OracleState") -> dict:
     logger.info("🔧 Exec tool '%s' para user=%s", tool, user_id)
 
     try:
-        from src.tools.crud_tools import executar_tool
+        from src.domain.tools.crud_tools import executar_tool
         resultado = await executar_tool(tool, args)
         mensagem  = resultado.get("mensagem", "✅ Ação concluída.")
 
