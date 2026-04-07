@@ -88,3 +88,30 @@ def route_after_crud(state: OracleState) -> Route:
     O interrupt acontece ANTES de exec_tool_node — não aqui.
     """
     return "respond_node"
+def route_after_agent(state: dict) -> Literal["respond_node", "ask_confirm_node", "tool_node"]:
+    """Usa o seu OracleState v3 para decidir o próximo passo."""
+    messages = state.get("messages", [])
+    if not messages:
+        return "respond_node"
+        
+    last_message = messages[-1]
+    
+    # Verifica chamadas de ferramentas no estilo LangChain/Gemini
+    if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
+        return "respond_node"
+    
+    # Sua lista de ferramentas sensíveis
+    SENSITIVE_TOOLS = ["abrir_chamado_glpi", "enviar_email", "admin_command"]
+    
+    for tool_call in last_message.tool_calls:
+        if tool_call["name"] in SENSITIVE_TOOLS:
+            # Se for sensível e ainda não foi confirmado
+            if state.get("confirmation_result") != "confirmed":
+                return "ask_confirm_node"
+    
+    return "tool_node"
+
+def route_after_hitl(state: dict) -> Literal["tool_node", "respond_node"]:
+    if state.get("confirmation_result") == "confirmed":
+        return "tool_node"
+    return "respond_node"    

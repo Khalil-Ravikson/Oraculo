@@ -33,7 +33,7 @@ from fastapi.templating import Jinja2Templates
 from src.api.middleware.auth_middleware import TokenPayload
 from src.application.use_cases.admin_auth import get_admin_auth
 from src.infrastructure.settings import settings
-
+from pydantic import BaseModel
 logger    = logging.getLogger(__name__)
 router    = APIRouter(prefix="/hub", tags=["Portal Admin"])
 templates = Jinja2Templates(directory="templates")
@@ -205,3 +205,42 @@ async def metrics_stream(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+    
+
+class WebChatRequest(BaseModel):
+    message: str
+
+@router.get("/chat", response_class=HTMLResponse)
+async def chat_page(request: Request):
+    """Página do Simulador de Chat Web."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="hub/chat.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+@router.post("/chat/send")
+async def chat_send(request: Request, data: WebChatRequest):
+    """Endpoint REST que o JS do frontend vai chamar."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    
+    from src.application.use_cases.simulate_web_chat import SimulateWebChatUseCase
+    
+    # ID da sessão único para este admin no simulador web
+    session_id = f"web_session_{payload.sub}" 
+    
+    use_case = SimulateWebChatUseCase()
+    resposta = await use_case.executar(
+        session_id=session_id, 
+        mensagem=data.message, 
+        admin_name=payload.sub
+    )
+    
+    return {"response": resposta}

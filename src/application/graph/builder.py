@@ -21,6 +21,9 @@ import logging
 from functools import lru_cache
 
 from langgraph.graph import END, StateGraph
+from src.application.graph import nodes  # Importa o pacote
+
+
 
 from src.application.graph.edges import (
     route_after_classify,

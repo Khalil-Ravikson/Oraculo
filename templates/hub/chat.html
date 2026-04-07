@@ -1,0 +1,105 @@
+{% extends "hub/_base.html" %}
+
+{% block title %}Simulador Web — Oráculo UEMA{% endblock %}
+
+{% block content %}
+<header>
+  <div class="logo">
+    <div class="logo-icon">💬</div>
+    <div class="logo-text">
+      <h1>Simulador Oráculo</h1>
+      <span>TESTE DIRETO COM O GRAFO LANGGRAPH</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <a href="/hub/" style="color: var(--accent); text-decoration: none; font-size: 14px; border: 1px solid var(--accent); padding: 5px 10px; border-radius: 4px;">VOLTAR AO HUB</a>
+  </div>
+</header>
+
+<main style="padding: 20px; display: flex; flex-direction: column; height: calc(100vh - 140px);">
+    
+    <div id="chat-box" style="flex: 1; background: #0a0c0e; border: 1px solid #2a3140; border-radius: 8px; padding: 20px; overflow-y: auto; font-family: monospace; color: #2a3140 display; flex:auto column; gap: 15px;">
+        <div style="color: var(--accent); align-self: flex-start; max-width: 80%;">
+            <strong>[ Oráculo UEMA ]</strong><br>
+            Sessão iniciada. Como posso ajudar-te hoje, {{ username }}?
+        </div>
+    </div>
+
+    <div style="margin-top: 15px; display: flex; gap: 10px;">
+        <input type="text" id="chat-input" placeholder="Escreve a tua mensagem aqui (Testa o RAG ou comandos Admin)..." 
+               style="flex: 1; background: #111; border: 1px solid #333; color: white; padding: 15px; border-radius: 8px; font-family: monospace; outline: none;">
+        <button id="send-btn" style="background: var(--accent); color: white; border: none; padding: 0 25px; border-radius: 8px; cursor: pointer; font-weight: bold; font-family: 'Share Tech Mono';">ENVIAR</button>
+    </div>
+</main>
+
+<script>
+    const chatBox = document.getElementById('chat-box');
+    const chatInput = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('send-btn');
+
+    function appendMessage(sender, text, isUser) {
+        const msgDiv = document.createElement('div');
+        msgDiv.style.maxWidth = '80%';
+        msgDiv.style.lineHeight = '1.5';
+        
+        if (isUser) {
+            msgDiv.style.color = '#fff';
+            msgDiv.style.alignSelf = 'flex-end';
+            msgDiv.innerHTML = `<strong style="color: #888;">[ ${sender} ]</strong><br>${text}`;
+        } else {
+            msgDiv.style.color = 'var(--accent)';
+            msgDiv.style.alignSelf = 'flex-start';
+            // Converte quebras de linha para <br>
+            const formattedText = text.replace(/\n/g, '<br>');
+            msgDiv.innerHTML = `<strong>[ ${sender} ]</strong><br>${formattedText}`;
+        }
+        
+        chatBox.appendChild(msgDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    async function sendMessage() {
+        const msg = chatInput.value.trim();
+        if (!msg) return;
+
+        // Limpa input e mostra na tela
+        chatInput.value = '';
+        appendMessage('{{ username }}', msg, true);
+        
+        // Indicador de loading
+        const loadingId = 'loading-' + Date.now();
+        const loadingDiv = document.createElement('div');
+        loadingDiv.id = loadingId;
+        loadingDiv.style.color = '#666';
+        loadingDiv.innerHTML = `<em>Processando...</em>`;
+        chatBox.appendChild(loadingDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+
+        try {
+            const response = await fetch('/hub/chat/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: msg })
+            });
+            const data = await response.json();
+            
+            // Remove loading
+            document.getElementById(loadingId).remove();
+            
+            if (data.error) {
+                appendMessage('Sistema', `Erro: ${data.error}`, false);
+            } else {
+                appendMessage('Oráculo UEMA', data.response, false);
+            }
+        } catch (error) {
+            document.getElementById(loadingId).remove();
+            appendMessage('Sistema', 'Falha de conexão com o servidor.', false);
+        }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendMessage();
+    });
+</script>
+{% endblock %}
