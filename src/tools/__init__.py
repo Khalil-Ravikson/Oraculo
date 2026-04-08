@@ -19,10 +19,10 @@ COMO ADICIONAR NOVA TOOL:
   5. Adiciona mapeamento em _TOOL_PARA_ROTA no semantic_router.py
   6. Adiciona mapeamento em _ROTA_PARA_SOURCE no agent/core.py
 """
-from src.tools.calendar_tool    import get_tool_calendario
-from src.tools.tool_edital      import get_tool_edital
-from src.tools.tool_contatos    import get_tool_contatos
-from src.tools.tool_wiki_ctic   import get_tool_wiki_ctic    # ← NOVO v4
+from src.domain.tools.calendar_tool    import get_tool_calendario
+from src.domain.tools.tool_edital      import get_tool_edital
+from src.domain.tools.tool_contatos    import get_tool_contatos
+from src.domain.tools.tool_wiki_ctic   import get_tool_wiki_ctic    # ← NOVO v4
  
 # Descomenta quando implementares:
 # from src.tools.tool_email import get_tool_email

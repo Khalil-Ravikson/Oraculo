@@ -735,7 +735,7 @@ async def scraping_status(x_admin_key: str = Header(None, alias="X-Admin-Key")):
     require_admin(x_admin_key)
     try:
         from src.infrastructure.redis_client import get_redis_text, get_redis, PREFIX_CHUNKS
-        from src.tools.tool_wiki_ctic import CACHE_PREFIX, WIKI_BASE_URL
+        from src.domain.tools.tool_wiki_ctic import CACHE_PREFIX, WIKI_BASE_URL
 
         rt = get_redis_text()
         r  = get_redis()
@@ -788,30 +788,43 @@ async def scraping_run(
     request: Request,
     x_admin_key: str = Header(None, alias="X-Admin-Key"),
 ):
+    """NOVO FLUXO: Dispara o Scraping jogando a URL na Fila do RabbitMQ."""
     require_admin(x_admin_key)
     try:
         body = await request.json()
-        url  = body.get("url", "")
-        max_pages = int(body.get("max_pages", 10))
+        url  = body.get("url", "https://ctic.uema.br/wiki/doku.php?id=start")
+        
+        # Importa o producer global que instanciamos no main.py
+        from src.main import mq_producer
+        from src.infrastructure.scraping.base_scraper import ScrapeRequest
 
-        from src.tools.tool_wiki_ctic import indexar_wiki, WIKI_SEED_PAGES
+        if not mq_producer:
+            raise HTTPException(503, "A fila do RabbitMQ não está conectada.")
 
-        t0     = time.monotonic()
-        seeds  = [url] if url else WIKI_SEED_PAGES
-        result = await asyncio.to_thread(indexar_wiki, seeds, min(max_pages, 50), False)
-        ms     = int((time.monotonic() - t0) * 1000)
+        # Cria a requisição de scraping e enfileira!
+        req = ScrapeRequest(
+            url=url, 
+            doc_type="wiki_ctic", 
+            priority=1, # Prioridade alta pois foi disparado pelo admin
+            force_refresh=True
+        )
+        await mq_producer.publish(req)
 
-        total_chunks = sum(result.values())
-        return {"ok": True, "pages_processed": len(result), "total_chunks": total_chunks, "ms": ms}
+        return {
+            "ok": True, 
+            "msg": "Scraping enviado para a fila com sucesso!", 
+            "url": url,
+            "request_id": req.request_id
+        }
     except Exception as e:
+        logger.error("Erro ao disparar scraping manual: %s", e)
         raise HTTPException(500, str(e))
-
-
+      
 @router.delete("/scraping/cache")
 async def scraping_clear_cache(x_admin_key: str = Header(None, alias="X-Admin-Key")):
     require_admin(x_admin_key)
     try:
-        from src.tools.tool_wiki_ctic import limpar_cache_wiki
+        from src.domain.tools.tool_wiki_ctic import limpar_cache_wiki
         n = await asyncio.to_thread(limpar_cache_wiki)
         return {"ok": True, "deleted": n}
     except Exception as e:

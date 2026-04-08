@@ -63,7 +63,7 @@ def _info(msg: str) -> None:
 def test_fase1_conectividade():
     _separador("FASE 1 — Conectividade e Fetch da Wiki")
 
-    from src.tools.tool_wiki_ctic import scrape_wiki_page, WIKI_BASE_URL
+    from src.domain.tools.tool_wiki_ctic import scrape_wiki_page, WIKI_BASE_URL
 
     url = f"{WIKI_BASE_URL}?id=start"
     _info(f"URL de teste: {url}")
@@ -207,7 +207,7 @@ def test_fase5_cache_redis(result: dict):
     _separador("FASE 5 — Cache Redis (opcional)")
 
     try:
-        from src.tools.tool_wiki_ctic import (
+        from src.domain.tools.tool_wiki_ctic import (
             _cache_key, _get_cache, _set_cache, limpar_cache_wiki,
         )
         from src.infrastructure.redis_client import redis_ok
@@ -229,7 +229,7 @@ def test_fase5_cache_redis(result: dict):
         _ok(f"Cache hit: {len(cached['content'])} chars recuperados")
 
         # Segunda chamada ao scraper (deve usar cache)
-        from src.tools.tool_wiki_ctic import scrape_wiki_page
+        from src.domain.tools.tool_wiki_ctic import scrape_wiki_page
         t0     = time.monotonic()
         result2= scrape_wiki_page(url, usar_cache=True)
         elapsed= int((time.monotonic() - t0) * 1000)

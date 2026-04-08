@@ -160,12 +160,10 @@ async def users_page(request: Request):
 # ─────────────────────────────────────────────────────────────────────────────
 # SSE — Métricas em tempo real (polling Redis a cada 2-3s)
 # ─────────────────────────────────────────────────────────────────────────────
-
-@router.get("/metrics/stream")
+@router.get("/metrics")
 async def metrics_stream(request: Request):
     """
     Server-Sent Events: envia métricas do Redis a cada 2 segundos.
-    O dashboard.html consome este endpoint para atualização em tempo real.
     """
     import asyncio, json
     from fastapi.responses import StreamingResponse
@@ -176,23 +174,21 @@ async def metrics_stream(request: Request):
 
     async def gerador():
         import datetime
-        from src.infrastructure.adapters.redis_metrics_adapter import RedisMetricsAdapter
-        from src.application.use_cases.get_system_metrics_use_case import GetSystemMetricsUseCase
+        from src.infrastructure.redis_client import get_redis_text
         
-        # Injeção de Dependência Clean
-        adapter = RedisMetricsAdapter()
-        use_case = GetSystemMetricsUseCase(adapter)
-
         while True:
             if await request.is_disconnected():
                 break
             try:
-                # O Controller chama o Use Case, e não o Redis diretamente!
-                metricas = await use_case.executar()
+                r = get_redis_text()
+                # Leitura direta e segura do Redis para não depender de UseCases antigos
+                mem_info = r.info("memory")
+                ram_usada = mem_info.get("used_memory", 0) / 1024 / 1024
                 
                 dados = {
                     "ts": datetime.datetime.now().isoformat(),
-                    **metricas
+                    "ram_mb": round(ram_usada, 1),
+                    "status": "online"
                 }
                 yield f"data: {json.dumps(dados, ensure_ascii=False)}\n\n"
             except Exception as e:

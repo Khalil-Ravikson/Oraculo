@@ -1,6 +1,13 @@
-# src/infrastructure/settings.py
 """
-Settings do Oráculo v3 — Campos adicionados para sistema admin completo.
+infrastructure/settings.py — Sprint 1 (Langfuse variables)
+===========================================================
+
+ADICIONADO:
+  LANGFUSE_SECRET_KEY  → chave secreta gerada no painel Langfuse
+  LANGFUSE_PUBLIC_KEY  → chave pública para o SDK
+  LANGFUSE_HOST        → URL do container Langfuse (interno Docker)
+
+Se as chaves estiverem vazias, o tracing é desativado silenciosamente.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from src.infrastructure.paths import ENV_FILE
@@ -34,30 +41,24 @@ class Settings(BaseSettings):
     DATA_DIR:             str = "/app/dados"
     MAX_HISTORY_MESSAGES: int = 20
 
-    # ── Admin — Portal Web ────────────────────────────────────────
-    # Credenciais do portal admin (login/senha)
-    ADMIN_USERNAME:   str = "admin"
-    ADMIN_PASSWORD:   str = ""          # OBRIGATÓRIO em produção
-
-    # Chave secreta para assinar JWT (se vazio, usa ADMIN_API_KEY)
-    ADMIN_JWT_SECRET: str = ""
-
-    # Chave de compatibilidade (mantida para endpoints existentes)
-    ADMIN_API_KEY:    str = ""
-
-    # ── Admin — WhatsApp ──────────────────────────────────────────
-    # Números do admin (reconhecidos automaticamente como admin)
-    ADMIN_NUMBERS:   str = ""    # "5598999990001,5598999990002"
-
-    # Token extra para comandos críticos via WhatsApp (double-check)
-    # Pode ser uma senha ou código TOTP
-    ADMIN_CONFIRMATION_TOKEN: str = ""
-
-    # ── RBAC ──────────────────────────────────────────────────────
-    STUDENT_NUMBERS: str = ""
+    # ── Admin ─────────────────────────────────────────────────────
+    ADMIN_USERNAME:            str = "admin"
+    ADMIN_PASSWORD:            str = ""
+    ADMIN_JWT_SECRET:          str = ""
+    ADMIN_API_KEY:             str = ""
+    ADMIN_NUMBERS:             str = ""
+    ADMIN_CONFIRMATION_TOKEN:  str = ""
+    STUDENT_NUMBERS:           str = ""
 
     # ── Embedding ─────────────────────────────────────────────────
-    EMBEDDING_PROVIDER: str = "google"   # "google" | "local"
+    EMBEDDING_PROVIDER: str = "google"
+
+    # ── Sprint 1: Langfuse (Observabilidade LLM) ──────────────────
+    # Gere as chaves em http://localhost:3000 → Settings → API Keys
+    # Se vazias, o tracing é desativado silenciosamente (sem erro).
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_HOST:       str = "http://langfuse:3000"
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
@@ -66,19 +67,18 @@ class Settings(BaseSettings):
     )
 
     def validar_producao(self) -> list[str]:
-        """
-        Retorna lista de problemas de configuração em produção.
-        Chamado no startup do main.py.
-        """
         erros = []
         if not self.ADMIN_PASSWORD:
             erros.append("ADMIN_PASSWORD não configurada — portal admin inseguro!")
         if not self.ADMIN_CONFIRMATION_TOKEN:
-            erros.append("ADMIN_CONFIRMATION_TOKEN não configurada — double-check desativado!")
+            erros.append("ADMIN_CONFIRMATION_TOKEN não configurada!")
         if not self.ADMIN_NUMBERS:
-            erros.append("ADMIN_NUMBERS não configurada — admin via WhatsApp desativado!")
+            erros.append("ADMIN_NUMBERS não configurada!")
         if not self.GEMINI_API_KEY:
             erros.append("GEMINI_API_KEY não configurada — bot não funcionará!")
+        # Sprint 1: aviso sobre Langfuse (não é crítico)
+        if not self.LANGFUSE_SECRET_KEY:
+            erros.append("LANGFUSE_SECRET_KEY vazia — tracing LLM desativado.")
         return erros
 
 

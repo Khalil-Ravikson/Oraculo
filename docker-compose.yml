@@ -1,7 +1,31 @@
-# docker-compose.yml — Oráculo UEMA (Produção)
+# docker-compose.yml — Oráculo UEMA + Sprint 1 (Langfuse + Grafana)
+# ===================================================================
+#
+# NOVOS SERVIÇOS (Sprint 1):
+#   langfuse_db  → PostgreSQL dedicado para o Langfuse (isolado do app DB)
+#   langfuse     → Painel de tracing LLM (http://localhost:3000)
+#   grafana      → Dashboard Redis/Celery (http://localhost:3001)
+#
+# ACESSO:
+#   Langfuse → http://localhost:3000
+#              Primeiro acesso: crie conta em /auth/sign-up
+#              Gere API Keys em Settings → API Keys → cole no .env
+#
+#   Grafana  → http://localhost:3001
+#              Login padrão: admin / admin
+#              Adicione datasource: Redis → redis:6379
+#              Import dashboard ID 12776 (Redis Exporter) ou 11835
+#sss
+# VARIÁVEIS NECESSÁRIAS NO .env:
+#   POSTGRES_PASSWORD=suasenha
+#   LANGFUSE_DB_PASSWORD=senhalangfuse
+#   LANGFUSE_SECRET=segredo-jwt-langfuse-min-32-chars
+#   LANGFUSE_SALT=salt-bcrypt-min-8-chars
+#   LANGFUSE_SECRET_KEY=sk-lf-...  (gerado no painel após subir)
+#   LANGFUSE_PUBLIC_KEY=pk-lf-...  (gerado no painel após subir)
+
 version: "3.9"
 
-# Network isolada — os serviços não ficam na bridge default do Docker
 networks:
   oraculo_net:
     driver: bridge
@@ -12,13 +36,17 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  langfuse_db_data:    # BD dedicado do Langfuse (isolado)
+  grafana_data:
 
-# ── Extensões (anchors YAML para DRY) ────────────────────────────────────────
-x-common-env: &common-env
+# ── Anchors YAML (DRY) ────────────────────────────────────────────────────────
+x-app-env: &app-env
   env_file: .env
   environment:
     REDIS_URL:    "redis://redis:6379/0"
     DATABASE_URL: "postgresql+asyncpg://user:${POSTGRES_PASSWORD}@postgres:5432/oraculo"
+    # Sprint 1: Langfuse URL interna (container-to-container)
+    LANGFUSE_HOST: "http://langfuse:3000"
 
 x-restart: &restart
   restart: unless-stopped
@@ -33,7 +61,7 @@ x-logging: &logging
 # ── Serviços ──────────────────────────────────────────────────────────────────
 services:
 
-  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  # ── PostgreSQL (App) ─────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: oraculo_postgres
@@ -53,9 +81,31 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    # Nunca expor a porta 5432 em produção — apenas acessível na rede interna
 
-  # ── Redis Stack ─────────────────────────────────────────────────────────────
+  # ── PostgreSQL (Langfuse) ────────────────────────────────────────────────────
+  # BD dedicado e isolado para o Langfuse.
+  # NÃO compartilha com o postgres do app (evita conflitos de schema e carga).
+  langfuse_db:
+    image: postgres:16-alpine
+    container_name: oraculo_langfuse_db
+    <<: [*restart, *logging]
+    environment:
+      POSTGRES_USER:     langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse_pass}
+      POSTGRES_DB:       langfuse
+      PGDATA:            /var/lib/postgresql/data/pgdata
+    volumes:
+      - langfuse_db_data:/var/lib/postgresql/data
+    networks:
+      - oraculo_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Redis Stack ──────────────────────────────────────────────────────────────
   redis:
     image: redis/redis-stack:latest
     container_name: oraculo_redis
@@ -72,22 +122,25 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    # Expõe RedisInsight na porta 8001 (UI web para inspecionar dados)
+    ports:
+      - "8001:8001"    # RedisInsight — NÃO expor em produção
 
-  # ── Migration (job único, roda antes da API) ─────────────────────────────────
+  # ── Migration ────────────────────────────────────────────────────────────────
   migration:
     build:
       context: .
       dockerfile: Dockerfile
       target: runtime
     container_name: oraculo_migration
-    <<: *common-env
+    <<: *app-env
     command: ["alembic", "upgrade", "head"]
     networks:
       - oraculo_net
     depends_on:
       postgres:
         condition: service_healthy
-    restart: "no"   # Job único — não reinicia
+    restart: "no"
 
   # ── API FastAPI ──────────────────────────────────────────────────────────────
   api:
@@ -96,7 +149,7 @@ services:
       dockerfile: Dockerfile
       target: runtime
     container_name: oraculo_api
-    <<: [*restart, *logging, *common-env]
+    <<: [*restart, *logging, *app-env]
     command:
       - "uvicorn"
       - "src.main:app"
@@ -127,23 +180,23 @@ services:
       retries: 3
       start_period: 60s
 
-  # ── Celery Worker (mensagens WhatsApp + LangGraph) ──────────────────────────
+  # ── Celery Worker ────────────────────────────────────────────────────────────
   worker:
     build:
       context: .
       dockerfile: Dockerfile
       target: runtime
     container_name: oraculo_worker
-    <<: [*restart, *logging, *common-env]
+    <<: [*restart, *logging, *app-env]
     command:
       - "celery"
       - "-A"
       - "src.infrastructure.celery_app.celery_app"
       - "worker"
       - "--loglevel=info"
-      - "--concurrency=2"          # 2 workers: equilíbrio RAM/throughput
+      - "--concurrency=2"
       - "--queues=default,admin"
-      - "--max-tasks-per-child=50" # Evita memory leaks de modelos ML
+      - "--max-tasks-per-child=50"
       - "--without-gossip"
       - "--without-mingle"
     networks:
@@ -154,20 +207,20 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "celery", "-A", "src.infrastructure.celery_app.celery_app", "inspect", "ping", "-d", "celery@oraculo_worker"]
+      test: ["CMD", "celery", "-A", "src.infrastructure.celery_app.celery_app", "inspect", "ping"]
       interval: 60s
       timeout: 15s
       retries: 3
       start_period: 90s
 
-  # ── Celery Beat (notificações agendadas) ─────────────────────────────────────
+  # ── Celery Beat ──────────────────────────────────────────────────────────────
   beat:
     build:
       context: .
       dockerfile: Dockerfile
       target: runtime
     container_name: oraculo_beat
-    <<: [*restart, *logging, *common-env]
+    <<: [*restart, *logging, *app-env]
     command:
       - "celery"
       - "-A"
@@ -183,3 +236,93 @@ services:
         condition: service_healthy
       worker:
         condition: service_started
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Sprint 1: Langfuse — Tracing LLM Open-Source
+  # ════════════════════════════════════════════════════════════════════════════
+  #
+  # SETUP INICIAL (uma vez):
+  #   1. docker-compose up langfuse langfuse_db -d
+  #   2. Acesse http://localhost:3000
+  #   3. Crie sua conta em /auth/sign-up
+  #   4. Vá em Settings → API Keys → Create new API Key
+  #   5. Copie LANGFUSE_SECRET_KEY e LANGFUSE_PUBLIC_KEY para o .env
+  #   6. docker-compose restart api worker
+  #
+  langfuse:
+    image: langfuse/langfuse:3
+    container_name: oraculo_langfuse
+    <<: [*restart, *logging]
+    ports:
+      - "3000:3000"    # Painel Langfuse — restrinja em produção
+    environment:
+      # BD do Langfuse (container dedicado)
+      DATABASE_URL: "postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse_pass}@langfuse_db:5432/langfuse"
+      # Segredos de sessão JWT (min 32 chars cada)
+      NEXTAUTH_SECRET: "${LANGFUSE_SECRET:-langfuse-secret-dev-32-chars-min}"
+      SALT:            "${LANGFUSE_SALT:-langfuse-salt-dev}"
+      NEXTAUTH_URL:    "http://localhost:3000"
+      # Opcionais
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      LANGFUSE_DEFAULT_PROJECT_NAME:         "Oraculo UEMA"
+      # Desativa telemetria para o servidor Langfuse Cloud
+      LANGFUSE_TELEMETRY_ENABLED: "false"
+    networks:
+      - oraculo_net
+    depends_on:
+      langfuse_db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/public/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Sprint 1: Grafana — Dashboards Redis/Celery
+  # ════════════════════════════════════════════════════════════════════════════
+  #
+  # SETUP INICIAL:
+  #   1. Acesse http://localhost:3001 | Login: admin / admin
+  #   2. Connections → Add new connection → Redis
+  #      URL: redis://redis:6379
+  #   3. Dashboards → Import → ID: 12776 (Redis Exporter) ou 11835
+  #
+  # DASHBOARDS RECOMENDADOS:
+  #   12776 → Redis Overview (memória, conexões, ops/sec)
+  #   11835 → Redis Cluster (para múltiplos nós)
+  #
+  # MÉTRICAS DO ORÁCULO (manual):
+  #   Criar painel com Source=Redis, Query: LLEN monitor:logs
+  #   Criar painel: XLEN oraculo:stream:messages
+  #   Criar painel: XPENDING oraculo:stream:messages oraculo-workers - + 100
+  #
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: oraculo_grafana
+    <<: [*restart, *logging]
+    ports:
+      - "3001:3000"    # Grafana exposto em 3001 (evita conflito com Langfuse na 3000)
+    environment:
+      GF_SECURITY_ADMIN_USER:     "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+      # Plugin Redis para visualizar dados do Redis Stack diretamente
+      GF_INSTALL_PLUGINS: "redis-datasource"
+      GF_PATHS_PROVISIONING: "/etc/grafana/provisioning"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      # Provision automática do datasource Redis
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - oraculo_net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

@@ -78,8 +78,39 @@ class ScrapingService:
         async with self._semaphore:
             result = await scraper.scrape(request)
 
-        if result.ok and result.document and self._rag:
-            await self._ingest_to_rag(result.document)
+        # 1. Tudo precisa estar garantido que deu sucesso!
+        if result.ok and result.document:
+            
+            # Injeta no RAG
+            if self._rag:
+                await self._ingest_to_rag(result.document)
+
+            # 2. Captura os novos links descobertos
+            novos_links = result.document.metadata.get("links_descobertos", [])
+            
+            if novos_links and self._queue:
+                from .base_scraper import ScrapeRequest
+                from src.infrastructure.redis_client import get_redis_text
+                
+                r = get_redis_text()
+                
+                for link in novos_links:
+                    # 3. Controle Distribuído: Usamos o Redis para garantir que 
+                    # nenhum worker coloque a mesma URL na fila duas vezes em 24h
+                    lock_key = f"crawler:queued:{link}"
+                    
+                    if not r.get(lock_key):
+                        # Marca como visitado/enfileirado (TTL de 24 horas)
+                        r.setex(lock_key, 86400, "1")
+                        
+                        # 4. Enfileira de forma recursiva com o mesmo doc_type
+                        await self.scrape_and_queue(
+                            ScrapeRequest(
+                                url=link, 
+                                doc_type=request.doc_type, 
+                                priority=8 # Prioridade mais baixa que ações do usuário
+                            )
+                        )
 
         return result
 
@@ -191,12 +222,12 @@ def build_default_scraping_service(
     from .retry import RetryConfig, RetryPolicy
     from .implementations.wikipedia_scraper import WikipediaScraper
     from .implementations.generic_scraper import GenericHTTPScraper, UEMAWikiScraper
-
+    from .implementations.uema_wiki_scraper import UEMAWikiScraper
     # Componentes compartilhados
     anti_block = AntiBlockManager(AntiBlockConfig(min_delay_s=0.3, max_delay_s=1.5))
     retry = RetryPolicy(RetryConfig(max_attempts=3))
     cache = ScraperCache(redis_client) if redis_client else NoOpCache()
-
+    
     def _mk(ScrapeClass: type) -> BaseScraper:
         return ScrapeClass(anti_block=anti_block, retry_policy=retry, cache=cache)
 
@@ -210,5 +241,5 @@ def build_default_scraping_service(
     service.register(_mk(WikipediaScraper))
     service.register(_mk(UEMAWikiScraper))
     service.register(_mk(GenericHTTPScraper), fallback=True)
-
+    service.register(UEMAWikiScraper(anti_block=anti_block, retry_policy=retry, cache=cache))
     return service

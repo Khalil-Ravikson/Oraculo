@@ -166,186 +166,12 @@ async def stream_logs(request: Request):
 @router.post("/query")
 async def query_rag(request: Request):
     """
-    SSE: executa a pipeline RAG completa e streama cada passo.
-
-    Body JSON: {"pergunta": "quando é a matrícula?", "user_id": "eval_user"}
-
-    Eventos emitidos (em ordem):
-      step_start   → início de cada etapa
-      step_result  → resultado de cada etapa
-      chunk_rag    → chunks recuperados
-      resposta     → resposta final do Gemini
-      metricas     → tokens, latência, CRAG score
-      done         → fim do stream
+    Desativado temporariamente durante a migração para o LangGraph.
     """
-    body = await request.json()
-    pergunta = (body.get("pergunta") or "").strip()
-    user_id  = body.get("user_id", "eval_live")
-
-    if not pergunta:
-        return JSONResponse({"erro": "Campo 'pergunta' obrigatório"}, status_code=400)
-
-    async def pipeline_stream() -> AsyncIterator[str]:
-        def _evento(tipo: str, dados: dict) -> str:
-            return f"data: {json.dumps({'tipo': tipo, **dados}, ensure_ascii=False)}\n\n"
-
-        t_total = time.monotonic()
-        logger  = logging.getLogger("eval.query")
-
-        try:
-            # ── Passo 0: Guardrails ──────────────────────────────────────────
-            yield _evento("step_start", {"step": "guardrails", "label": "0 — Guardrails"})
-            t0 = time.monotonic()
-            from src.agent.core import _guardrails
-            gr = _guardrails(pergunta)
-            ms = int((time.monotonic() - t0) * 1000)
-
-            if gr:
-                yield _evento("step_result", {
-                    "step": "guardrails", "ms": ms,
-                    "resultado": f"Short-circuit: {gr[0]}",
-                    "badge": "blocked",
-                })
-                yield _evento("resposta", {"texto": gr[1], "fonte": "guardrail"})
-                yield _evento("metricas", {"tokens_entrada": 0, "tokens_saida": 0, "latencia_ms": ms})
-                yield _evento("done", {})
-                return
-
-            yield _evento("step_result", {"step": "guardrails", "ms": ms, "resultado": "Passou ✓", "badge": "ok"})
-
-            # ── Passo 1: Routing semântico ────────────────────────────────────
-            yield _evento("step_start", {"step": "routing", "label": "1 — Routing Semântico (Redis KNN)"})
-            t0 = time.monotonic()
-            from src.domain.semantic_router import rotear
-            from src.domain.entities import EstadoMenu
-            r_routing = rotear(pergunta, EstadoMenu.MAIN)
-            ms = int((time.monotonic() - t0) * 1000)
-            yield _evento("step_result", {
-                "step": "routing", "ms": ms,
-                "resultado": f"Rota: {r_routing.rota.value} | Confiança: {r_routing.confianca} | Score: {r_routing.score:.3f}",
-                "badge": r_routing.confianca,
-                "rota": r_routing.rota.value,
-                "score": round(r_routing.score, 3),
-            })
-
-            # ── Passo 2: Query Transform ──────────────────────────────────────
-            yield _evento("step_start", {"step": "transform", "label": "2 — Query Transform (Gemini)"})
-            t0 = time.monotonic()
-            from src.rag.query_transform import transformar_query
-            qt = transformar_query(pergunta, fatos_usuario=[], usar_sub_queries=False)
-            ms = int((time.monotonic() - t0) * 1000)
-            yield _evento("step_result", {
-                "step": "transform", "ms": ms,
-                "resultado": qt.query_principal,
-                "foi_transformada": qt.foi_transformada,
-                "badge": "transformed" if qt.foi_transformada else "skip",
-            })
-
-            # ── Passo 3: Hybrid Retrieval ─────────────────────────────────────
-            yield _evento("step_start", {"step": "retrieval", "label": "3 — Busca Híbrida (BM25 + Vetor)"})
-            t0 = time.monotonic()
-            from src.rag.hybrid_retriever import recuperar, recuperar_simples
-            from src.domain.entities import Rota
-            rota = r_routing.rota
-
-            _SOURCE_MAP = {
-                Rota.CALENDARIO: "calendario-academico-2026.pdf",
-                Rota.EDITAL:     "edital_paes_2026.pdf",
-                Rota.CONTATOS:   "guia_contatos_2025.pdf",
-            }
-            source_f = _SOURCE_MAP.get(rota)
-            rec = recuperar(qt, source_filter=source_f) if rota != Rota.GERAL else recuperar_simples(pergunta)
-            ms  = int((time.monotonic() - t0) * 1000)
-
-            # CRAG score
-            crag_score = 0.0
-            if rec.encontrou and rec.chunks:
-                scores = [c.rrf_score for c in rec.chunks if c.rrf_score > 0]
-                crag_score = round(sum(scores) / len(scores), 3) if scores else 0.0
-
-            yield _evento("step_result", {
-                "step": "retrieval", "ms": ms,
-                "resultado": f"{len(rec.chunks)} chunks | fonte: {rec.fonte_principal or 'geral'} | método: {rec.metodo_usado}",
-                "badge": "ok" if crag_score >= 0.40 else "warn",
-                "crag_score": crag_score,
-            })
-
-            # Emite os chunks para a UI mostrar
-            for i, chunk in enumerate(rec.chunks[:4]):
-                yield _evento("chunk_rag", {
-                    "idx":     i + 1,
-                    "source":  chunk.source,
-                    "score":   round(chunk.rrf_score, 4),
-                    "preview": chunk.content[:180].replace("\n", " "),
-                })
-
-            # ── Passo 4: Geração Gemini ───────────────────────────────────────
-            yield _evento("step_start", {"step": "geracao", "label": "4 — Geração (Gemini Flash)"})
-            t0 = time.monotonic()
-            from src.providers.gemini_provider import chamar_gemini
-            from src.application.graph.prompts import SYSTEM_UEMA, montar_prompt_geracao
-
-            prompt = montar_prompt_geracao(
-                pergunta     = pergunta,
-                contexto_rag = rec.contexto_formatado if rec.encontrou else "",
-            )
-            resp = chamar_gemini(
-                prompt             = prompt,
-                system_instruction = SYSTEM_UEMA,
-            )
-            ms_gen = int((time.monotonic() - t0) * 1000)
-            ms_tot = int((time.monotonic() - t_total) * 1000)
-
-            if not resp.sucesso:
-                yield _evento("step_result", {
-                    "step": "geracao", "ms": ms_gen,
-                    "resultado": f"Erro: {resp.erro[:100]}",
-                    "badge": "error",
-                })
-                yield _evento("done", {})
-                return
-
-            yield _evento("step_result", {
-                "step": "geracao", "ms": ms_gen,
-                "resultado": f"{resp.output_tokens} tokens gerados",
-                "badge": "ok",
-            })
-
-            yield _evento("resposta", {
-                "texto":   resp.conteudo,
-                "fonte":   rota.value,
-                "tokens":  resp.output_tokens,
-            })
-
-            yield _evento("metricas", {
-                "tokens_entrada": resp.input_tokens,
-                "tokens_saida":   resp.output_tokens,
-                "tokens_total":   resp.tokens_total,
-                "latencia_ms":    ms_tot,
-                "crag_score":     crag_score,
-                "rota":           rota.value,
-                "foi_cache":      False,
-            })
-
-            # Salva no Redis para o histórico de métricas
-            _salvar_metrica_eval(pergunta, resp, crag_score, rota.value, ms_tot)
-
-            logger.info("📊 Query eval | rota=%s | tokens=%d | crag=%.3f | %dms",
-                        rota.value, resp.tokens_total, crag_score, ms_tot)
-
-        except Exception as exc:
-            tb = traceback.format_exc()
-            logger.error("❌ Erro no pipeline eval: %s", exc)
-            yield _evento("erro", {"msg": str(exc)[:200], "traceback": tb[-400:]})
-
-        yield _evento("done", {})
-
-    return StreamingResponse(
-        pipeline_stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    return JSONResponse(
+        {"erro": "Eval desativado temporariamente. Aguardando integração final com LangGraph."}, 
+        status_code=503
     )
-
 
 @router.get("/metrics")
 async def get_metrics():
@@ -394,7 +220,7 @@ async def run_full_eval(request: Request):
         ids    = body.get("ids", None)  # None = todos
 
         # Importa a task de eval ou roda direto
-        from src.application.tasks_notificacao import celery_app  # reusa o celery_app
+        from src.application.tasks.tasks_notificacao import celery_app  # reusa o celery_app
         logging.getLogger(__name__).info(
             "🧪 Full eval solicitado | versao=%s | ids=%s", versao, ids
         )
