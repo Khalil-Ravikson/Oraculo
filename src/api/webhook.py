@@ -11,6 +11,35 @@ from src.application.use_cases.messages import MSG_CADASTRO_NECESSARIO
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+@router.post("/evolution/webhook")
+async def evolution_webhook(
+    request:          Request,
+    background_tasks: BackgroundTasks,
+    db:               AsyncSession = Depends(get_db_session),
+):
+    payload = await request.json()
+
+    # ── 1. DevGuard: valida payload Evolution API ─────────────────────────────
+    from src.api.middleware.dev_guard import DevGuard
+    guard = DevGuard(get_redis_text())
+    ok, identity = await guard.validar(payload)
+    if not ok:
+        return {"status": "ignored", "reason": identity}
+
+    # ── 2. Instancia use case com dependências injectadas ─────────────────────
+    use_case = ProcessMessageUseCase(
+        user_repo = PostgresUserRepository(db),
+        gateway   = EvolutionAdapter(),
+        lock      = RedisCacheLock(get_redis_text()),
+    )
+
+    # ── 3. Executa o pipeline do Porteiro (async, <5ms) ───────────────────────
+    # PostgreSQL verifica quem é o utilizador ANTES de gastar tokens.
+    # Se for bloqueado/guest/inativo, responde e termina aqui.
+    status = await use_case.execute(identity)
+    logger.info("📥 Webhook: %s → %s", identity.get("sender_phone", "?")[-8:], status)
+
+    return {"status": "ok"}
 async def processar_mensagem_background(phone: str, text: str, user_data: dict):
     """
     Simula o processamento em background (LangGraph).

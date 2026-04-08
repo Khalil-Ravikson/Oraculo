@@ -2,32 +2,34 @@
 api/monitor.py — Router exclusivo do Dashboard de Monitoramento
 ================================================================
 
-Montado em main.py com prefix="/monitor":
+Montado em main.py com prefix="/monitor" (ou /hub/monitor dependendo da tua montagem):
   GET  /monitor            → dashboard HTML (Jinja2)
-  GET  /monitor/data       → JSON dos logs (para o JS fazer polling)
-  GET  /monitor/{user_id}  → dados de um utilizador específico
+  GET  /monitor/stream     → SSE (Server-Sent Events) para métricas em tempo real
+  GET  /monitor/{user_id}  → dados de um utilizador específico (legado/suporte)
   POST /monitor/reset      → limpa logs de monitoramento (admin)
-
-Por que APIRouter separado?
-  - main.py fica limpo: só bootstrap, webhook e health
-  - O router pode ser versionado, testado e desactivado independentemente
-  - O template HTML e o CSS/JS são servidos por StaticFiles — sem string gigante no Python
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from src.infrastructure.redis_client import get_redis_text
 from src.infrastructure.settings import settings
+from src.api.hub import _verificar_cookie # Import necessário para SSE# Import necessário para SSE
+from src.application.use_cases.get_live_metrics import GetLiveMetricsUseCase
 
 logger    = logging.getLogger(__name__)
-router    = APIRouter()
+
+# Definimos o router apenas UMA vez
+router    = APIRouter(tags=["Monitor"])
+
+# Usamos a pasta de templates principal
 templates = Jinja2Templates(directory="templates")
 
 
@@ -36,10 +38,11 @@ templates = Jinja2Templates(directory="templates")
 # =============================================================================
 
 @router.get("", response_class=HTMLResponse)
-async def dashboard(request: Request, limit: int = 100):
+@router.get("/", response_class=HTMLResponse)
+async def dashboard(request: Request):
     """
     Dashboard principal — renderiza templates/monitor/dashboard.html via Jinja2.
-    Os dados reais vêm do endpoint /monitor/data via fetch() no JS.
+    Os dados reais vêm do endpoint /monitor/stream via SSE no JS.
     """
     contexto = {
         "request":    request,
@@ -50,70 +53,55 @@ async def dashboard(request: Request, limit: int = 100):
         "updated_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
     }
     return templates.TemplateResponse(
-    request=request,
-    name="monitor/dashboard.html",
-    context=contexto
+        request=request,
+        name="monitor/dashboard.html",
+        context=contexto
     )
 
 
 # =============================================================================
-# JSON API — para o JS fazer polling a cada 30s
+# Stream API — SSE (Server-Sent Events) para o Live Dashboard
 # =============================================================================
 
-@router.get("/data")
-async def monitor_data(limit: int = 100):
-    """
-    Retorna os dados do monitor em JSON estruturado.
-    O dashboard.html faz fetch("/monitor/data") a cada 30 segundos.
-    """
-    r = get_redis_text()
+@router.get("/stream")
+async def monitor_stream(request: Request):
+    """SSE: Envia métricas a cada 2 segundos para o FrontEnd."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        # Retorna um JSON de erro formatado para o SSE se não estiver autenticado
+        return StreamingResponse(
+            iter([f"data: {json.dumps({'erro': 'Não autorizado'})}\n\n"]),
+            media_type="text/event-stream"
+        )
 
-    try:
-        raw_logs = r.lrange("monitor:logs", 0, limit - 1)
-        logs     = [json.loads(l) for l in raw_logs]
-    except Exception:
-        logs = []
+    use_case = GetLiveMetricsUseCase()
 
-    # Métricas agregadas
-    total_msgs   = len(logs)
-    total_tokens = sum(l.get("tokens_total", 0) for l in logs)
-    avg_lat      = int(sum(l.get("latencia_ms", 0) for l in logs) / max(total_msgs, 1))
+    async def event_generator():
+        while True:
+            # Se o cliente desconectar (fechar a aba), o loop para
+            if await request.is_disconnected():
+                break
+            
+            metricas = use_case.executar()
+            yield f"data: {json.dumps(metricas)}\n\n"
+            
+            await asyncio.sleep(2) # Atualiza a cada 2 segundos
 
-    # Distribuição por nível
-    niveis: dict[str, int] = {}
-    for l in logs:
-        n = l.get("nivel", "GUEST")
-        niveis[n] = niveis.get(n, 0) + 1
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
-    # Distribuição por rota
-    rotas: dict[str, int] = {}
-    for l in logs:
-        r_ = l.get("rota", "GERAL")
-        rotas[r_] = rotas.get(r_, 0) + 1
 
-    # Erros recentes
-    try:
-        raw_errs = r.lrange("system_logs:error", 0, 9)
-        erros    = [json.loads(e) for e in raw_errs]
-    except Exception:
-        erros = []
-
-    return {
-        "updated_at":   datetime.now().isoformat(),
-        "total_msgs":   total_msgs,
-        "total_tokens": total_tokens,
-        "avg_latencia": avg_lat,
-        "niveis":       niveis,
-        "rotas":        rotas,
-        "logs":         logs[:50],    # últimas 50 entradas para a tabela
-        "erros":        erros,
-    }
-
+# =============================================================================
+# Endpoints Auxiliares (Legado / Utilitários)
+# =============================================================================
 
 @router.get("/{user_id}")
 async def monitor_usuario(user_id: str):
     """Dados de monitoramento de um utilizador específico."""
-    r    = get_redis_text()
+    r = get_redis_text()
     try:
         dados = r.hgetall(f"monitor:user:{user_id}")
     except Exception:

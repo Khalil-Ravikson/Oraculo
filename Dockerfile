@@ -1,61 +1,66 @@
 # =============================================================================
-# Dockerfile — Bot UEMA
-# =============================================================================
-#
-# SOBRE O .env E O DOCKER:
-#   O Dockerfile NÃO copia o .env para dentro da imagem.
-#   As variáveis chegam ao container em runtime via docker-compose.yml:
-#     env_file: .env        → injeta o arquivo inteiro
-#     environment: ...      → sobrescreve DATABASE_URL, REDIS_URL, WAHA_BASE_URL
-#
-# SOBRE O requirements.txt vs pyproject.toml:
-#   O Dockerfile usa requirements.txt (mais previsível para builds Docker).
-#   O pyproject.toml é para uso local e para configurar pytest — não é
-#   "copiado para o Docker" no sentido de ser executado lá.
-#
-# SOBRE O hot-reload:
-#   --reload no CMD + volume ./src:/app/src no docker-compose.yml permitem
-#   editar o código e ver a mudança sem reconstruir a imagem.
-#   Em produção: remova --reload e o volume ./src do docker-compose.yml.
+# Dockerfile — Oráculo UEMA (Multi-stage, rootless, produção)
 # =============================================================================
 
-# Python 3.11 slim — estável com pydantic-settings v2 e todas as dependências
-# Atualizado de 3.10 para 3.11 (melhor suporte a type hints modernos)
-FROM python:3.11-slim
+# ── Stage 1: Builder ──────────────────────────────────────────────────────────
+FROM python:3.11-slim AS builder
 
-WORKDIR /app
+WORKDIR /build
 
-# 1. Dependências do sistema operacional
-#    libpq-dev  → psycopg para conectar no PostgreSQL/pgvector
-#    gcc, build-essential → compilar extensões C (tiktoken, psutil, etc.)
-#    curl → usado no healthcheck do docker-compose
-RUN apt-get update && apt-get install -y \
+# Dependências de sistema apenas para compilação
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     gcc \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Instala dependências Python em camada separada
-#    Enquanto requirements.txt não mudar, o Docker reutiliza esta camada em cache.
-#    Mudar só o código em src/ não refaz o pip install.
+# Copia e instala dependências em venv isolado
 COPY requirements.txt .
-RUN pip install --no-cache-dir --timeout 1000 -r requirements.txt
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade pip --no-cache-dir && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# 3. Copia o código-fonte
-#    O volume ./src:/app/src no docker-compose.yml sobrescreve em dev (hot-reload).
-COPY src/ ./src/
+# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
+FROM python:3.11-slim AS runtime
 
-# 4. Copia os PDFs para ingestão
-#    O volume ./dados:/app/dados no docker-compose.yml sobrescreve em dev.
-COPY dados/ ./dados/
+# Copia apenas o runtime das libs de sistema (não os headers de compilação)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# 5. Variáveis de ambiente internas do Python
+# Cria utilizador sem privilégios
+RUN groupadd --gid 1001 oraculo && \
+    useradd  --uid 1001 --gid oraculo --shell /bin/bash --create-home oraculo
+
+WORKDIR /app
+
+# Copia o venv do builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH="/app"
 
-# 6. Expõe a porta da API
+# Copia código da aplicação
+COPY --chown=oraculo:oraculo src/    ./src/
+COPY --chown=oraculo:oraculo dados/  ./dados/
+COPY --chown=oraculo:oraculo templates/ ./templates/
+COPY --chown=oraculo:oraculo static/    ./static/
+COPY --chown=oraculo:oraculo alembic.ini ./
+COPY --chown=oraculo:oraculo alembic/    ./alembic/
+
+USER oraculo
 EXPOSE 9000
-# 7. Comando de inicialização
-#    --reload: hot-reload ativo (remova em produção)
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "9000", "--reload"]
+
+# Healthcheck interno
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:9000/health || exit 1
+
+CMD ["uvicorn", "src.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "9000", \
+     "--workers", "1", \
+     "--loop", "uvloop", \
+     "--no-access-log"]

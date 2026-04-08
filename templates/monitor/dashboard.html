@@ -1,136 +1,104 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Monitor — Bot UEMA v5</title>
-  <link rel="stylesheet" href="/static/css/monitor.css">
-</head>
-<body>
+{% extends "hub/_base.html" %}
 
-<!-- ── Header ─────────────────────────────────────────────────── -->
-<header class="header">
-  <div>
-    <h1>🎓 Bot UEMA — Monitor v5</h1>
-    <p class="meta">
-      Modelo: <strong>{{ modelo }}</strong> &nbsp;|&nbsp;
-      Redis: <strong>{{ redis_url.split("@")[-1] }}</strong> &nbsp;|&nbsp;
-      DEV: <strong>{{ dev_mode }}</strong>
-    </p>
+{% block title %}Monitor Live — Oráculo UEMA{% endblock %}
+
+{% block content %}
+<header>
+  <div class="logo">
+    <div class="logo-icon">📊</div>
+    <div class="logo-text">
+      <h1>Monitor Live</h1>
+      <span>STATUS DO MOTOR LANGGRAPH</span>
+    </div>
   </div>
-  <div style="display:flex;align-items:center;gap:12px">
-    <span class="meta">Última sync: <span id="updated-at">{{ updated_at }}</span></span>
-    <span class="badge-live">AO VIVO</span>
-    <button id="btn-refresh" class="btn btn-primary">↻ Actualizar</button>
+  <div class="header-right">
+    <a href="/hub/" style="color: var(--accent); text-decoration: none; border: 1px solid var(--accent); padding: 5px 10px; border-radius: 4px; font-family: monospace;">VOLTAR AO HUB</a>
   </div>
 </header>
 
-<div class="container">
-
-  <!-- ── Cards de métricas ───────────────────────────────────── -->
-  <div class="cards">
-    <div class="card accent-primary" id="card-msgs">
-      <div class="value">—</div>
-      <div class="label">Mensagens</div>
-    </div>
-    <div class="card accent-yellow" id="card-tokens">
-      <div class="value">—</div>
-      <div class="label">Tokens consumidos</div>
-    </div>
-    <div class="card" id="card-lat">
-      <div class="value">—</div>
-      <div class="label">Latência média</div>
-    </div>
-    <div class="card accent-red" id="card-admin">
-      <div class="value">—</div>
-      <div class="label">Msgs ADMIN</div>
-    </div>
-    <div class="card" id="card-student">
-      <div class="value">—</div>
-      <div class="label">Msgs STUDENT</div>
-    </div>
-    <div class="card" id="card-guest">
-      <div class="value">—</div>
-      <div class="label">Msgs GUEST</div>
-    </div>
-  </div>
-
-  <!-- ── Gráficos ──────────────────────────────────────────────── -->
-  <div class="grid-2">
-    <div class="section">
-      <div class="section-header">
-        <span class="section-title">Distribuição por Nível</span>
-      </div>
-      <div class="table-wrap" style="padding:20px">
-        <div id="chart-niveis">
-          <p class="empty">A carregar…</p>
-        </div>
-      </div>
+<main style="padding: 20px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
+    
+    <div style="background: #111; padding: 20px; border-radius: 8px; border: 1px solid #333; text-align: center;">
+        <h3 style="color: #888; margin-bottom: 10px;">Interações (Últimos 50)</h3>
+        <div id="metric-total" style="font-size: 3rem; color: var(--accent); font-weight: bold;">--</div>
     </div>
 
-    <div class="section">
-      <div class="section-header">
-        <span class="section-title">Distribuição por Rota RAG</span>
-      </div>
-      <div class="table-wrap" style="padding:20px">
-        <div id="chart-rotas">
-          <p class="empty">A carregar…</p>
-        </div>
-      </div>
+    <div style="background: #111; padding: 20px; border-radius: 8px; border: 1px solid #333; text-align: center;">
+        <h3 style="color: #888; margin-bottom: 10px;">Qualidade RAG (CRAG)</h3>
+        <div id="metric-crag" style="font-size: 3rem; color: #4CAF50; font-weight: bold;">--</div>
     </div>
-  </div>
 
-  <!-- ── Tabela de logs ─────────────────────────────────────────── -->
-  <div class="section">
-    <div class="section-header">
-      <span class="section-title">Log de Interações (últimas 50)</span>
+    <div style="background: #111; padding: 20px; border-radius: 8px; border: 1px solid #333; text-align: center;">
+        <h3 style="color: #888; margin-bottom: 10px;">Rota Dominante</h3>
+        <div id="metric-rota" style="font-size: 2rem; color: #00bcd4; font-weight: bold; margin-top: 15px;">--</div>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Timestamp</th>
-            <th>User ID</th>
-            <th>Nível</th>
-            <th style="text-align:right">Tokens</th>
-            <th style="text-align:right">Latência</th>
-            <th>Rota</th>
-            <th>Pergunta</th>
-          </tr>
-        </thead>
-        <tbody id="log-tbody">
-          <tr><td colspan="7" class="empty">A carregar…</td></tr>
-        </tbody>
-      </table>
+
+    <div style="grid-column: span 3; background: #0a0c0e; border: 1px solid #2a3140; border-radius: 8px; padding: 20px;">
+        <h3 style="color: #fff; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px;">Live Logs</h3>
+        <table style="width: 100%; text-align: left; border-collapse: collapse; font-family: monospace;">
+            <thead>
+                <tr style="color: #666; border-bottom: 1px solid #222;">
+                    <th style="padding: 10px;">Hora</th>
+                    <th style="padding: 10px;">User / Session</th>
+                    <th style="padding: 10px;">Rota (Intenção)</th>
+                    <th style="padding: 10px;">Score RAG</th>
+                </tr>
+            </thead>
+            <tbody id="logs-body" style="color: #ccc;">
+                <tr><td colspan="4" style="text-align:center; padding: 20px;">Aguardando sinal SSE...</td></tr>
+            </tbody>
+        </table>
     </div>
-  </div>
 
-  <!-- ── Erros recentes ─────────────────────────────────────────── -->
-  <div class="section">
-    <div class="section-header">
-      <span class="section-title">Erros Recentes (últimos 10)</span>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Timestamp</th>
-            <th>Contexto</th>
-            <th>Mensagem</th>
-          </tr>
-        </thead>
-        <tbody id="erros-tbody">
-          <tr><td colspan="3" class="empty">A carregar…</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
+</main>
 
-</div><!-- /container -->
+<script>
+    // Conecta ao Endpoint SSE do Monitor
+    const source = new EventSource('/monitor/stream');
 
-<!-- Toast de actualização -->
-<div id="toast"></div>
+    source.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        
+        if (data.erro) {
+            console.error("Erro nas métricas:", data.erro);
+            return;
+        }
 
-<script src="/static/js/monitor.js"></script>
-</body>
-</html>
+        // 1. Atualiza Cards
+        document.getElementById('metric-total').innerText = data.total_interacoes;
+        document.getElementById('metric-crag').innerText = data.media_crag.toFixed(2);
+        
+        // Descobre a rota mais usada
+        let rotaDominante = "N/A";
+        let maxCount = 0;
+        for (const [rota, count] of Object.entries(data.rotas)) {
+            if (count > maxCount) { maxCount = count; rotaDominante = rota; }
+        }
+        document.getElementById('metric-rota').innerText = rotaDominante.toUpperCase();
+
+        // 2. Atualiza Tabela de Logs
+        const tbody = document.getElementById('logs-body');
+        tbody.innerHTML = ''; // Limpa atual
+        
+        data.recent_logs.forEach(log => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = "1px solid #1a1a1a";
+            
+            // Cor do Score RAG (Verde se bom, Vermelho se fraco/nulo)
+            const cragColor = log.crag > 0.5 ? '#4CAF50' : (log.crag > 0 ? '#ff9800' : '#f44336');
+
+            tr.innerHTML = `
+                <td style="padding: 10px; color: #888;">${log.ts}</td>
+                <td style="padding: 10px;">${log.user}</td>
+                <td style="padding: 10px; color: var(--accent);">${log.rota}</td>
+                <td style="padding: 10px; color: ${cragColor}; font-weight: bold;">${log.crag.toFixed(2)}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    };
+
+    source.onerror = function(error) {
+        console.error("Falha na conexão SSE do Monitor.");
+    };
+</script>
+{% endblock %}

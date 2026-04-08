@@ -25,6 +25,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from src.api import monitor
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ def _registrar_routers(app: FastAPI) -> None:
 
     # Webhook WhatsApp
     app.include_router(webhook_router, prefix="/api/v1", tags=["Webhook"])
-
+    app.include_router(monitor.router, prefix="/monitor")
     # Monitor SSE (opcional — apenas em DEV)
     try:
         from src.api.eval_dashboard import router as eval_router

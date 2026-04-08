@@ -244,3 +244,109 @@ async def chat_send(request: Request, data: WebChatRequest):
     )
     
     return {"response": resposta}
+
+import asyncio
+import json
+from fastapi import Request
+from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse
+
+
+
+@router.get("/chat/stream")
+async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
+    """SSE: executa o grafo e streama o resultado passo a passo."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+
+    if not msg or not thread_id:
+        return JSONResponse({"erro": "msg e thread_id obrigatórios"}, status_code=400)
+
+    async def _generator():
+        from src.application.graph.builder import get_compiled_graph, get_graph_config
+        from src.application.graph.state import OracleState
+
+        graph  = get_compiled_graph()
+        config = get_graph_config(thread_id=thread_id)
+
+        # Verifica se existe estado HITL pendente para este thread
+        try:
+            snapshot = await graph.aget_state(config)
+            has_pending = (
+                snapshot.values.get("pending_confirmation") is not None
+                and snapshot.values.get("confirmation_result") not in ("confirmed", "cancelled")
+            )
+        except Exception:
+            has_pending = False
+            snapshot = None
+
+        # Monta o input correcto
+        if has_pending:
+            # Retomada HITL: injeta a resposta do utilizador no estado existente
+            input_state = {"current_input": msg, "messages": []}
+        else:
+            # Nova conversa ou novo turno
+            input_state = OracleState.from_identity({
+                "user_id":   f"sim_{thread_id}",
+                "chat_id":   f"sim_{thread_id}@sim",
+                "nome":      "Simulador Admin",
+                "role":      "admin",
+                "status":    "ativo",
+                "is_admin":  True,
+                "body":      msg,
+                "has_media": False,
+            })
+
+        yield f"data: {json.dumps({'type': 'start', 'hitl': has_pending})}\n\n"
+
+        try:
+            async for chunk in graph.astream(input_state, config=config, stream_mode="values"):
+                # Streama cada mudança de estado relevante
+                route = chunk.get("route", "")
+                if route:
+                    yield f"data: {json.dumps({'type': 'route', 'route': route})}\n\n"
+
+                pending = chunk.get("pending_confirmation")
+                if pending:
+                    yield f"data: {json.dumps({'type': 'hitl', 'question': pending})}\n\n"
+
+                response = chunk.get("final_response")
+                if response:
+                    yield f"data: {json.dumps({'type': 'response', 'text': response, 'crag': chunk.get('crag_score', 0)})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'msg': str(e)[:200]})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        _generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/audit/data")
+async def audit_data(request: Request):
+    """Endpoint REST para alimentar a tabela de Auditoria."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+        
+    from src.application.use_cases.get_audit_logs import GetAuditLogsUseCase
+    use_case = GetAuditLogsUseCase()
+    # CORRECT: Added await
+    logs = await use_case.executar() 
+    return {"logs": logs}
+
+
+@router.get("/users/data")
+async def users_data(request: Request, role: str = ""):
+    """Endpoint REST para alimentar a tabela de Utilizadores."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+        
+    from src.application.use_cases.get_users_list import GetUsersListUseCase
+    users = await GetUsersListUseCase().executar(role)
+    return {"users": users}

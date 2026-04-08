@@ -1,0 +1,76 @@
+{% extends "hub/_base.html" %}
+
+{% block title %}Audit Log — Oráculo UEMA{% endblock %}
+
+{% block content %}
+<header>
+  <div class="logo">
+    <div class="logo-icon">📋</div>
+    <div class="logo-text">
+      <h1>Audit Log</h1>
+      <span>REGISTO DE AÇÕES CRÍTICAS DO SISTEMA</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <a href="/hub/" style="color: var(--accent); text-decoration: none; border: 1px solid var(--accent); padding: 5px 10px; border-radius: 4px; font-family: monospace;">VOLTAR AO HUB</a>
+  </div>
+</header>
+
+<main style="padding: 20px;">
+    <div style="background: #0a0c0e; border: 1px solid #2a3140; border-radius: 8px; padding: 20px; overflow-x: auto;">
+        <table style="width: 100%; text-align: left; border-collapse: collapse; font-family: monospace;">
+            <thead>
+                <tr style="color: #666; border-bottom: 1px solid #222;">
+                    <th style="padding: 10px;">Data/Hora</th>
+                    <th style="padding: 10px;">Admin Responsável</th>
+                    <th style="padding: 10px;">Ação Executada</th>
+                    <th style="padding: 10px;">Alvo / Payload</th>
+                    <th style="padding: 10px;">Status</th>
+                </tr>
+            </thead>
+            <tbody id="audit-body" style="color: #ccc;">
+                <tr><td colspan="5" style="text-align:center; padding: 20px;">A extrair logs seguros...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</main>
+
+<script>
+    async function loadAuditLogs() {
+        try {
+            const res = await fetch('/hub/audit/data');
+            const data = await res.json();
+            
+            const tbody = document.getElementById('audit-body');
+            tbody.innerHTML = '';
+            
+            if (data.logs && data.logs.length > 0) {
+                data.logs.forEach(log => {
+                    const tr = document.createElement('tr');
+                    tr.style.borderBottom = "1px solid #1a1a1a";
+                    
+                    const statusColor = log.resultado === 'ok' ? '#4CAF50' : '#f44336';
+                    const targetInfo = log.target ? `[Alvo: ${log.target}] ` : '';
+                    const payloadStr = log.payload ? JSON.stringify(log.payload) : '';
+                    
+                    tr.innerHTML = `
+                        <td style="padding: 10px; color: #888;">${log.ts || '--'}</td>
+                        <td style="padding: 10px; color: var(--accent); font-weight: bold;">${log.admin_id || '--'}</td>
+                        <td style="padding: 10px; color: #fff;">${log.action || '--'}</td>
+                        <td style="padding: 10px; color: #00bcd4; font-size: 11px;">${targetInfo}${payloadStr}</td>
+                        <td style="padding: 10px; color: ${statusColor}; font-weight: bold;">${log.resultado || '--'}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">Nenhum registo de auditoria encontrado.</td></tr>';
+            }
+        } catch (error) {
+            console.error("Erro ao carregar auditoria:", error);
+            document.getElementById('audit-body').innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:#f44336;">Falha de comunicação com o servidor.</td></tr>';
+        }
+    }
+    
+    loadAuditLogs();
+</script>
+{% endblock %}

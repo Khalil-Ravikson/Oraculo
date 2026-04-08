@@ -30,7 +30,7 @@
   <div class="section-label" style="font-family: 'Share Tech Mono'; color: var(--accent); margin-bottom: 15px;">// módulos principais</div>
 
   <div class="primary-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
-    <a class="card" href="/hub/metrics" target="_blank" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block;">
+    <a class="card" href="/monitor" target="_blank" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block;">
       <div style="font-family: monospace; color: #666; font-size: 10px;">01</div>
       <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// MONITOR</div>
       <div style="font-size: 24px; margin-bottom: 10px;">📊</div>
@@ -60,6 +60,14 @@
       <div style="font-size: 24px; margin-bottom: 10px;">📡</div>
       <div style="font-weight: bold; margin-bottom: 5px;">API Docs</div>
       <div style="font-size: 12px; color: #888;">Swagger UI automático. Endpoints documentados.</div>
+    </a>    
+    
+    <a class="card" href="/hub/chat" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block; border-left: 3px solid #ff6b35;">
+      <div style="font-family: monospace; color: #666; font-size: 10px;">05</div>
+      <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// TESTE</div>
+      <div style="font-size: 24px; margin-bottom: 10px;">💬</div>
+      <div style="font-weight: bold; margin-bottom: 5px;">Simulador Web</div>
+      <div style="font-size: 12px; color: #888;">Chat direto com o Grafo para testar RAG, HITL e comandos.</div>
     </a>
   </div>
 </main>
@@ -70,11 +78,5 @@
   <span style="display: inline-block; width: 6px; height: 12px; background: #ff6b35; animation: blink 1s step-end infinite; vertical-align: middle; margin-left: 4px;"></span>
 </div>
 
-<a class="card" href="/hub/chat" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block; border-left: 3px solid #ff6b35;">
-      <div style="font-family: monospace; color: #666; font-size: 10px;">05</div>
-      <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// TESTE</div>
-      <div style="font-size: 24px; margin-bottom: 10px;">💬</div>
-      <div style="font-weight: bold; margin-bottom: 5px;">Simulador Web</div>
-      <div style="font-size: 12px; color: #888;">Chat direto com o Grafo para testar RAG, HITL e comandos.</div>
-    </a>
+
 {% endblock %}

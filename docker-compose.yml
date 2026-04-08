@@ -1,35 +1,185 @@
-version: '3.8' # É sempre uma boa prática colocar a versão no topo
+# docker-compose.yml — Oráculo UEMA (Produção)
+version: "3.9"
 
+# Network isolada — os serviços não ficam na bridge default do Docker
+networks:
+  oraculo_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  postgres_data:
+  redis_data:
+
+# ── Extensões (anchors YAML para DRY) ────────────────────────────────────────
+x-common-env: &common-env
+  env_file: .env
+  environment:
+    REDIS_URL:    "redis://redis:6379/0"
+    DATABASE_URL: "postgresql+asyncpg://user:${POSTGRES_PASSWORD}@postgres:5432/oraculo"
+
+x-restart: &restart
+  restart: unless-stopped
+
+x-logging: &logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# ── Serviços ──────────────────────────────────────────────────────────────────
 services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: oraculo_postgres
-    restart: always
+    <<: [*restart, *logging]
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: oraculo
-    # Mudamos a porta do Host de 5432 para 5433
-    ports:
-      - "5433:5432"
-    # Nome do volume explicitamente com prefixo
+      POSTGRES_USER:     user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       oraculo
+      PGDATA:            /var/lib/postgresql/data/pgdata
     volumes:
-      - oraculo_postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - oraculo_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d oraculo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Nunca expor a porta 5432 em produção — apenas acessível na rede interna
 
+  # ── Redis Stack ─────────────────────────────────────────────────────────────
   redis:
     image: redis/redis-stack:latest
     container_name: oraculo_redis
-    restart: always
-    # Mudamos as portas do Host para não baterem com o meubotrag
-    ports:
-      - "6380:6379" # Porta do Banco de Dados Redis
-      - "8002:8001" # Porta do RedisInsight (Painel Visual Embutido)
+    <<: [*restart, *logging]
     volumes:
-      - oraculo_redis_data:/data
+      - redis_data:/data
+    networks:
+      - oraculo_net
     environment:
-      - REDIS_ARGS=--appendonly yes
+      REDIS_ARGS: "--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
-# Volumes nomeados de forma única para não sobrescrever os dados antigos
-volumes:
-  oraculo_postgres_data:
-  oraculo_redis_data:
+  # ── Migration (job único, roda antes da API) ─────────────────────────────────
+  migration:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: oraculo_migration
+    <<: *common-env
+    command: ["alembic", "upgrade", "head"]
+    networks:
+      - oraculo_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"   # Job único — não reinicia
+
+  # ── API FastAPI ──────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: oraculo_api
+    <<: [*restart, *logging, *common-env]
+    command:
+      - "uvicorn"
+      - "src.main:app"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "9000"
+      - "--workers"
+      - "2"
+      - "--loop"
+      - "uvloop"
+      - "--no-access-log"
+    ports:
+      - "${API_PORT:-9000}:9000"
+    networks:
+      - oraculo_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ── Celery Worker (mensagens WhatsApp + LangGraph) ──────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: oraculo_worker
+    <<: [*restart, *logging, *common-env]
+    command:
+      - "celery"
+      - "-A"
+      - "src.infrastructure.celery_app.celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--concurrency=2"          # 2 workers: equilíbrio RAM/throughput
+      - "--queues=default,admin"
+      - "--max-tasks-per-child=50" # Evita memory leaks de modelos ML
+      - "--without-gossip"
+      - "--without-mingle"
+    networks:
+      - oraculo_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "celery", "-A", "src.infrastructure.celery_app.celery_app", "inspect", "ping", "-d", "celery@oraculo_worker"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 90s
+
+  # ── Celery Beat (notificações agendadas) ─────────────────────────────────────
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: oraculo_beat
+    <<: [*restart, *logging, *common-env]
+    command:
+      - "celery"
+      - "-A"
+      - "src.infrastructure.celery_app.celery_app"
+      - "beat"
+      - "--loglevel=info"
+      - "--scheduler=celery.beat:PersistentScheduler"
+      - "--schedule=/tmp/celerybeat-schedule"
+    networks:
+      - oraculo_net
+    depends_on:
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
