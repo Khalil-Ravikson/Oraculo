@@ -1,28 +1,4 @@
-# docker-compose.yml — Oráculo UEMA v6.1
-# =========================================
-# Stack completa: App + Observability (Prometheus + Grafana + Langfuse)
-#
-# ACESSO RÁPIDO:
-#   API           → http://localhost:9000
-#   Hub Admin     → http://localhost:9000/hub/
-#   RedisInsight  → http://localhost:8001
-#   Langfuse      → http://localhost:3000  (criar conta no primeiro acesso)
-#   Grafana       → http://localhost:3001  (admin/admin)
-#   Prometheus    → http://localhost:9090
-#
-# SETUP INICIAL (uma vez):
-#   1. cp .env.example .env && vim .env  (preencher variáveis)
-#   2. docker compose up langfuse_db langfuse -d
-#   3. Acesse http://localhost:3000 → criar conta → gerar API Keys
-#   4. Cole LANGFUSE_SECRET_KEY e LANGFUSE_PUBLIC_KEY no .env
-#   5. docker compose up -d
-#
-# VARIÁVEIS OBRIGATÓRIAS NO .env:
-#   POSTGRES_PASSWORD, GEMINI_API_KEY, EVOLUTION_API_KEY
-#   ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_NUMBERS
-#   LANGFUSE_DB_PASSWORD (pode ser qualquer senha forte)
-#   LANGFUSE_SECRET (mín. 32 chars)
-
+# docker-compose.yml — Oráculo UEMA v6.2 (Corrigido)
 version: "3.9"
 
 networks:
@@ -35,14 +11,17 @@ volumes:
   langfuse_db_data:
   grafana_data:
   prometheus_data:
+  # O volume abaixo não é gerenciado pelo docker, usaremos bind mount ./dados
 
-# ── Anchors ──────────────────────────────────────────────────────────────────
 x-app-env: &app-env
   env_file: .env
   environment:
-    REDIS_URL:    "redis://redis:6379/0"
+    REDIS_URL: "redis://redis:6379/0"
     DATABASE_URL: "postgresql+asyncpg://user:${POSTGRES_PASSWORD}@postgres:5432/oraculo"
+    # IMPORTANTE: A API e Worker devem usar a rede interna para o Langfuse
     LANGFUSE_HOST: "http://langfuse:3000"
+    LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY}"
+    LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY}"
 
 x-restart: &restart
   restart: unless-stopped
@@ -60,18 +39,17 @@ x-build: &build
     dockerfile: Dockerfile
     target: runtime
 
-# ── Serviços de Infraestrutura ────────────────────────────────────────────────
 services:
-
+  # ── Infraestrutura (Postgres, Redis, Exporter) ──
   postgres:
     image: postgres:16-alpine
     container_name: oraculo_postgres
     <<: [*restart, *logging]
     environment:
-      POSTGRES_USER:     user
+      POSTGRES_USER: user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB:       oraculo
-      PGDATA:            /var/lib/postgresql/data/pgdata
+      POSTGRES_DB: oraculo
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -100,10 +78,8 @@ services:
       retries: 5
       start_period: 20s
     ports:
-      - "8001:8001"    # RedisInsight — restringir em produção
+      - "8001:8001"
 
-  # ── Redis Exporter (Prometheus scrape) ──────────────────────────────────────
-  # Expõe métricas do Redis no formato Prometheus (necessário para Grafana)
   redis_exporter:
     image: oliver006/redis_exporter:latest
     container_name: oraculo_redis_exporter
@@ -115,11 +91,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    # Porta 9121 exposta apenas internamente (Prometheus acessa via rede interna)
 
-# ── Observabilidade ───────────────────────────────────────────────────────────
-
-  # Prometheus: coleta métricas da API, Celery e Redis
+  # ── Observabilidade (Prometheus, Grafana, Langfuse) ──
   prometheus:
     image: prom/prometheus:v2.51.0
     container_name: oraculo_prometheus
@@ -133,7 +106,6 @@ services:
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=15d"
       - "--web.enable-lifecycle"
     networks:
       - oraculo_net
@@ -147,30 +119,28 @@ services:
     ports:
       - "3001:3000"
     environment:
-      GF_SECURITY_ADMIN_USER:     "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
-      GF_USERS_ALLOW_SIGN_UP:     "false"
-      GF_INSTALL_PLUGINS:         "redis-datasource"
-      GF_PATHS_PROVISIONING:      "/etc/grafana/provisioning"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: "redis-datasource"
+      GF_PATHS_PROVISIONING: "/etc/grafana/provisioning"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:
       - oraculo_net
     depends_on:
       - prometheus
 
-  # ── Langfuse (Tracing LLM self-hosted) ──────────────────────────────────────
   langfuse_db:
     image: postgres:16-alpine
     container_name: oraculo_langfuse_db
     <<: [*restart, *logging]
     environment:
-      POSTGRES_USER:     langfuse
+      POSTGRES_USER: langfuse
       POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse_pass}
-      POSTGRES_DB:       langfuse
-      PGDATA:            /var/lib/postgresql/data/pgdata
+      POSTGRES_DB: langfuse
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - langfuse_db_data:/var/lib/postgresql/data
     networks:
@@ -189,26 +159,18 @@ services:
     ports:
       - "3000:3000"
     environment:
-      DATABASE_URL:    "postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse_pass}@langfuse_db:5432/langfuse"
+      DATABASE_URL: "postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse_pass}@langfuse_db:5432/langfuse"
       NEXTAUTH_SECRET: "${LANGFUSE_SECRET:-langfuse-secret-dev-change-in-prod-32c}"
-      SALT:            "${LANGFUSE_SALT:-salt-dev}"
-      NEXTAUTH_URL:    "http://localhost:3000"
+      SALT: "${LANGFUSE_SALT:-salt-dev}"
+      NEXTAUTH_URL: "http://localhost:3000"
       LANGFUSE_TELEMETRY_ENABLED: "false"
-      LANGFUSE_DEFAULT_PROJECT_NAME: "Oraculo UEMA"
     networks:
       - oraculo_net
     depends_on:
       langfuse_db:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/public/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
 
-# ── Aplicação ─────────────────────────────────────────────────────────────────
-
+  # ── Aplicação ──
   migration:
     <<: [*build, *app-env]
     container_name: oraculo_migration
@@ -223,20 +185,11 @@ services:
   api:
     <<: [*build, *restart, *logging, *app-env]
     container_name: oraculo_api
-    command:
-      - "uvicorn"
-      - "src.main:app"
-      - "--host"
-      - "0.0.0.0"
-      - "--port"
-      - "9000"
-      - "--workers"
-      - "2"
-      - "--loop"
-      - "uvloop"
-      - "--no-access-log"
+    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "2", "--loop", "uvloop", "--no-access-log"]
     ports:
       - "${API_PORT:-9000}:9000"
+    volumes:
+      - ./dados:/app/dados  # CRÍTICO: Compartilha arquivos ingeridos
     networks:
       - oraculo_net
     depends_on:
@@ -246,27 +199,13 @@ services:
         condition: service_healthy
       migration:
         condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
   worker:
     <<: [*build, *restart, *logging, *app-env]
     container_name: oraculo_worker
-    command:
-      - "celery"
-      - "-A"
-      - "src.infrastructure.celery_app.celery_app"
-      - "worker"
-      - "--loglevel=info"
-      - "--concurrency=2"
-      - "--queues=default,admin,notificacoes"
-      - "--max-tasks-per-child=50"
-      - "--without-gossip"
-      - "--without-mingle"
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=default,admin,notificacoes"]
+    volumes:
+      - ./dados:/app/dados  # CRÍTICO: O worker precisa acessar os mesmos PDFs que a API
     networks:
       - oraculo_net
     depends_on:
@@ -278,17 +217,9 @@ services:
   beat:
     <<: [*build, *restart, *logging, *app-env]
     container_name: oraculo_beat
-    command:
-      - "celery"
-      - "-A"
-      - "src.infrastructure.celery_app.celery_app"
-      - "beat"
-      - "--loglevel=info"
-      - "--schedule=/tmp/celerybeat-schedule"
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
     networks:
       - oraculo_net
     depends_on:
       redis:
         condition: service_healthy
-      worker:
-        condition: service_started

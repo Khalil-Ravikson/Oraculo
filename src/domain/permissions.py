@@ -48,7 +48,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable
 
-from src.domain.models import RoleEnum, StatusMatriculaEnum
+from src.domain.entities.models import RoleEnum, StatusMatriculaEnum
 
 
 # ─────────────────────────────────────────────────────────────────────────────

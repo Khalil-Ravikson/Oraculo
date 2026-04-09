@@ -1,22 +1,9 @@
 """
-src/application/graph/nodes/core.py — v2 (LLM corrigido)
-==========================================================
-
-BUGS CORRIGIDOS:
-  BUG 1 (CRÍTICO): GeminiProvider importado mas nunca instanciado como
-    singleton — cada chamada criava nova instância perdendo o cliente.
-    FIX: _get_llm_provider() com lru_cache.
-
-  BUG 2 (CRÍTICO): RetrieveContextUseCase recebia RedisVectorAdapter
-    instanciado inline sem embeddings carregados, causando 0 chunks.
-    FIX: _get_retriever() singleton com adapter pré-aquecido.
-
-  BUG 3: classify_node não preenchia OracleState corretamente para
-    o LangGraph — faltava preservar campos imutáveis de identidade.
-    FIX: retorno explícito apenas dos campos que mudam.
-
-  BUG 4: node_rag usava system_instruction hard-coded; agora lê do Redis
-    (alterável via !prompt do admin) e faz fallback para SYSTEM_UEMA.
+src/application/graph/nodes/core.py — Nós Centrais (Classificação e RAG)
+========================================================================
+Este arquivo contém os nós principais do LangGraph:
+1. node_classify: Delega o roteamento para o OraculoRouter (Semântico + LLM).
+2. node_rag: Executa o Pipeline RAG (Recuperação e Geração) se for o caso.
 """
 import logging
 import re
@@ -28,9 +15,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Singletons (instanciados uma vez por processo)
+# Singletons & Helpers de Injeção
 # ─────────────────────────────────────────────────────────────────────────────
 
 @lru_cache(maxsize=1)
@@ -39,14 +25,12 @@ def _get_llm_provider():
     from src.infrastructure.adapters.gemini_provider import GeminiProvider
     return GeminiProvider()
 
-
 @lru_cache(maxsize=1)
 def _get_retriever():
     """Retriever singleton com adapter pré-aquecido."""
     from src.application.use_cases.retrieve_context_use_case import RetrieveContextUseCase
     from src.infrastructure.adapters.redis_vector_adapter import RedisVectorAdapter
     return RetrieveContextUseCase(RedisVectorAdapter())
-
 
 def _get_system_prompt() -> str:
     """Lê system prompt do Redis (admin pode alterar via !prompt)."""
@@ -61,19 +45,19 @@ def _get_system_prompt() -> str:
         from src.application.graph.prompts import SYSTEM_UEMA
         return SYSTEM_UEMA
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-# NÓ: classify
+# NÓ 1: CLASSIFY (O Porteiro Inteligente)
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def node_classify(state: "OracleState") -> dict:
+async def node_classify(state: "OracleState", oraculo_router) -> dict:
     """
-    Classifica a intenção e define a rota.
-    Usa PydanticRouter (Gemini) com fallback para KNN Redis e regex.
+    Nó do LangGraph responsável por definir o state["route"].
+    Usa o OraculoRouter (Injetado via Builder) que orquestra o Semantic e o Pydantic Router.
     """
     msg = (state.get("current_input") or "").strip()
+    is_admin = state.get("is_admin", False)
 
-    # ── Retomada HITL ─────────────────────────────────────────────────────────
+    # ── 1. Retomada HITL (Human-in-the-Loop) ──
     pending = state.get("pending_confirmation")
     conf_result = state.get("confirmation_result")
     if pending and conf_result not in ("confirmed", "cancelled", "awaiting_token"):
@@ -87,77 +71,48 @@ async def node_classify(state: "OracleState") -> dict:
                 "route": "respond_only",
             }
         return {
-            "final_response": (
-                f"{pending}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar."
-            ),
+            "final_response": f"{pending}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.",
             "route": "respond_only",
         }
 
-    # ── Modo manutenção ───────────────────────────────────────────────────────
+    # ── 2. Modo manutenção ──
     try:
         from src.infrastructure.redis_client import get_redis_text
         r = get_redis_text()
         maintenance = r.get("admin:maintenance_mode")
-        if isinstance(maintenance, bytes):
-            maintenance = maintenance.decode()
-        if maintenance == "1" and not state.get("is_admin"):
+        if isinstance(maintenance, bytes): maintenance = maintenance.decode()
+        if maintenance == "1" and not is_admin:
             return {
-                "final_response": (
-                    "🔧 *O Oráculo está em manutenção para melhorias.*\n\n"
-                    "Voltarei em breve! 🎓"
-                ),
+                "final_response": "🔧 *O Oráculo está em manutenção para melhorias.*\n\nVoltarei em breve! 🎓",
                 "route": "respond_only",
             }
     except Exception:
         pass
 
-    # ── Saudação curta → resposta rápida (0 tokens) ───────────────────────────
-    if _e_saudacao(msg):
-        return {"route": "greeting"}
+    # ── 3. O Roteamento de Elite (Oraculo Router Cascade) ──
+    contexto = {
+        "curso": state.get("curso"),
+        "periodo": state.get("periodo"),
+        "centro": state.get("centro"),
+    }
+    
+    # Executa a regra de negócio do roteador injetado
+    resultado = oraculo_router.rotear(mensagem=msg, contexto=contexto, is_admin=is_admin)
 
-    # ── Intenção CRUD ─────────────────────────────────────────────────────────
-    if _e_crud(msg) and state.get("user_role") not in ("guest", None):
-        return {"route": "crud", "tool_name": "update_student_data"}
+    logger.info("🚦 Classificação Final: Rota '%s' | Skip Cache: %s", 
+                resultado.get("route", "rag_node"), resultado.get("skip_cache", False))
 
-    # ── PydanticRouter (Gemini structured output) com fallback ───────────────
-    try:
-        from src.rag.query.pydantic_router import get_pydantic_router
-        ctx = {
-            "curso":   state.get("curso"),
-            "periodo": state.get("periodo"),
-            "centro":  state.get("centro"),
-        }
-        result = get_pydantic_router().rotear(
-            mensagem=msg,
-            contexto_usuario=ctx,
-            estado_menu=state.get("menu_state", "MAIN"),
-        )
-        rota = result.decisao.lower()
-
-        return {
-            "route":        rota,
-            "crag_score":   0.0,  # será preenchido pelo node_rag
-            "_router_conf": result.confianca,
-            "_skip_cache":  result.skip_cache,
-        }
-    except Exception as e:
-        logger.warning("⚠️  PydanticRouter falhou: %s — usando regex", e)
-        return {"route": "rag"}
+    # O LangGraph vai pegar esse dict e atualizar o OracleState
+    return resultado
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NÓ: rag
+# NÓ 2: RAG (O Cientista Pesquisador)
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def node_rag(state: "OracleState") -> dict:
     """
     Pipeline RAG: recupera contexto → gera resposta via Gemini.
-
-    FIXES aplicados:
-    - LLM provider singleton (não recria cliente a cada chamada)
-    - Retriever singleton com embeddings pré-carregados
-    - System prompt dinâmico do Redis
-    - Tratamento explícito de erros com mensagem amigável
     """
     from src.application.graph.prompts import montar_prompt_geracao
 
@@ -177,7 +132,7 @@ async def node_rag(state: "OracleState") -> dict:
         if centro:  partes.append(f"Centro: {centro}")
         perfil_str = " | ".join(partes)
 
-    # ── Recuperação RAG ───────────────────────────────────────────────────────
+    # ── Recuperação RAG ──
     contexto_rag = ""
     crag_score   = 0.0
     fonte        = ""
@@ -191,7 +146,6 @@ async def node_rag(state: "OracleState") -> dict:
         transformer = QueryTransformer.build_for_route(route)
         qt      = transformer.transform(qt_raw)
 
-        # Usa a query transformada se disponível, senão a original
         from src.rag.query.protocols import TransformedQuery
         transformed = TransformedQuery(
             original=qt.original,
@@ -212,9 +166,9 @@ async def node_rag(state: "OracleState") -> dict:
                 fonte = resultado.chunks[0].titulo_fonte if resultado.chunks else ""
 
     except Exception as e:
-        logger.warning("⚠️  RAG retrieval falhou: %s — gerando sem contexto", e)
+        logger.warning("⚠️ RAG retrieval falhou: %s — gerando sem contexto", e)
 
-    # ── Geração ───────────────────────────────────────────────────────────────
+    # ── Geração LLM ──
     system_prompt = _get_system_prompt()
     prompt_final  = montar_prompt_geracao(
         pergunta=msg,
@@ -234,52 +188,18 @@ async def node_rag(state: "OracleState") -> dict:
 
         if resp.sucesso and resp.conteudo:
             resposta_texto = resp.conteudo
-            logger.info(
-                "✅ node_rag | phone=%s | tokens=%d | crag=%.3f | fonte=%s",
-                (state.get("user_id") or "?")[-8:],
-                resp.tokens_total,
-                crag_score,
-                fonte[:40],
-            )
+            logger.info("✅ node_rag | user=%s | crag=%.3f | fonte=%s",
+                        (state.get("user_id") or "?")[-8:], crag_score, fonte[:40])
         else:
             logger.error("❌ LLM retornou vazio: %s", resp.erro)
-            resposta_texto = (
-                "Desculpe, tive dificuldade em gerar uma resposta. "
-                "Pode reformular a pergunta?"
-            )
+            resposta_texto = "Desculpe, tive dificuldade em gerar uma resposta. Pode reformular a pergunta?"
 
     except Exception as e:
         logger.exception("❌ Gemini falhou em node_rag: %s", e)
-        resposta_texto = (
-            "Estou tendo uma instabilidade técnica momentânea. "
-            "Tente novamente em alguns segundos. 🙏"
-        )
+        resposta_texto = "Estou tendo uma instabilidade técnica momentânea. Tente novamente em alguns segundos. 🙏"
 
     return {
         "final_response": resposta_texto,
         "rag_context":    contexto_rag[:500] if contexto_rag else "",
         "crag_score":     crag_score,
     }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-_SAUDACAO_RE = re.compile(
-    r"^(oi|olá|ola|bom\s*dia|boa\s*tarde|boa\s*noite|ei|hey|hello|hi|tudo\s*bem|e\s*aí)\s*[!?.]*$",
-    re.IGNORECASE,
-)
-_CRUD_RE = re.compile(
-    r"(atualiz|mudar|alterar|corrig|trocar|editar|modificar).{0,30}"
-    r"(nome|email|e-mail|telefone|matrícula|curso|senha|dados)",
-    re.IGNORECASE,
-)
-
-
-def _e_saudacao(msg: str) -> bool:
-    return bool(_SAUDACAO_RE.match(msg.strip())) and len(msg.split()) <= 4
-
-
-def _e_crud(msg: str) -> bool:
-    return bool(_CRUD_RE.search(msg))

@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
-from src.domain.models import CentroEnum, RoleEnum, StatusMatriculaEnum
+from src.domain.entities.models import CentroEnum, RoleEnum, StatusMatriculaEnum
 
 
 # ─────────────────────────────────────────────────────────────────────────────

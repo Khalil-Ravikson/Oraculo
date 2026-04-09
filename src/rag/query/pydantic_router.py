@@ -324,7 +324,7 @@ class PydanticRouter:
         Mantemos o legado intacto (nunca reescrever o que funciona).
         """
         try:
-            from src.domain.semantic_router import rotear
+            from src.domain.services.semantic_router import rotear
             from src.domain.entities import EstadoMenu
             res = rotear(mensagem, EstadoMenu.MAIN)
             return RouterResult(

@@ -1,20 +1,6 @@
 """
 application/tasks_admin.py — Tasks Celery Admin (v2 — Validação + Auto-Config)
 ================================================================================
-
-MUDANÇAS v2 vs v1:
-───────────────────
-  ADICIONADO:
-    - Validação do documento ANTES de ingerir (document_validator.py)
-    - Auto-config: parsing_instruction gerada automaticamente pelo nome do ficheiro
-    - Feedback detalhado ao admin (tipo detectado, parser escolhido, chunks)
-    - Mensagem de ajuda no !ingerir sem ficheiro (tipos aceites + formato esperado)
-    - Protecção contra ficheiros corrompidos, muito grandes e scans
-
-  MANTIDO:
-    - Download via Evolution API /chat/getBase64FromMediaMessage
-    - Celery task assíncrona
-    - Confirmação ao admin via WhatsApp
 """
 from __future__ import annotations
 
@@ -43,18 +29,6 @@ _PASTA_UPLOADS = os.path.join(settings.DATA_DIR, "uploads")
 
 @celery_app.task(name="ingerir_documento_whatsapp", bind=True, max_retries=2)
 def ingerir_documento_task(self, identity: dict) -> None:
-    """
-    Baixa o ficheiro via Evolution API, valida, auto-configura e ingere.
-
-    FLUXO v2:
-      1. Download base64 via /chat/getBase64FromMediaMessage
-      2. Salva em /dados/uploads/
-      3. Valida com document_validator (formato, tamanho, estrutura)
-      4. Se inválido → avisa admin com motivo específico
-      5. Se válido   → usa config gerado automaticamente
-      6. Ingere no Redis Stack
-      7. Confirmação detalhada ao admin
-    """
     chat_id  = identity.get("chat_id", "")
     key_id   = identity.get("msg_key_id", "")
     user_id  = identity.get("sender_phone", "admin")
@@ -62,13 +36,11 @@ def ingerir_documento_task(self, identity: dict) -> None:
     logger.info("📥 [ADMIN] Download doc | key=%s | user=%s", key_id[:20], user_id)
 
     try:
-        # ── 1. Download ───────────────────────────────────────────────────────
         b64, mimetype, nome_original = _baixar_media_evolution(key_id)
         if not b64:
             _enviar(chat_id, "❌ Não consegui baixar o ficheiro. Verifica se o ficheiro ainda existe e tenta reenviar.")
             return
 
-        # ── 2. Salva em disco ─────────────────────────────────────────────────
         from src.rag.document_validator import _detectar_extensao
         ext  = _detectar_extensao(nome_original, mimetype, "")
         if not ext:
@@ -91,7 +63,6 @@ def ingerir_documento_task(self, identity: dict) -> None:
         tamanho_kb = len(conteudo_bytes) // 1024
         logger.info("💾 Salvo: %s (%d KB)", caminho, tamanho_kb)
 
-        # ── 3. Validação ──────────────────────────────────────────────────────
         from src.rag.document_validator import (
             validar_documento,
             formatar_resultado_para_whatsapp,
@@ -101,17 +72,14 @@ def ingerir_documento_task(self, identity: dict) -> None:
 
         if not resultado.valido:
             _enviar(chat_id, resultado.motivo_rejeicao)
-            # Remove ficheiro inválido
             try:
                 os.remove(caminho)
             except Exception:
                 pass
             return
 
-        # Informa ao admin sobre o que foi detectado
         _enviar(chat_id, formatar_resultado_para_whatsapp(resultado, nome_seg))
 
-        # ── 4. Regista no DOCUMENT_CONFIG com auto-config ─────────────────────
         from src.rag.ingestion import DOCUMENT_CONFIG
         config_auto = resultado.config_sugerido.copy()
         DOCUMENT_CONFIG[nome_seg] = config_auto
@@ -122,13 +90,11 @@ def ingerir_documento_task(self, identity: dict) -> None:
             config_auto.get("chunk_size", 400),
         )
 
-        # ── 5. Ingere ─────────────────────────────────────────────────────────
         t0      = time.monotonic()
         ingestor= _get_ingestor()
         n_chunks= ingestor._ingerir_ficheiro(caminho)
         ms      = int((time.monotonic() - t0) * 1000)
 
-        # ── 6. Confirmação final ──────────────────────────────────────────────
         if n_chunks > 0:
             avisos = "\n".join(resultado.avisos) if resultado.avisos else ""
             _enviar(
@@ -188,26 +154,64 @@ def executar_comando_admin_task(self, chat_id: str, parametro: str, user_id: str
 
 
 # =============================================================================
-# Implementações dos comandos
+# Implementações dos comandos (Limpo e Corrigido)
 # =============================================================================
 
 def _cmd_limpar_cache(chat_id: str) -> None:
-    from src.infrastructure.semantic_cache import invalidar_cache_rota
-    from src.domain.entities import Rota
-    total = sum(invalidar_cache_rota(r.value) for r in Rota)
-    _enviar(chat_id, f"🗑️  *Cache limpo!*\n• Entradas removidas: {total}")
+    # Apenas apaga a chave de cache semântico no Redis
+    from src.infrastructure.redis_client import get_redis
+    r = get_redis()
+    
+    try:
+        # Pega todas as chaves de cache e deleta
+        cursor, keys = r.scan(0, match="semantic_cache:*", count=1000)
+        if keys:
+            r.delete(*keys)
+        _enviar(chat_id, f"🗑️ *Cache semântico limpo!*\n• Entradas removidas: {len(keys) if keys else 0}")
+    except Exception as e:
+        _enviar(chat_id, f"❌ Erro ao limpar cache: {e}")
 
 
 def _cmd_tools(chat_id: str) -> None:
-    from src.domain.semantic_router import listar_tools_registadas
-    tools = listar_tools_registadas()
+    # Lê as intents e tools direto do Redis (Roteador Semântico)
+    from src.infrastructure.redis_client import get_redis, PREFIX_TOOLS
+    r = get_redis()
+    tools = []
+    
+    cursor, keys = r.scan(0, match=f"{PREFIX_TOOLS}*", count=100)
+    for key in keys:
+        try:
+            doc = r.json().get(key, "$")
+            if doc:
+                item = doc[0] if isinstance(doc, list) else doc
+                tools.append({
+                    "name": item.get("name", "?"),
+                    "description": item.get("description", "?")[:70] + "..."
+                })
+        except Exception:
+            pass
+            
     if not tools:
-        _enviar(chat_id, "⚠️  Nenhuma tool registada.")
+        _enviar(chat_id, "⚠️ Nenhuma tool ou intenção registada no Redis.")
         return
-    linhas = [f"🔧 *{len(tools)} Tools registadas:*\n"]
+        
+    linhas = [f"🔧 *{len(tools)} Intents/Tools registadas no Roteador:*\n"]
     for t in tools:
-        linhas.append(f"• `{t['name']}`\n  {t['description'][:70]}...")
+        linhas.append(f"• `{t['name']}`\n  {t['description']}")
     _enviar(chat_id, "\n".join(linhas))
+
+
+def _cmd_reload(chat_id: str) -> None:
+    """
+    No LangGraph, o Grafo não precisa de 'reload'. 
+    O que precisa de reload são as Intents no Redis.
+    """
+    from src.main import inicializar_dependencias # Importe a sua função de inicialização
+    try:
+        inicializar_dependencias() # Chama a rotina de seeding do Redis (Intents)
+        _enviar(chat_id, "🔄 Intents do Roteador reinicializadas com sucesso no Redis.")
+    except Exception as e:
+        _enviar(chat_id, f"❌ Reload falhou: `{str(e)[:100]}`")
 
 
 def _cmd_exportar_ragas(chat_id: str, target: str | None) -> None:
@@ -250,17 +254,6 @@ def _cmd_fatos(chat_id: str, user_id: str) -> None:
     if len(fatos) > 10:
         linhas.append(f"_...e mais {len(fatos) - 10} fatos._")
     _enviar(chat_id, "\n".join(linhas))
-
-
-def _cmd_reload(chat_id: str) -> None:
-    from src.agent.core import agent_core
-    from src.tools import get_tools_ativas
-    try:
-        tools = get_tools_ativas()
-        agent_core.inicializar(tools)
-        _enviar(chat_id, f"🔄 AgentCore reiniciado com {len(tools)} tools.")
-    except Exception as e:
-        _enviar(chat_id, f"❌ Reload falhou: `{str(e)[:100]}`")
 
 
 def _cmd_ingerir_por_nome(chat_id: str, nome: str) -> None:

@@ -34,3 +34,5 @@ scrapling>=0.1.1
 # Instalação: pip install langfuse
 # Sem Langfuse → tracing desativado silenciosamente (sem erro)
 langfuse>=2.0.0
+prometheus-client>=0.20.0
+scikit-learn>=1.3.0

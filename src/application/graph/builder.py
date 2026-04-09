@@ -1,21 +1,26 @@
 # src/application/graph/builder.py
 from __future__ import annotations
 import logging
-from functools import lru_cache
 from langgraph.graph import END, StateGraph
 from src.application.graph.state import OracleState
 
 logger = logging.getLogger(__name__)
 
-@lru_cache(maxsize=1)
+# 1. Criamos uma variável privada para guardar o grafo na memória
+_compiled_graph = None
+
+# 2. Mantemos a função exata que o teu hub.py e as tasks já usam hoje!
 def get_compiled_graph():
-    """
-    O grafo compilado é IMUTÁVEL — partilhá-lo entre threads é safe.
-    O estado vive no RedisSaver por thread_id (phone), não na instância.
-    """
-    from src.application.graph.edges import route_after_classify, route_after_interceptor
+    global _compiled_graph
+    if _compiled_graph is None:
+        raise RuntimeError("O Grafo ainda não foi inicializado pela main.py!")
+    return _compiled_graph
+
+# 3. A função que a main.py vai chamar no arranque
+def compilar_grafo(oraculo_router):
+    global _compiled_graph
     
-    # IMPORTAÇÕES CORRIGIDAS: Cada nó vem do seu ficheiro correto!
+    from src.application.graph.edges import route_after_classify, route_after_interceptor
     from src.application.graph.nodes.admin import node_admin_interceptor, node_admin_command
     from src.application.graph.nodes.core import node_classify, node_rag
     from src.application.graph.nodes.tools_exec import node_ask_confirm, node_exec_tool
@@ -25,7 +30,10 @@ def get_compiled_graph():
 
     builder.add_node("admin_interceptor_node", node_admin_interceptor)
     builder.add_node("admin_command_node",     node_admin_command)
-    builder.add_node("classify_node",          node_classify)
+    
+    # Injetamos o Roteador aqui
+    builder.add_node("classify_node",          lambda state: node_classify(state, oraculo_router))
+    
     builder.add_node("rag_node",               node_rag)
     builder.add_node("crud_node",              node_ask_confirm)
     builder.add_node("exec_tool_node",         node_exec_tool)
@@ -63,9 +71,11 @@ def get_compiled_graph():
         interrupt_before=["exec_tool_node"],
     )
     
-    logger.info("✅ Grafo LangGraph compilado e pronto.")
+    logger.info("✅ Grafo LangGraph compilado e guardado na memória (Singleton)!")
+    
+    # 4. Guardamos o grafo na variável global para o hub.py poder usar
+    _compiled_graph = graph
     return graph
-
 
 def _criar_redis_saver():
     try:
@@ -73,10 +83,9 @@ def _criar_redis_saver():
         from src.infrastructure.settings import settings
         return RedisSaver.from_conn_string(settings.REDIS_URL)
     except ImportError:
-        logger.warning("⚠️ langgraph[redis] não instalado. Usando MemorySaver para testes.")
+        logger.warning("⚠️ langgraph[redis] não instalado. Usando MemorySaver.")
         from langgraph.checkpoint.memory import MemorySaver
         return MemorySaver()
-
 
 def get_graph_config(thread_id: str) -> dict:
     return {"configurable": {"thread_id": thread_id}}

@@ -1,18 +1,53 @@
 """
-src/main.py — v4 (Prometheus metrics + RAG Admin + Langfuse flush)
-==================================================================
+src/main.py — v4 (LangGraph + Roteamento Duplo [Semântico+Pydantic] + FastAPI)
+================================================================================
 """
 from __future__ import annotations
 
 import logging
 import os
+import traceback
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
+
+# =================================================================
+# VARIÁVEL GLOBAL DO SEU AGENTE (O cérebro do LangGraph)
+# =================================================================
+oraculo_graph = None 
+
+def inicializar_dependencias():
+    """Configura o Roteador Mestre e compila o LangGraph."""
+    print("⚙️ [STARTUP] Inicializando dependências do LangGraph...")
+    
+    from src.infrastructure.redis_client import get_redis
+    from src.rag.embeddings import get_embeddings
+    from src.application.graph.builder import compilar_grafo
+    
+    # --- IMPORTS FLEXÍVEIS (Evita quebrar se a pasta mudou) ---
+    from src.domain.services.semantic_router import SemanticRouterService
+
+        
+    from src.rag.query.pydantic_router import PydanticRouter
+    from src.domain.services.oraculo_router import OraculoRouterService
+    
+    redis_client = get_redis()
+    embeddings = get_embeddings()
+    
+    print("⚙️ [STARTUP] Instanciando a 1ª e 2ª Linhas de Roteamento...")
+    semantic_router = SemanticRouterService(redis_client, embeddings)
+    pydantic_router = PydanticRouter()
+    
+    print("⚙️ [STARTUP] Criando o Orquestrador Mestre...")
+    oraculo_router = OraculoRouterService(semantic_router, pydantic_router)
+    
+    print("⚙️ [STARTUP] Compilando o Grafo LangGraph...")
+    global oraculo_graph
+    oraculo_graph = compilar_grafo(oraculo_router)
+    print("✅ [STARTUP] Grafo compilado e injetado com sucesso!")
 
 
 def create_app() -> FastAPI:
@@ -26,17 +61,12 @@ def create_app() -> FastAPI:
         redoc_url   = None,
     )
 
-    # ── Prometheus metrics endpoint ───────────────────────────────────────────
     from src.infrastructure.observability.metrics import setup_metrics
     setup_metrics(app)
 
-    # ── Arquivos estáticos ────────────────────────────────────────────────────
     _montar_static(app)
-
-    # ── Routers ───────────────────────────────────────────────────────────────
     _registrar_routers(app)
 
-    # ── Eventos ───────────────────────────────────────────────────────────────
     @app.on_event("startup")
     async def startup():
         await _startup(settings)
@@ -69,16 +99,14 @@ def _montar_static(app: FastAPI) -> None:
 
 
 def _registrar_routers(app: FastAPI) -> None:
-    from src.api.webhook  import router as webhook_router
-    from src.api.hub      import router as hub_router
+    from src.api.hub       import router as hub_router
     from src.api.admin_api import router as admin_api_router
     from src.api.rag_admin import router as rag_admin_router
     from src.api import monitor
 
     app.include_router(hub_router)
     app.include_router(admin_api_router)
-    app.include_router(rag_admin_router)  # ← RAG admin com auth JWT
-    app.include_router(webhook_router, prefix="/api/v1", tags=["Webhook"])
+    app.include_router(rag_admin_router)
     app.include_router(monitor.router, prefix="/monitor")
 
     try:
@@ -99,28 +127,33 @@ async def _startup(settings) -> None:
 
     logger.info("🚀 Oráculo UEMA v4.0 iniciando...")
 
-    erros = settings.validar_producao()
-    for e in erros:
-        if settings.DEV_MODE:
-            logger.warning("⚠️  [DEV] %s", e)
-        else:
-            logger.error("❌ [PROD] %s", e)
-
-    # Redis
+    # 1. Inicializa o Redis Indices
     try:
         from src.infrastructure.redis_client import inicializar_indices
         inicializar_indices()
     except Exception as e:
         logger.error("❌ Redis offline: %s", e)
 
-    # RAG chunks metric inicial
+    # 2. Inicializa RAG Metrics
     try:
         from src.infrastructure.observability.metrics import update_rag_chunks
         update_rag_chunks()
     except Exception:
         pass
 
-    # Evolution API
+    # 3. CHAMA NOSSA NOVA FUNÇÃO DO LANGGRAPH AQUI!
+    # Nota: Removi o try...except que "engolia" o erro. Se quebrar, vamos ver na hora.
+    try:
+        inicializar_dependencias()
+    except Exception as e:
+        print("\n" + "="*60)
+        print("🚨 ERRO CRÍTICO AO COMPILAR O CÉREBRO DO ORÁCULO 🚨")
+        traceback.print_exc()
+        print("="*60 + "\n")
+        # Forçamos a queda do FastAPI, pois não adianta subir a API com o bot quebrado.
+        raise RuntimeError("Falha no LangGraph. Veja o terminal acima para os detalhes exatos.") from e
+
+    # 4. Evolution API
     try:
         from src.services.evolution_service import EvolutionService
         await EvolutionService().inicializar()
@@ -131,12 +164,10 @@ async def _startup(settings) -> None:
 
 
 def _shutdown() -> None:
-    """Flush Langfuse antes de encerrar."""
     try:
         from src.infrastructure.observability.langfuse_client import flush_langfuse
         flush_langfuse()
     except Exception:
         pass
-
 
 app = create_app()
