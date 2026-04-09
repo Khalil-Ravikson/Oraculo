@@ -1,0 +1,19 @@
+# observability/alert_rules.yml
+groups:
+  - name: oraculo_alerts
+    rules:
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis offline"
+
+      - alert: HighTokenUsage
+        expr: increase(oraculo_tokens_total[5m]) > 10000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Uso de tokens acima do esperado"

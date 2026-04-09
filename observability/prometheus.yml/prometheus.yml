@@ -1,0 +1,24 @@
+# observability/prometheus.yml
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert_rules.yml"
+
+scrape_configs:
+  # Métricas do Redis via redis_exporter
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis_exporter:9121"]
+
+  # Métricas da API FastAPI (via endpoint /metrics que criaremos)
+  - job_name: "oraculo_api"
+    static_configs:
+      - targets: ["api:9000"]
+    metrics_path: "/metrics"
+
+  # Prometheus si mesmo
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
