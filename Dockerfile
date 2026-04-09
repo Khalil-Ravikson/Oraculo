@@ -49,7 +49,8 @@ COPY --chown=oraculo:oraculo dados/  ./dados/
 COPY --chown=oraculo:oraculo templates/ ./templates/
 COPY --chown=oraculo:oraculo static/    ./static/
 COPY --chown=oraculo:oraculo alembic.ini ./
-COPY --chown=oraculo:oraculo alembic/    ./alembic/
+COPY --chown=oraculo:oraculo migrations/ ./migrations/
+# COPY --chown=oraculo:oraculo alembic/    ./alembic/
 
 USER oraculo
 EXPOSE 9000

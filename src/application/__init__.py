@@ -1,0 +1,1 @@
+from src.application.tasks import tasks_notificacao

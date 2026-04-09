@@ -13,7 +13,7 @@ from alembic import context
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 # 2. Importa nossa configuração blindada e nossos modelos
-from src.infrastructure.settings import config as app_config
+from src.infrastructure.settings import settings as app_config
 from src.infrastructure.database.models import Base
 
 config = context.config
@@ -26,7 +26,7 @@ target_metadata = Base.metadata
 # --- A BLINDAGEM MÁXIMA ---
 # Lemos a URL diretamente do nosso sistema de settings (pydantic),
 # ignorando completamente o que estiver escrito no alembic.ini
-DATABASE_URL = app_config.database_url
+DATABASE_URL = app_config.DATABASE_URL
 
 def run_migrations_offline() -> None:
     # Usa a nossa URL blindada

@@ -250,7 +250,7 @@ services:
   #   6. docker-compose restart api worker
   #
   langfuse:
-    image: langfuse/langfuse:3
+    image: langfuse/langfuse:2
     container_name: oraculo_langfuse
     <<: [*restart, *logging]
     ports:
