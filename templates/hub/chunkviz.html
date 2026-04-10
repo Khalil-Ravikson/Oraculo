@@ -1,0 +1,204 @@
+{% extends "hub/_base.html" %}
+
+{% block title %}ChunkViz — Oráculo UEMA{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/hub/chunkviz.css">
+{% endblock %}
+
+{% block content %}
+<header>
+  <div class="logo">
+    <div class="logo-icon" style="font-size:20px">🧩</div>
+    <div class="logo-text">
+      <h1>ChunkViz</h1>
+      <span>VISUALIZADOR INTERATIVO DE INGESTÃO</span>
+    </div>
+  </div>
+  <div class="header-right" style="display:flex;align-items:center;gap:12px">
+    <span id="cv-badge" class="cv-badge">Aguardando</span>
+    <a href="/hub/" style="color:var(--accent,#ff6b35);text-decoration:none;border:1px solid currentColor;padding:4px 12px;font-family:monospace;font-size:11px;border-radius:4px">← Hub</a>
+  </div>
+</header>
+
+<div class="cv-root">
+
+  <!-- ═══ LEFT: SOURCE PANEL ═══════════════════════════════════ -->
+  <aside class="cv-sidebar">
+
+    <div class="cv-tabs">
+      <button class="cv-tab active" data-src="file"  onclick="CV.setSource('file')">📄 Arquivo</button>
+      <button class="cv-tab"        data-src="text"  onclick="CV.setSource('text')">✏️ Texto</button>
+      <button class="cv-tab"        data-src="url"   onclick="CV.setSource('url')">🌐 URL</button>
+    </div>
+
+    <!-- ── FILE PANEL ── -->
+    <div class="cv-panel" id="cv-panel-file">
+      <div class="cv-dropzone" id="cv-dz"
+           ondragover="CV.dzOver(event)" ondragleave="CV.dzLeave(event)"
+           ondrop="CV.dzDrop(event)"
+           onclick="document.getElementById('cv-fi').click()">
+        <div style="font-size:28px;margin-bottom:6px">📁</div>
+        <div class="cv-dz-title">Arraste ou clique para enviar</div>
+        <div class="cv-dz-sub">PDF · DOCX · TXT · MD · CSV · HTML — máx. 50 MB</div>
+      </div>
+      <input id="cv-fi" type="file"
+             accept=".pdf,.docx,.txt,.md,.csv,.html,.htm" hidden
+             onchange="CV.fileSelected(event)">
+
+      <div id="cv-fileinfo" style="display:none" class="cv-fileinfo">
+        <div class="cv-row">
+          <span id="cv-fname" class="cv-fname">–</span>
+          <span id="cv-fmeta" class="cv-fmeta">–</span>
+        </div>
+
+        <label class="cv-lbl">Parser</label>
+        <select id="cv-parser" class="cv-sel" onchange="CV.parserChanged()">
+          <option value="auto">🤖  Auto-detect</option>
+          <option value="pymupdf">⚡  PyMuPDF (rápido)</option>
+          <option value="marker">🧠  Marker (ML / tabelas)</option>
+          <option value="docling">📊  Docling IBM (layout)</option>
+          <option value="txt">📝  Texto puro</option>
+        </select>
+        <div id="cv-parserhint" class="cv-hint">Detecta automaticamente pelo formato</div>
+
+        <div id="cv-pagenav" style="display:none" class="cv-pagenav">
+          <button class="cv-pgbtn" onclick="CV.prevPage()" title="Anterior">‹</button>
+          <span>Pág.</span>
+          <strong id="cv-pgcur">1</strong>
+          <span>/</span>
+          <span id="cv-pgtot">?</span>
+          <button class="cv-pgbtn" onclick="CV.nextPage()" title="Próxima">›</button>
+          <button class="cv-pgbtn" style="margin-left:auto;font-size:9px;padding:0 6px"
+                  onclick="CV.loadFullDoc()" title="Chunkar documento inteiro">ALL</button>
+        </div>
+
+        <div id="cv-pgstrip" class="cv-pgstrip"></div>
+      </div>
+    </div>
+
+    <!-- ── TEXT PANEL ── -->
+    <div class="cv-panel" id="cv-panel-text" style="display:none">
+      <textarea id="cv-textarea" class="cv-textarea"
+                placeholder="Cole o texto aqui…"
+                oninput="CV.textChanged()"></textarea>
+      <div id="cv-textmeta" class="cv-hint" style="text-align:right">0 chars</div>
+    </div>
+
+    <!-- ── URL PANEL ── -->
+    <div class="cv-panel" id="cv-panel-url" style="display:none">
+      <input id="cv-urlinput" class="cv-input"
+             placeholder="https://ctic.uema.br/wiki/doku.php?id=start"
+             onkeydown="if(event.key==='Enter')CV.fetchUrl()">
+      <button class="cv-btn cv-btn-accent" style="width:100%;margin-top:8px"
+              onclick="CV.fetchUrl()">🌐 Fazer Scraping</button>
+      <div id="cv-urlmeta" class="cv-hint" style="margin-top:8px"></div>
+    </div>
+
+    <!-- source stats footer -->
+    <div id="cv-srcstats" class="cv-srcstats" style="display:none">
+      <span id="cv-src-chars">–</span> chars ·
+      <span id="cv-src-words">–</span> palavras
+    </div>
+
+  </aside>
+
+  <!-- ═══ MAIN PANEL ════════════════════════════════════════════ -->
+  <main class="cv-main">
+
+    <!-- ── SETTINGS BAR ── -->
+    <div class="cv-settingsbar">
+
+      <div class="cv-ctrl">
+        <label class="cv-lbl">Estratégia</label>
+        <select id="cv-strategy" class="cv-sel" onchange="CV.settingChanged()">
+          <option value="recursive">🔄 Recursive</option>
+          <option value="markdown">📑 Markdown</option>
+        </select>
+      </div>
+
+      <div class="cv-ctrl">
+        <label class="cv-lbl">Tipo de Doc</label>
+        <select id="cv-doctype" class="cv-sel" onchange="CV.settingChanged()">
+          <option value="geral">Geral</option>
+          <option value="calendario">Calendário</option>
+          <option value="edital">Edital</option>
+          <option value="contatos">Contatos</option>
+          <option value="wiki_ctic">Wiki CTIC</option>
+        </select>
+      </div>
+
+      <div class="cv-ctrl cv-ctrl-slider">
+        <label class="cv-lbl">
+          Tamanho <strong id="cv-sizeval" class="cv-slval">400</strong>
+        </label>
+        <input id="cv-size" type="range" min="50" max="2000" step="50" value="400"
+               oninput="CV.sizeChanged(this.value)">
+        <div class="cv-slrange"><span>50</span><span>2000</span></div>
+      </div>
+
+      <div class="cv-ctrl cv-ctrl-slider">
+        <label class="cv-lbl">
+          Overlap <strong id="cv-ovlapval" class="cv-slval">60</strong>
+        </label>
+        <input id="cv-overlap" type="range" min="0" max="500" step="10" value="60"
+               oninput="CV.overlapChanged(this.value)">
+        <div class="cv-slrange"><span>0</span><span>500</span></div>
+      </div>
+
+      <div class="cv-ctrl" style="justify-content:flex-end">
+        <button id="cv-bsim" class="cv-btn cv-btn-accent"
+                onclick="CV.simulate()">▶ Simular</button>
+      </div>
+
+    </div>
+
+    <!-- ── STATS BAR (after simulation) ── -->
+    <div id="cv-statsbar" class="cv-statsbar" style="display:none">
+      <div class="cv-stat"><span id="sv-total" class="cv-sv">–</span><span class="cv-sl">chunks</span></div>
+      <div class="cv-stat"><span id="sv-avg"   class="cv-sv">–</span><span class="cv-sl">chars/chunk</span></div>
+      <div class="cv-stat"><span id="sv-min"   class="cv-sv">–</span><span class="cv-sl">mín</span></div>
+      <div class="cv-stat"><span id="sv-max"   class="cv-sv">–</span><span class="cv-sl">máx</span></div>
+      <div class="cv-stat"><span id="sv-ovlp"  class="cv-sv">–</span><span class="cv-sl">overlaps</span></div>
+      <div class="cv-statactions">
+        <button id="cv-vtext"  class="cv-vbtn active"  onclick="CV.setView('text')">¶ Texto</button>
+        <button id="cv-vcards" class="cv-vbtn"          onclick="CV.setView('cards')">▦ Cards</button>
+        <button id="cv-bingest" class="cv-btn cv-btn-ingest"
+                style="display:none" onclick="CV.ingest()">💾 Ingerir ao Redis</button>
+      </div>
+    </div>
+
+    <!-- ── VISUALIZATION AREA ── -->
+    <div class="cv-vizarea" id="cv-vizarea">
+
+      <div id="cv-empty" class="cv-empty">
+        <div style="font-size:40px;opacity:.4">🧩</div>
+        <div>Carregue um arquivo, cole texto ou informe uma URL<br>e clique em <strong>Simular</strong></div>
+      </div>
+
+      <!-- TEXT VIEW -->
+      <div id="cv-textview" style="display:none" class="cv-textview">
+        <div id="cv-textcontent" class="cv-textcontent"></div>
+        <div id="cv-legend"      class="cv-legend"></div>
+      </div>
+
+      <!-- CARDS VIEW -->
+      <div id="cv-cardsview" style="display:none">
+        <div id="cv-cardsgrid" class="cv-cardsgrid"></div>
+      </div>
+
+    </div>
+
+    <!-- ── INGEST PROGRESS ── -->
+    <div id="cv-ingprog" class="cv-ingprog" style="display:none">
+      <div class="cv-progbar"><div id="cv-progfill" class="cv-progfill" style="width:0%"></div></div>
+      <div id="cv-proglbl" class="cv-hint">Iniciando...</div>
+    </div>
+
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/hub/chunkviz.js"></script>
+{% endblock %}

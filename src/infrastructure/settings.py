@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # ── LLM ──────────────────────────────────────────────────────
     GEMINI_API_KEY:    str   = ""
-    GEMINI_MODEL:      str   = "gemini-2.0-flash-lite"
+    GEMINI_MODEL:      str   = "gemini-2.5-flash-lite"
     GEMINI_TEMP:       float = 0.2
     GEMINI_MAX_TOKENS: int   = 1024
 

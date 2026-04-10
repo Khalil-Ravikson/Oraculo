@@ -43,7 +43,7 @@ def _is_retryable(exc: BaseException) -> bool:
 
 
 class GeminiProvider(ILLMProvider):
-    MODELO_PRIMARIO = "gemini-2.0-flash-lite"
+    MODELO_PRIMARIO = "gemini-3.1-flash-lite-preview"
 
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
@@ -94,7 +94,7 @@ class GeminiProvider(ILLMProvider):
         )
 
     # ── Sprint 1: @observe_llm injetado aqui ──────────────────────────────────
-    @observe_llm(name="gemini_gerar_resposta", capture_input=True, capture_output=True)
+    #@observe_llm(name="gemini_gerar_resposta", capture_input=True, capture_output=True)
     async def gerar_resposta_async(
         self,
         prompt: str,
@@ -120,7 +120,7 @@ class GeminiProvider(ILLMProvider):
             )
 
     # ── Sprint 1: @observe_llm injetado aqui ──────────────────────────────────
-    @observe_llm(name="gemini_estruturado", capture_input=True, capture_output=False)
+    #@observe_llm(name="gemini_estruturado", capture_input=True, capture_output=False)
     async def gerar_resposta_estruturada_async(
         self,
         prompt: str,

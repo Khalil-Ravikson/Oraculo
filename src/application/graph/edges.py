@@ -115,3 +115,13 @@ def route_after_hitl(state: dict) -> Literal["tool_node", "respond_node"]:
     if state.get("confirmation_result") == "confirmed":
         return "tool_node"
     return "respond_node"    
+
+def route_after_grade(state: OracleState) -> Literal["generate_node", "rewrite_query_node"]:
+    """
+    Aresta central do loop CRAG.
+    relevance = "yes" → gera resposta
+    relevance = "no"  → reescreve query e busca de novo
+    """
+    if state.get("relevance", "yes") == "no":
+        return "rewrite_query_node"
+    return "generate_node"

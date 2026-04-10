@@ -1,11 +1,10 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from src.application.graph.state import OracleState
 from src.domain.tools.tool_registry import ToolRegistry
-
+"""
 def agent_node(state: OracleState, tool_registry: ToolRegistry):
-    """
-    O Cérebro: Decide qual ferramenta usar baseada no histórico e role.
-    """
+
+
     # 1. Instancia o modelo (pode vir de settings)
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
     
@@ -18,4 +17,18 @@ def agent_node(state: OracleState, tool_registry: ToolRegistry):
     response = llm_with_tools.invoke(state["messages"])
     
     # Retornamos a mensagem do modelo para o estado
+    return {"messages": [response]}"""
+    
+    
+async def agent_node(state: OracleState, tool_registry: ToolRegistry): # Adicione async
+    llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
+    
+    role = state.get("user_role", "guest")
+    tools = tool_registry.get_tools_for_role(role)
+    
+    llm_with_tools = llm.bind_tools(tools)
+    
+    # MUDANÇA CRÍTICA: Use ainvoke com await
+    response = await llm_with_tools.ainvoke(state["messages"]) 
+    
     return {"messages": [response]}

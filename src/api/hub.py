@@ -346,3 +346,102 @@ async def users_data(request: Request, role: str = ""):
     from src.application.use_cases.get_users_list import GetUsersListUseCase
     users = await GetUsersListUseCase().executar(role)
     return {"users": users}
+
+
+# Adicionar em src/api/hub.py
+
+from pydantic import BaseModel
+
+class ChunkSimulateRequest(BaseModel):
+    text:          str
+    chunk_size:    int = 400
+    chunk_overlap: int = 60
+    strategy:      str = "recursive"  # "recursive" | "markdown" | "semantic"
+
+class ChunkResult(BaseModel):
+    index:      int
+    text:       str
+    start_char: int
+    end_char:   int
+    length:     int
+    is_overlap: bool  # True se este chunk começa dentro do overlap do anterior
+
+
+@router.post("/api/simulate-chunking")
+async def simulate_chunking(
+    request: Request,
+    body:    ChunkSimulateRequest,
+):
+    """
+    Simula o chunking sem salvar no banco.
+    Retorna lista com posições exatas para o frontend pintar os overlaps.
+    """
+    payload = _verificar_cookie(request)
+    if not payload:
+        return JSONResponse({"error": "Não autorizado"}, status_code=401)
+
+    if len(body.text) > 50_000:
+        return JSONResponse({"error": "Texto muito grande (máx 50.000 chars)"}, status_code=400)
+
+    try:
+        from src.rag.ingestion.chunker_factory import ChunkerFactory
+        chunker = ChunkerFactory.get(
+            body.strategy,
+            chunk_size=body.chunk_size,
+            overlap=body.chunk_overlap,
+        )
+        raw_chunks = chunker.chunk(body.text, source="preview", doc_type="geral")
+
+        # Calcula posições reais no texto original para o highlight
+        results    = []
+        prev_end   = 0
+
+        for i, chunk in enumerate(raw_chunks):
+            # Localiza o início do chunk no texto original
+            start = body.text.find(chunk.text[:50].strip(), max(0, prev_end - body.chunk_overlap))
+            if start == -1:
+                start = prev_end   # fallback
+            end       = start + len(chunk.text)
+            is_overlap= (i > 0) and (start < prev_end)
+
+            results.append({
+                "index":      i,
+                "text":       chunk.text,
+                "start_char": start,
+                "end_char":   end,
+                "length":     len(chunk.text),
+                "is_overlap": is_overlap,
+            })
+            prev_end = end
+
+        return JSONResponse({
+            "chunks":           results,
+            "total":            len(results),
+            "total_chars":      len(body.text),
+            "avg_chunk_size":   int(sum(r["length"] for r in results) / max(len(results), 1)),
+            "strategy_used":    body.strategy,
+        })
+
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.exception("❌ simulate-chunking: %s", e)
+        return JSONResponse({"error": "Erro interno"}, status_code=500)
+    
+    
+@router.get("/chunkviz", response_class=HTMLResponse)
+async def chunkviz_page(request: Request):
+    """Serve a página HTML do Simulador."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="hub/chunkviz.html", # Verifique se o arquivo está nesta pasta
+        context={
+            "request": request, 
+            "username": payload.sub,
+            "modelo": settings.GEMINI_MODEL
+        },
+    )

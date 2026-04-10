@@ -1,76 +1,99 @@
-# src/domain/services/oraculo_router.py
+"""
+src/domain/services/oraculo_router.py
+======================================
+
+CORREÇÃO RISCOS 2 E 3:
+  Risco 2: SemanticRouterService.rotear() é síncrono → bloqueava o event loop.
+  Risco 3: PydanticRouter.rotear()       é síncrono → await direto gerava TypeError.
+
+SOLUÇÃO: asyncio.to_thread() envolve ambas as chamadas síncronas,
+movendo-as para o thread pool do Python sem bloquear o event loop
+do FastAPI/LangGraph/Celery.
+"""
+from __future__ import annotations
+
+import asyncio
 import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+_NODE_MAP = {
+    "CALENDARIO": "rag_node",
+    "EDITAL":     "rag_node",
+    "CONTATOS":   "rag_node",
+    "WIKI":       "rag_node",
+    "CRUD":       "crud_node",
+    "GREETING":   "greeting_node",
+    "GERAL":      "rag_node",
+}
+
+
 class OraculoRouterService:
+    """
+    Cascata assíncrona em 3 camadas.
+    Todos os roteadores síncronos são executados via asyncio.to_thread()
+    para não bloquear o event loop — fix definitivo dos Riscos 2 e 3.
+    """
+
     def __init__(self, semantic_router, pydantic_router):
-        """Recebe os dois roteadores como peças de montar."""
-        self.semantic = semantic_router
-        self.pydantic = pydantic_router
-        
-        # A SUA REGRA DE NEGÓCIO: O Threshold (Ponto de Corte)
-        self.limite_confianca = 0.85
+        self._semantic = semantic_router   # SemanticRouterService (sync)
+        self._pydantic = pydantic_router   # PydanticRouter        (sync)
+        self._knn_threshold = 0.85
 
-    def rotear(self, mensagem: str, contexto: dict, is_admin: bool = False) -> dict:
-        logger.info("🚦 OráculoRouter: Iniciando Roteamento em Cascata...")
+    async def rotear(
+        self,
+        mensagem: str,
+        contexto: dict,
+        is_admin: bool = False,
+    ) -> dict:
+        """
+        Roteia de forma totalmente assíncrona.
+        Retorna dict compatível com OracleState:
+          {"route": str, "crag_score": float, "_skip_cache": bool}
+        """
 
-        # =================================================================
-        # TENTATIVA 1: O Rápido (Semantic Router via Redis)
-        # =================================================================
+        # ── Camada 1: KNN Semântico (sync → thread pool) ──────────────────────
+        # FIX Risco 2: asyncio.to_thread evita bloqueio do event loop
         try:
-            res_semantico = self.semantic.rotear(mensagem, is_admin=is_admin)
-            
-            # AVALIA O SCORE: Se for maior que 0.85, confia e para por aqui!
-            if res_semantico.score >= self.limite_confianca:
-                logger.info("⚡ Sucesso na Tentativa 1! Rota Semântica: %s (Score: %.2f)", 
-                            res_semantico.route, res_semantico.score)
+            res = await asyncio.to_thread(
+                self._semantic.rotear,
+                mensagem,
+                is_admin=is_admin,
+            )
+            if res.score >= self._knn_threshold:
+                logger.debug("🚦 KNN: %s (%.3f)", res.route, res.score)
                 return {
-                    "route": res_semantico.route,
-                    "skip_cache": False
+                    "route":       res.route,
+                    "crag_score":  res.score,
+                    "_skip_cache": False,
                 }
-            else:
-                logger.debug("🤔 Tentativa 1 Falhou (Score %.2f < %.2f). Repassando para a IA...", 
-                             res_semantico.score, self.limite_confianca)
-                
+            logger.debug(
+                "🤔 KNN confiança baixa (%.3f < %.2f) → Pydantic Router",
+                res.score, self._knn_threshold,
+            )
         except Exception as e:
-            logger.warning("⚠️ Erro na Tentativa 1 (Semântico): %s", e)
+            logger.warning("⚠️  KNN Router falhou: %s", e)
 
-
-        # =================================================================
-        # TENTATIVA 2: O Inteligente (Pydantic Router via Gemini)
-        # =================================================================
+        # ── Camada 2: Pydantic/LLM Router (sync → thread pool) ────────────────
+        # FIX Risco 3: PydanticRouter.rotear() é sync — o await direto
+        # anterior causava TypeError. Agora usamos asyncio.to_thread().
         try:
-            res_pydantic = self.pydantic.rotear(mensagem, contexto_usuario=contexto)
-            
-            logger.info("🧠 Sucesso na Tentativa 2! A IA decidiu: %s (Motivo: %s)", 
-                        res_pydantic.decisao, res_pydantic.motivo)
-            
-            # Converte a decisão da IA para os NÓS do LangGraph
-            mapa_nós = {
-                "CALENDARIO": "rag_node",
-                "EDITAL": "rag_node",
-                "CONTATOS": "rag_node",
-                "WIKI": "rag_node",
-                "CRUD": "crud_node",
-                "GREETING": "greeting_node",
-                "GERAL": "rag_node"
-            }
-            
+            res = await asyncio.to_thread(
+                self._pydantic.rotear,
+                mensagem,
+                contexto_usuario=contexto,
+            )
+            route = _NODE_MAP.get(res.decisao, "rag_node")
+            logger.debug("🚦 Pydantic: %s → %s (%.3f)", res.decisao, route, res.confianca)
             return {
-                "route": mapa_nós.get(res_pydantic.decisao, "rag_node"),
-                "skip_cache": res_pydantic.skip_cache
+                "route":       route,
+                "crag_score":  res.confianca,
+                "_skip_cache": res.skip_cache,
             }
-            
         except Exception as e:
-            logger.error("❌ Erro na Tentativa 2 (Pydantic): %s", e)
+            logger.error("❌ Pydantic Router falhou: %s", e)
 
-
-        # =================================================================
-        # TENTATIVA 3: O Salva-Vidas (Fallback de Queda)
-        # =================================================================
-        logger.error("🚨 Todos os roteadores falharam (Redis e Gemini fora do ar?). Padrão RAG.")
-        return {
-            "route": "rag_node",
-            "skip_cache": True
-        }
+        # ── Fallback seguro ────────────────────────────────────────────────────
+        logger.warning("⚠️  Ambos os roteadores falharam — fallback rag_node")
+        return {"route": "rag_node", "crag_score": 0.0, "_skip_cache": True}

@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from src.domain.semantic_router import _busca_tool_semantica, Rota
+from src.domain.services.semantic_router import _busca_tool_semantica, Rota
 from src.domain.entities import EstadoMenu
 
 @patch('src.domain.semantic_router.get_redis')

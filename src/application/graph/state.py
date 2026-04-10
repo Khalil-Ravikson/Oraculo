@@ -1,12 +1,12 @@
 # src/application/graph/state.py
 from __future__ import annotations
-from typing import Annotated, Any, Literal, Optional
+from typing import Annotated, Literal, Optional
 from typing_extensions import TypedDict
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
 
 class OracleState(TypedDict):
-    # Identidade (imutável durante a conversa)
+    # ── Identidade (imutável por conversa) ───────────────────────────────────
     user_id:     str
     chat_id:     str
     user_name:   str
@@ -18,31 +18,34 @@ class OracleState(TypedDict):
     matricula:   Optional[str]
     centro:      Optional[str]
 
-    # Mensagem actual
+    # ── Mensagem atual ────────────────────────────────────────────────────────
     current_input: str
     has_media:     bool
 
-    # Histórico (gerido pelo LangGraph com reducer add_messages)
-    # NUNCA sobrescrever directamente — usar add_messages como reducer
+    # ── Histórico oficial (reducer do LangGraph — NUNCA sobrescrever) ─────────
     messages: Annotated[list[BaseMessage], add_messages]
 
-    # Roteamento
-    route:     str
-    tool_name: Optional[str]
-    tool_args: Optional[dict]
+    # ── Roteamento ────────────────────────────────────────────────────────────
+    route:         str
+    tool_name:     Optional[str]
+    tool_args:     Optional[dict]
 
-    # HITL
+    # ── Agentic RAG ───────────────────────────────────────────────────────────
+    rag_context:   Optional[str]   # contexto recuperado do Redis
+    crag_score:    float           # qualidade do retrieval (0.0–1.0)
+    relevance:     str             # "yes" | "no" (resultado do grade_documents)
+    loop_count:    int             # quantas vezes reescrevemos a query (máx 2)
+
+    # ── HITL ──────────────────────────────────────────────────────────────────
     pending_confirmation: Optional[str]
     confirmation_result:  Optional[str]  # "confirmed" | "cancelled" | "pending"
 
-    # Admin
+    # ── Admin ─────────────────────────────────────────────────────────────────
     admin_token_verified: bool
     admin_command:        Optional[str]
 
-    # Output
+    # ── Output final ──────────────────────────────────────────────────────────
     final_response: Optional[str]
-    rag_context:    Optional[str]
-    crag_score:     float
 
     @classmethod
     def from_identity(cls, identity: dict, messages: list | None = None) -> "OracleState":
@@ -63,11 +66,13 @@ class OracleState(TypedDict):
             "route":         "rag",
             "tool_name":     None,
             "tool_args":     None,
+            "rag_context":   None,
+            "crag_score":    0.0,
+            "relevance":     "yes",
+            "loop_count":    0,
             "pending_confirmation": None,
             "confirmation_result":  None,
             "admin_token_verified": False,
             "admin_command":        None,
             "final_response": None,
-            "rag_context":    None,
-            "crag_score":     0.0,
         }

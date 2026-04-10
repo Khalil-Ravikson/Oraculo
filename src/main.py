@@ -103,12 +103,12 @@ def _registrar_routers(app: FastAPI) -> None:
     from src.api.admin_api import router as admin_api_router
     from src.api.rag_admin import router as rag_admin_router
     from src.api import monitor
-
+    from src.api.chunkviz_api import router as chunkviz_router
     app.include_router(hub_router)
     app.include_router(admin_api_router)
     app.include_router(rag_admin_router)
     app.include_router(monitor.router, prefix="/monitor")
-
+    app.include_router(chunkviz_router)
     try:
         from src.infrastructure.settings import settings
         from src.api.eval_dashboard import router as eval_router
