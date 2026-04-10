@@ -1,5 +1,15 @@
+<<<<<<< HEAD
 # src/application/graph/nodes/core.py
 from __future__ import annotations
+=======
+"""
+src/application/graph/nodes/core.py — Padrão Ouro Agentic RAG
+========================================================================
+1. node_classify: O Porteiro (Decide a rota com Semantic Cache/Pydantic)
+2. node_retrieve: O Bibliotecário (Busca no Redis)
+3. node_generate: O Escritor (Gera a resposta final via Gemini)
+"""
+>>>>>>> 1e14e7272f9c6a542742690c81c043e2933aeba1
 import logging
 from functools import lru_cache
 from typing import TYPE_CHECKING
@@ -10,12 +20,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+<<<<<<< HEAD
 CRAG_THRESHOLD     = 0.30   # abaixo → relevance = "no"
 MAX_REWRITE_LOOPS  = 2       # evita loop infinito
 
 
 #@lru_cache(maxsize=1)
 def _get_llm():
+=======
+@lru_cache(maxsize=1)
+def _get_llm_provider():
+>>>>>>> 1e14e7272f9c6a542742690c81c043e2933aeba1
     from src.infrastructure.adapters.gemini_provider import GeminiProvider
     return GeminiProvider()
 
@@ -26,6 +41,7 @@ def _get_retriever():
     from src.infrastructure.adapters.redis_vector_adapter import RedisVectorAdapter
     return RetrieveContextUseCase(RedisVectorAdapter())
 
+<<<<<<< HEAD
 
 def _system_prompt() -> str:
     try:
@@ -35,6 +51,15 @@ def _system_prompt() -> str:
         if val:
             return val if isinstance(val, str) else val.decode()
         return SYSTEM_UEMA
+=======
+def _get_system_prompt() -> str:
+    try:
+        from src.infrastructure.redis_client import get_redis_text
+        from src.application.graph.prompts import SYSTEM_UEMA
+        custom = get_redis_text().get("admin:system_prompt")
+        if isinstance(custom, bytes): custom = custom.decode()
+        return custom or SYSTEM_UEMA
+>>>>>>> 1e14e7272f9c6a542742690c81c043e2933aeba1
     except Exception:
         from src.application.graph.prompts import SYSTEM_UEMA
         return SYSTEM_UEMA
@@ -42,6 +67,7 @@ def _system_prompt() -> str:
 
 class OraculoCoreNodes:
     """
+<<<<<<< HEAD
     Nós do Agentic RAG agrupados em classe para injeção limpa do router.
     Resolve o bug `'coroutine' object has no attribute 'get'` que ocorria
     com lambdas assíncronas nos nós do LangGraph.
@@ -191,8 +217,50 @@ class OraculoCoreNodes:
         return {
             "messages":   [HumanMessage(content=nova_query)],  # reducer acumula
             "loop_count": loop_count + 1,
-        }
+=======
+    Classe que agrupa os nós centrais. 
+    Resolve o bug do LangGraph ao permitir injeção de dependência nativa.
+    """
+    def __init__(self, oraculo_router):
+        self.oraculo_router = oraculo_router
 
+    async def node_classify(self, state: "OracleState") -> dict:
+        """O Porteiro Inteligente: Usa o OraculoRouter para decidir o caminho."""
+        msg = (state.get("current_input") or "").strip()
+        is_admin = state.get("is_admin", False)
+
+        # 1. Retomada HITL
+        pending = state.get("pending_confirmation")
+        conf_result = state.get("confirmation_result")
+        if pending and conf_result not in ("confirmed", "cancelled", "awaiting_token"):
+            msg_lower = msg.lower().strip()
+            if msg_lower in ("sim", "s", "yes", "y", "confirmo", "ok"):
+                return {"confirmation_result": "confirmed"}
+            elif msg_lower in ("não", "nao", "n", "no", "cancelar"):
+                return {"confirmation_result": "cancelled", "final_response": "❌ Operação cancelada.", "route": "respond_only"}
+            return {"final_response": f"{pending}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.", "route": "respond_only"}
+
+        # 2. Manutenção
+        try:
+            from src.infrastructure.redis_client import get_redis_text
+            maintenance = get_redis_text().get("admin:maintenance_mode")
+            if isinstance(maintenance, bytes): maintenance = maintenance.decode()
+            if maintenance == "1" and not is_admin:
+                return {"final_response": "🔧 *O Oráculo está em manutenção.*\nVoltarei em breve!", "route": "respond_only"}
+        except Exception:
+            pass
+
+        # 3. Roteamento (Aguarda a promessa nativamente)
+        contexto = {
+            "curso": state.get("curso"), "periodo": state.get("periodo"), "centro": state.get("centro"),
+>>>>>>> 1e14e7272f9c6a542742690c81c043e2933aeba1
+        }
+        resultado_dict = await self.oraculo_router.rotear(msg, contexto, is_admin)
+        
+        logger.info("🚦 Rota: '%s' | Score: %.2f", resultado_dict.get("route"), resultado_dict.get("crag_score", 0.0))
+        return resultado_dict
+
+<<<<<<< HEAD
     # ── NÓ 5: Generate ───────────────────────────────────────────────────────
 
     async def node_generate(self, state: "OracleState") -> dict:
@@ -244,3 +312,67 @@ class OraculoCoreNodes:
                 "messages": [AIMessage(content=resposta_padrao)],
                 "final_response": resposta_padrao,
             }
+=======
+    async def node_retrieve(self, state: "OracleState") -> dict:
+        """O Bibliotecário: Apenas busca documentos (Agentic RAG Parte 1)"""
+        msg = state.get("current_input", "")
+        route = state.get("route", "geral").upper()
+        
+        contexto_rag = ""
+        crag_score = 0.0
+        
+        try:
+            from src.rag.query.transformer import QueryTransformer
+            from src.rag.query.protocols import RawQuery, TransformedQuery
+            
+            qt_raw = RawQuery(text=msg, fatos_usuario=[])
+            transformer = QueryTransformer.build_for_route(route)
+            qt = transformer.transform(qt_raw)
+            
+            transformed = TransformedQuery(
+                original=qt.original, primary=qt.primary,
+                variants=getattr(qt, "variants", []), strategy_used=getattr(qt, "strategy_used", "passthrough")
+            )
+
+            retriever = _get_retriever()
+            resultado = await retriever.executar(transformed)
+
+            if resultado.encontrou:
+                contexto_rag = resultado.contexto_formatado
+                if resultado.chunks:
+                    scores = [c.rrf_score for c in resultado.chunks if c.rrf_score > 0]
+                    crag_score = sum(scores) / len(scores) if scores else 0.0
+                    
+        except Exception as e:
+            logger.warning("⚠️ Retrieve falhou: %s", e)
+
+        # Atualiza o estado com os documentos encontrados
+        return {"rag_context": contexto_rag, "crag_score": crag_score}
+
+    async def node_generate(self, state: "OracleState") -> dict:
+        """O Escritor: Apenas gera a resposta (Agentic RAG Parte 2)"""
+        from src.application.graph.prompts import montar_prompt_geracao
+        
+        msg = state.get("current_input", "")
+        contexto_rag = state.get("rag_context", "")
+        
+        user_ctx = state.get("user_context") or {}
+        curso = state.get("curso") or user_ctx.get("curso", "")
+        nome = state.get("user_name", "")
+        
+        perfil_str = f"Aluno: {nome} | Curso: {curso}" if nome or curso else ""
+
+        prompt_final = montar_prompt_geracao(pergunta=msg, contexto_rag=contexto_rag, perfil_usuario=perfil_str)
+        
+        try:
+            llm = _get_llm_provider()
+            resp = await llm.gerar_resposta_async(
+                prompt=prompt_final, system_instruction=_get_system_prompt(), temperatura=0.2
+            )
+            resposta_texto = resp.conteudo if resp.sucesso else "Desculpe, tive dificuldade em formular a resposta."
+        except Exception as e:
+            logger.exception("❌ Erro no Gemini: %s", e)
+            resposta_texto = "Estou tendo uma instabilidade técnica momentânea. Tente novamente."
+
+        return {"final_response": resposta_texto}
+>>>>>>> 1e14e7272f9c6a542742690c81c043e2933aeba1

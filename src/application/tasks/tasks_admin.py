@@ -14,7 +14,7 @@ from datetime import datetime
 
 import httpx
 
-from src.application.tasks import celery_app
+from src.infrastructure.celery_app import celery_app
 from src.infrastructure.redis_client import get_redis_text
 from src.infrastructure.settings import settings
 
