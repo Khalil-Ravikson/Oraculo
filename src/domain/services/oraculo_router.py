@@ -14,11 +14,29 @@ from __future__ import annotations
 
 import asyncio
 import logging
-<<<<<<< HEAD
 from dataclasses import dataclass
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+# --- Modelos de Dados ---
+class RoutingDecision(BaseModel):
+    decisao: str
+    confianca: float
+    motivo: str
+    intencao_crud: bool
+    skip_cache: bool = False
+
+@dataclass
+class RouterResult:
+    route: str
+    confianca: float
+    metodo: str
+    motivo: str
+    score: float = 0.0
+    skip_cache: bool = False
+
+# --- Mapeamento de Rotas ---
 _NODE_MAP = {
     "CALENDARIO": "rag_node",
     "EDITAL":     "rag_node",
@@ -29,29 +47,6 @@ _NODE_MAP = {
     "GERAL":      "rag_node",
 }
 
-=======
-import struct
-import json
-from dataclasses import dataclass
-from pydantic import BaseModel, Field
-
-logger = logging.getLogger(__name__)
-
-class RoutingDecision(BaseModel):
-    decisao: str
-    confianca: float
-    motivo: str
-    intencao_crud: bool
-
-@dataclass
-class RouterResult:
-    route: str
-    confianca: float
-    metodo: str
-    motivo: str
-    skip_cache: bool = False
->>>>>>> 1e14e7272f9c6a542742690c81c043e2933aeba1
-
 class OraculoRouterService:
     """
     Cascata assíncrona em 3 camadas.
@@ -60,7 +55,6 @@ class OraculoRouterService:
     """
 
     def __init__(self, semantic_router, pydantic_router):
-<<<<<<< HEAD
         self._semantic = semantic_router   # SemanticRouterService (sync)
         self._pydantic = pydantic_router   # PydanticRouter        (sync)
         self._knn_threshold = 0.85
@@ -78,30 +72,31 @@ class OraculoRouterService:
         """
 
         # ── Camada 1: KNN Semântico (sync → thread pool) ──────────────────────
-        # FIX Risco 2: asyncio.to_thread evita bloqueio do event loop
         try:
             res = await asyncio.to_thread(
                 self._semantic.rotear,
                 mensagem,
                 is_admin=is_admin,
             )
-            if res.score >= self._knn_threshold:
-                logger.debug("🚦 KNN: %s (%.3f)", res.route, res.score)
+            
+            # Suporta tanto `.score` quanto `.confianca` dependendo do retorno real
+            score_semantico = getattr(res, 'score', getattr(res, 'confianca', 0.0))
+            
+            if score_semantico >= self._knn_threshold:
+                logger.info("🚦 KNN: %s (%.3f)", res.route, score_semantico)
                 return {
                     "route":       res.route,
-                    "crag_score":  res.score,
+                    "crag_score":  score_semantico,
                     "_skip_cache": False,
                 }
             logger.debug(
                 "🤔 KNN confiança baixa (%.3f < %.2f) → Pydantic Router",
-                res.score, self._knn_threshold,
+                score_semantico, self._knn_threshold,
             )
         except Exception as e:
             logger.warning("⚠️  KNN Router falhou: %s", e)
 
         # ── Camada 2: Pydantic/LLM Router (sync → thread pool) ────────────────
-        # FIX Risco 3: PydanticRouter.rotear() é sync — o await direto
-        # anterior causava TypeError. Agora usamos asyncio.to_thread().
         try:
             res = await asyncio.to_thread(
                 self._pydantic.rotear,
@@ -109,60 +104,18 @@ class OraculoRouterService:
                 contexto_usuario=contexto,
             )
             route = _NODE_MAP.get(res.decisao, "rag_node")
-            logger.debug("🚦 Pydantic: %s → %s (%.3f)", res.decisao, route, res.confianca)
+            logger.info("🚦 Pydantic: %s → %s (%.3f)", res.decisao, route, res.confianca)
+            
+            skip_cache = getattr(res, 'skip_cache', False)
+            
             return {
                 "route":       route,
                 "crag_score":  res.confianca,
-                "_skip_cache": res.skip_cache,
+                "_skip_cache": skip_cache,
             }
         except Exception as e:
             logger.error("❌ Pydantic Router falhou: %s", e)
 
         # ── Fallback seguro ────────────────────────────────────────────────────
         logger.warning("⚠️  Ambos os roteadores falharam — fallback rag_node")
-=======
-        self.semantic = semantic_router
-        self.pydantic = pydantic_router
-        self.limite_confianca = 0.85
-
-    async def rotear(self, mensagem: str, contexto: dict, is_admin: bool = False) -> dict:
-        """
-        Orquestrador assíncrono em cascata.
-        Retorna um dicionário pronto para o LangGraph.
-        """
-        # --- TENTATIVA 1: Semantic Router (Rápido) ---
-        try:
-            # Assumindo que seu semantic_router.rotear é síncrono (CPU bound)
-            res_semantico = self.semantic.rotear(mensagem, is_admin=is_admin)
-            
-            if res_semantico.score >= self.limite_confianca:
-                return {
-                    "route": res_semantico.route,
-                    "crag_score": res_semantico.score,
-                    "_skip_cache": False
-                }
-        except Exception as e:
-            logger.warning("⚠️ Erro no roteador semântico: %s", e)
-
-        # --- TENTATIVA 2: Pydantic Router (Inteligente/Async) ---
-        try:
-            # Chamamos o rotear do PydanticRouter (que é async internamente)
-            res_pydantic = await self.pydantic.rotear(mensagem, contexto_usuario=contexto)
-            
-            mapa_nós = {
-                "CALENDARIO": "rag_node", "EDITAL": "rag_node", 
-                "CONTATOS": "rag_node", "WIKI": "rag_node", 
-                "CRUD": "crud_node", "GREETING": "greeting_node", "GERAL": "rag_node"
-            }
-            
-            return {
-                "route": mapa_nós.get(res_pydantic.decisao, "rag_node"),
-                "crag_score": res_pydantic.confianca,
-                "_skip_cache": res_pydantic.skip_cache
-            }
-        except Exception as e:
-            logger.error("❌ Erro no roteador Pydantic: %s", e)
-
-        # --- FALLBACK FINAL ---
->>>>>>> 1e14e7272f9c6a542742690c81c043e2933aeba1
         return {"route": "rag_node", "crag_score": 0.0, "_skip_cache": True}
