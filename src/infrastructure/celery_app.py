@@ -44,7 +44,7 @@ celery_app.conf.update(
     # ── Tasks ─────────────────────────────────────────────────────────────────
     include = [
         "src.application.tasks",
-        "src.application.tasks.tasks_notificacao",
+        'src.application.tasks.ingestion_tasks', # <--- ADICIONE ESTA LINHA!
         "src.application.tasks.tasks_admin",
     ],
 
@@ -74,8 +74,7 @@ celery_app.conf.update(
     task_default_queue = "default",
     task_routes = {
         "processar_mensagem":           {"queue": "default"},
-        "verificar_e_notificar_prazos": {"queue": "notificacoes"},
-        "notificar_evento_especifico":  {"queue": "notificacoes"},
+
         "ingerir_documento_whatsapp":   {"queue": "admin"},
         "executar_comando_admin":       {"queue": "admin"},
         "stream_recovery":              {"queue": "default"},
@@ -86,7 +85,7 @@ celery_app.conf.update(
 )
 celery_app.autodiscover_tasks([
     'src.application.tasks.tasks_admin',
-    'src.application.tasks.tasks_notificacao',
+    'src.application.tasks.ingestion_tasks', # <--- ADICIONE ESTA LINHA!
     'src.application.tasks.process_message_task'
 ])
 logger = logging.getLogger(__name__)
