@@ -201,6 +201,7 @@
 .cv-slval { color: var(--cv-acc); }
 input[type=range].cv-sel {
   -webkit-appearance: none;
+  appearance: none;
   height: 4px;
   background: var(--cv-brd);
   border-radius: 2px;
@@ -210,6 +211,7 @@ input[type=range].cv-sel {
 }
 input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none;
+  appearance: none;
   width: 13px; height: 13px;
   background: var(--cv-acc);
   border-radius: 50%;

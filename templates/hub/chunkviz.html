@@ -34,6 +34,19 @@
 
     <!-- ── FILE PANEL ── -->
     <div class="cv-panel" id="cv-panel-file">
+      
+      <div style="margin-bottom: 8px;">
+        <label class="cv-lbl">Extrator de PDF</label>
+        <select id="cv-parser" class="cv-sel" onchange="CV.parserChanged()">
+          <option value="pymupdf" selected>⚡  PyMuPDF (Rápido / Recomendado)</option>
+          <option value="auto">🤖  Auto-detect</option>
+          <option value="marker">🧠  Marker (ML / tabelas - Requer GPU)</option>
+          <option value="docling">📊  Docling IBM (layout)</option>
+          <option value="txt">📝  Texto puro</option>
+        </select>
+        <div id="cv-parserhint" class="cv-hint" style="margin-top: 4px;">Rápido — ideal para PDFs com texto nativo</div>
+      </div>
+
       <div class="cv-dropzone" id="cv-dz"
            ondragover="CV.dzOver(event)" ondragleave="CV.dzLeave(event)"
            ondrop="CV.dzDrop(event)"
@@ -51,16 +64,6 @@
           <span id="cv-fname" class="cv-fname">–</span>
           <span id="cv-fmeta" class="cv-fmeta">–</span>
         </div>
-
-        <label class="cv-lbl">Parser</label>
-        <select id="cv-parser" class="cv-sel" onchange="CV.parserChanged()">
-          <option value="auto">🤖  Auto-detect</option>
-          <option value="pymupdf">⚡  PyMuPDF (rápido)</option>
-          <option value="marker">🧠  Marker (ML / tabelas)</option>
-          <option value="docling">📊  Docling IBM (layout)</option>
-          <option value="txt">📝  Texto puro</option>
-        </select>
-        <div id="cv-parserhint" class="cv-hint">Detecta automaticamente pelo formato</div>
 
         <div id="cv-pagenav" style="display:none" class="cv-pagenav">
           <button class="cv-pgbtn" onclick="CV.prevPage()" title="Anterior">‹</button>

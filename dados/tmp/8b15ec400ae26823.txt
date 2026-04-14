@@ -1,0 +1,75 @@
+## Tabela de conteúdos
+
+SIGUEMA Ferramentas do Office 365 Libre Office Arquivos Importantes Dúvidas Recorrentes Acompanhe a CTIC nas Redes Sociais Fale com a CTIC
+
+Ferramentas do Office 365
+
+Arquivos Importantes
+
+Dúvidas Recorrentes
+
+Acompanhe a CTIC nas Redes Sociais
+
+A Universidade Estadual do Maranhão, por meio de seu Núcleo de Tecnologias da Informação, realizou nos dois primeiros meses do ano de 2015, levantamento da sua necessidade de sistemas de informação. Tal esforço foi demandado pela nova administração da instituição, seguindo a diretriz de “Aperfeiçoar a gestão administrativa e a gestão acadêmica, com maior profissionalização, descentralização e participação” e na perspectiva de potencializar a Gestão das unidades utilizadoras desses sistemas. A partir desse levantamento, foi elaborada uma proposta de reformulação dos sistemas institucionais, o que gerou a contratação de uma empresa especializada em sistemas para administração de universidades públicas.
+
+Em busca de soluções que atendam a necessidade da instituição verificou-se que um Sistema Integrado de Gestão que contemple as áreas de gestão administrativa, acadêmica e planejamento suportará satisfatoriamente a modernização e crescimento da instituição.
+
+O Sistema Administrativo fornecerá operações fundamentais para a gestão das finanças, patrimônio e contratos, atuando nas atividades da instituição. Este sistema deve integrar totalmente a área administrativa, desde as requisições (material, prestação de serviço, suprimento de fundos, diárias, passagens, hospedagem, material informacional, manutenção de infraestrutura) até o controle do orçamento distribuído internamente.
+
+Acesse aqui a página com a documentação referente aos módulos do SIPAC.
+
+O Sistema Acadêmico deve informatizar os procedimentos da área acadêmica através de módulos que controlem: graduação, pós-graduação (stricto e lato sensu), submissão e controle de projetos e bolsistas de pesquisa, submissão e controle de ações de extensão, submissão e controle dos projetos de ensino (monitoria e inovações), registro e relatórios da produção acadêmica dos docentes. Essas ferramentas devem disponibilizar portais específicos para: Reitoria, docentes, discentes, tutores de ensino a distância, coordenações lato e stricto-sensu, de graduação e comissões de avaliação (institucional e docente).
+
+Acesse aqui a página com a documentação referente aos módulos do SIGAA.
+
+O Sistema de Administração técnica deve ser responsável pela administração e gestão dos outros sistemas integrados. Este sistema deverá gerenciar as entidades comuns entre os sistemas informatizados, tais como: usuários, permissões, unidades, mensagens, notícias, gerência de sites e portais, dentre outras funcionalidades. Apenas gestores e administradores do sistema possuirão acesso ao sistema de administração técnica.
+
+O SIGRH informatiza os procedimentos de recursos humanos e planejamento, tais como: marcação/alteração de férias, cálculos de aposentadoria, avaliação funcional, dimensionamento de força de trabalho, controle de freqüência, concursos, capacitações, atendimentos on-line, serviços e requerimentos, registros funcionais, relatórios de RH, plano de gestão e metas, dentre outros. A maioria das operações possui algum nível de interação com o sistema SIAPE, outras são somente de âmbito interno.
+
+Acesse aqui a página com a documentação referente aos módulos do SIGRH.
+
+## Ferramentas do Office 365
+
+A Universidade Estadual do Maranhão disponibiliza a todos os discentes, docentes e demais servidores da Instituição, acesso a todos os aplicativos do pacote Office 365 gratuitamente, para auxiliar toda a comunidade acadêmica em suas atividades e estudos remotos.
+
+Além disso, cada integrante da comunidade acadêmica pode usar sua conta de e-mail institucional da Universidade no Outlook; armazenar até 1 Terabyte (equivalente a 1024 GB ) de arquivos em nuvem, enquanto outras contas gratuitas só comportam 15 GB , e muito mais benefícios na plataforma OneDrive.
+
+Acesse aqui a página com a documentação referente aos aplicativos do Office 365
+
+LibreOffice é uma suíte de aplicativos livres e de código aberto para escritório disponível para Windows, Unix, Solaris, Linux e macOS. A suíte utiliza o formato OpenDocument (ODF - OpenDocument Format) e é também compatível com os formatos do Microsoft Office, além de outros formatos legados. Alguns deles não são suportados pelas versões mais recentes do Microsoft Office, mas ainda podem ser abertos pelo LibreOffice
+
+Acesse aqui a página com a documentação referente aos aplicativos do Libre Office
+
+## Arquivos Importantes
+
+Esta seção é destinada aos arquivos contendo orientações importantes.
+
+Acesse aqui a página com os arquivos
+
+## Dúvidas Recorrentes
+
+Esta seção têm o objetivo de mostrar as dúvidas recorrentes sobre o SigUema, E-mail Institucional e Ferramentas do Office 365, bem como as respostas.
+
+Acesse aqui a página com as dúvidas e respostas
+
+## Acompanhe a CTIC nas Redes Sociais
+
+Site: https://ctic.uema.br/
+
+Instagram: https://bit.ly/3qXaZMs
+
+Abaixo você encontra vídeos sobre os módulos do SigUema, bem como os aplicativos do Office 365 e mais.
+
+Link do Canal no Youtube: https://bit.ly/3hPzWa3
+
+Entrem em contato conosco via Helpdesk nos números: 2016-8200 / 2016-8201 / 2016-8202
+
+Dúvidas? Entre em contato com o nosso suporte através do email: helpdesk@proinfra.uema.br .
+
+Para abertura de chamados com problemas relacionados a E-mail, SigUema, Aplicativos Office365 entre em contato via Sistema de Chamados GLPI usando seu usuário e senha do SIGUEMA:
+
+Acesse o GLPI aqui
+
+Voltar para o site do SIGUEMA
+
+Ir para o site da UEMA

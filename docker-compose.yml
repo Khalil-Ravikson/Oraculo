@@ -1,5 +1,4 @@
-# docker-compose.yml — Oráculo UEMA v6.2 (Corrigido)
-version: "3.9"
+# docker-compose.yml — Oráculo UEMA v6.2 (Dev/Stable)
 
 networks:
   oraculo_net:
@@ -11,15 +10,12 @@ volumes:
   langfuse_db_data:
   grafana_data:
   prometheus_data:
-  shared_tmp:
-  # O volume abaixo não é gerenciado pelo docker, usaremos bind mount ./dados
 
 x-app-env: &app-env
   env_file: .env
   environment:
     REDIS_URL: "redis://redis:6379/0"
     DATABASE_URL: "postgresql+asyncpg://user:${POSTGRES_PASSWORD}@postgres:5432/oraculo"
-    # IMPORTANTE: A API e Worker devem usar a rede interna para o Langfuse
     LANGFUSE_HOST: "http://langfuse:3000"
     LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY}"
     LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY}"
@@ -186,6 +182,7 @@ services:
   api:
     <<: [*build, *restart, *logging, *app-env]
     container_name: oraculo_api
+    user: "root"
     command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "2", "--loop", "uvloop", "--no-access-log"]
     ports:
       - "${API_PORT:-9000}:9000"
@@ -193,8 +190,8 @@ services:
       - ./src:/app/src
       - ./templates:/app/templates
       - ./static:/app/static
-      - ./dados:/app/dados  # CRÍTICO: Compartilha arquivos ingeridos
-      - shared_tmp:/tmp/oraculo_cv
+      - ./dados:/app/dados
+      - ./dados/tmp:/tmp/oraculo_cv  # <-- FIX DE PERMISSÃO: Mapeado direto pra sua pasta física
     networks:
       - oraculo_net
     depends_on:
@@ -208,10 +205,12 @@ services:
   worker:
     <<: [*build, *restart, *logging, *app-env]
     container_name: oraculo_worker
+    user: "root"
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=default,admin,notificacoes"]
     volumes:
+      - ./src:/app/src
       - ./dados:/app/dados
-      - shared_tmp:/tmp/oraculo_cv  # <--- ADICIONE ESTA LINHA AQUI TAMBÉM  # CRÍTICO: O worker precisa acessar os mesmos PDFs que a API
+      - ./dados/tmp:/tmp/oraculo_cv  # <-- FIX DE PERMISSÃO IGUAL AO DA API
     networks:
       - oraculo_net
     depends_on:
@@ -224,6 +223,8 @@ services:
     <<: [*build, *restart, *logging, *app-env]
     container_name: oraculo_beat
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+    volumes:
+      - ./src:/app/src
     networks:
       - oraculo_net
     depends_on:
