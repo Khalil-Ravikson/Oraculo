@@ -169,72 +169,95 @@ class PydanticRouter:
         # _cache = {hash(mensagem): (RouterResult, timestamp)}
         self._cache: dict[int, tuple[RouterResult, float]] = {}
 
-    def rotear(
+    async def rotear_async(
         self,
         mensagem: str,
         contexto_usuario: dict | None = None,
-        estado_menu: str = "MAIN",
+        is_admin: bool = False,
     ) -> RouterResult:
         """
-        Classifica a mensagem usando PydanticAI com fallback automático.
-
-        Args:
-            mensagem:         texto da mensagem do aluno
-            contexto_usuario: dict com curso, periodo, centro (opcional)
-            estado_menu:      estado atual do menu (força rota em submenus)
-
-        Returns:
-            RouterResult com decisao, confianca, skip_cache, metodo
+        Versão 100% assíncrona do roteador PydanticAI.
+        Usa google-genai async client diretamente — sem asyncio.to_thread.
         """
-        # ── 0. Submenu ativo → rota forçada (skip Gemini) ─────────────────────
-        forced = _rota_por_estado_menu(estado_menu)
-        if forced:
-            return RouterResult(
-                decisao=forced,
-                confianca=1.0,
-                motivo=f"Submenu ativo: {estado_menu}",
-                skip_cache=False,
-                intencao_crud=False,
-                metodo="estado_menu",
-            )
+        import asyncio, json, time
+        from src.infrastructure.observability.langfuse_client import langfuse_span
 
-        # ── 1. Cache local (evita Gemini 2x na mesma mensagem) ────────────────
+        # Cache local (evita Gemini 2x para a mesma msg no mesmo segundo)
         cache_key = hash(f"{mensagem}:{str(contexto_usuario)}")
-        cached = self._cache.get(cache_key)
+        cached    = self._cache.get(cache_key)
         if cached:
             result, ts = cached
             if time.time() - ts < _ROUTER_CACHE_TTL_S:
-                logger.debug("🗃️  Router cache hit: '%s'", mensagem[:40])
+                logger.debug("🗃️  [PYDANTIC ROUTER] Cache hit: '%.40s'", mensagem)
                 return result
 
-        # ── 2. PydanticAI → Gemini ────────────────────────────────────────────
-        t0 = time.monotonic()
-        result = self._rotear_com_pydantic_ai(mensagem, contexto_usuario or {})
-        ms = int((time.monotonic() - t0) * 1000)
-        result.latencia_ms = ms
-
-        # ── 3. Se PydanticAI falhou → fallback KNN Redis ──────────────────────
-        if result.metodo == "fallback_knn":
-            result = self._fallback_knn(mensagem, estado_menu)
-            result.latencia_ms = ms
-
-        # ── 4. Persiste no cache local ────────────────────────────────────────
-        self._cache[cache_key] = (result, time.time())
-        # Limpa entradas antigas (max 200 no cache local)
-        if len(self._cache) > 200:
-            oldest = sorted(self._cache.items(), key=lambda x: x[1][1])[:50]
-            for k, _ in oldest:
-                self._cache.pop(k, None)
-
-        # ── 5. Log estruturado ────────────────────────────────────────────────
-        cache_flag = "⚡ cache" if result.skip_cache else "✅ cache ok"
-        logger.info(
-            "🗺️  Router [%s] %s → %s (%.2f) | %s | %dms",
-            result.metodo, cache_flag, result.decisao,
-            result.confianca, result.motivo[:60], ms,
+        ctx_str = _formatar_contexto(contexto_usuario or {})
+        prompt  = _PROMPT_ROUTER_TEMPLATE.format(
+            contexto=ctx_str,
+            mensagem=mensagem[:400],
         )
 
-        return result
+        t0 = time.monotonic()
+        try:
+            from src.infrastructure.settings import settings
+            import google.genai as genai
+            from google.genai import types
+
+            client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+            # Chamada async nativa — sem wrapper síncrono
+            response = await client.aio.models.generate_content(
+                model    = settings.GEMINI_MODEL,
+                contents = prompt,
+                config   = types.GenerateContentConfig(
+                    system_instruction  = _SYSTEM_ROUTER,
+                    temperature         = 0.0,
+                    max_output_tokens   = _MAX_TOKENS_ROUTER,
+                    response_mime_type  = "application/json",
+                    response_schema     = RoutingDecision,
+                ),
+            )
+
+            ms   = int((time.monotonic() - t0) * 1000)
+            data = json.loads(response.text or "{}")
+            decision = RoutingDecision(**data)
+
+            if decision.usar_geral:
+                decision.decisao   = "GERAL"
+                decision.confianca = min(decision.confianca, 0.39)
+            if decision.intencao_crud:
+                decision.decisao = "CRUD"
+
+            result = RouterResult(
+                decisao       = decision.decisao,
+                confianca     = decision.confianca,
+                motivo        = decision.motivo,
+                skip_cache    = decision.skip_cache,
+                intencao_crud = decision.intencao_crud,
+                metodo        = "pydantic_ai",
+                latencia_ms   = ms,
+            )
+
+            # Persiste no cache local
+            self._cache[cache_key] = (result, time.time())
+            return result
+
+        except Exception as exc:
+            ms = int((time.monotonic() - t0) * 1000)
+            logger.exception(
+                "❌ [PYDANTIC ROUTER] Gemini async falhou | ms=%d | erro: %s",
+                ms, exc,
+            )
+            # Retorna resultado de fallback — o orquestrador vai ao regex
+            return RouterResult(
+                decisao=_rota_fallback_regex(mensagem),
+                confianca=0.0,
+                motivo=f"Gemini falhou: {type(exc).__name__}",
+                skip_cache=True,
+                intencao_crud=False,
+                metodo="fallback_regex",
+                latencia_ms=ms,
+            )
 
     # ── PydanticAI call ───────────────────────────────────────────────────────
 

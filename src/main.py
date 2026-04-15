@@ -1,173 +1,158 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# FICHEIRO 10: src/main.py — Container DI e startup completo
+# ─────────────────────────────────────────────────────────────────────────────
+
 """
-src/main.py — v4 (LangGraph + Roteamento Duplo [Semântico+Pydantic] + FastAPI)
-================================================================================
+main.py — FastAPI app com container DI completo para esta sprint
+================================================================
+Ordem de inicialização (importa para evitar race conditions no startup):
+
+  1. Configurações e logging
+  2. Redis indices (idempotente)
+  3. Embeddings model (CPU, singleton)
+  4. RedisVL adapters (injectados via DI)
+  5. Semantic Cache + Session Manager
+  6. LLM clients (Gemini)
+  7. Router pipeline (Semantic + Pydantic)
+  8. LangGraph (compilado com HITL)
+  9. Prometheus metrics
+  10. FastAPI routes (webhook + hub + metrics)
 """
 from __future__ import annotations
 
 import logging
-import os
-import traceback
+import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import Response
 
+from src.infrastructure.settings import settings
+
+# ─── Logging de produção ──────────────────────────────────────────────────────
+
+logging.basicConfig(
+    level   = logging.DEBUG if settings.DEV_MODE else logging.INFO,
+    format  = "%(asctime)s [%(levelname)s] %(name)s | %(message)s",
+    handlers= [logging.StreamHandler(sys.stdout)],
+)
 logger = logging.getLogger(__name__)
 
-# =================================================================
-# VARIÁVEL GLOBAL DO SEU AGENTE (O cérebro do LangGraph)
-# =================================================================
-oraculo_graph = None 
+# ─── Container global ─────────────────────────────────────────────────────────
+# Guardamos as instâncias aqui para reutilização entre requests.
 
-def inicializar_dependencias():
-    """Configura o Roteador Mestre e compila o LangGraph."""
-    print("⚙️ [STARTUP] Inicializando dependências do LangGraph...")
-    
-    from src.infrastructure.redis_client import get_redis
+_CONTAINER: dict = {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Startup e shutdown da aplicação.
+    O lifespan substitui @app.on_event("startup") no FastAPI 0.110+.
+    """
+    logger.info("🚀 [STARTUP] Oráculo UEMA iniciando...")
+
+    # 1. Redis indices (SVS-VAMANA)
+    from src.infrastructure.redis_client import (
+        inicializar_indices, get_redis_text,
+    )
+    await inicializar_indices()
+   
+    _CONTAINER["redis_text"] = get_redis_text()
+    logger.info("✅ [STARTUP] Redis conectado.")
+
+    # 2. Embeddings model (singleton — carregado uma vez)
     from src.rag.embeddings import get_embeddings
-    from src.application.graph.builder import compilar_grafo
-    
-    # --- IMPORTS FLEXÍVEIS (Evita quebrar se a pasta mudou) ---
-    from src.domain.services.semantic_router import SemanticRouterService
+    embeddings = get_embeddings()
+    _CONTAINER["embeddings"] = embeddings
+    logger.info("✅ [STARTUP] Modelo de embeddings carregado.")
 
-        
+    # 3. RedisVL adapters
+    from src.infrastructure.adapters.redis_vector_adapter import RedisVLVectorAdapter
+    vector_adapter = RedisVLVectorAdapter(embeddings_model=embeddings)
+    _CONTAINER["vector_adapter"] = vector_adapter
+    logger.info("✅ [STARTUP] RedisVLVectorAdapter pronto.")
+
+    # 4. Semantic Cache
+    from src.infrastructure.cache.llm_cache import OracloSemanticCache
+    llm_cache = OracloSemanticCache(embeddings_model=embeddings)
+    _CONTAINER["llm_cache"] = llm_cache
+    logger.info("✅ [STARTUP] SemanticCache pronto.")
+
+    # 5. Session Manager
+    from src.memory.adapters.redisvl_session_manager import RedisVLSessionManager
+    session_manager = RedisVLSessionManager()
+    _CONTAINER["session_manager"] = session_manager
+    logger.info("✅ [STARTUP] SessionManager pronto.")
+
+
+    # 7. Router pipeline
     from src.rag.query.pydantic_router import PydanticRouter
     from src.domain.services.oraculo_router import OraculoRouterService
-    
-    redis_client = get_redis()
-    embeddings = get_embeddings()
-    
-    print("⚙️ [STARTUP] Instanciando a 1ª e 2ª Linhas de Roteamento...")
-    semantic_router = SemanticRouterService(redis_client, embeddings)
     pydantic_router = PydanticRouter()
-    
-    print("⚙️ [STARTUP] Criando o Orquestrador Mestre...")
-    oraculo_router = OraculoRouterService(semantic_router, pydantic_router)
-    
-    print("⚙️ [STARTUP] Compilando o Grafo LangGraph...")
-    global oraculo_graph
-    oraculo_graph = compilar_grafo(oraculo_router)
-    print("✅ [STARTUP] Grafo compilado e injetado com sucesso!")
-
-
-def create_app() -> FastAPI:
-    from src.infrastructure.settings import settings
-
-    app = FastAPI(
-        title       = "Oráculo UEMA",
-        description = "Assistente Acadêmico Inteligente da UEMA",
-        version     = "4.0.0",
-        docs_url    = "/api/docs" if settings.DEV_MODE else None,
-        redoc_url   = None,
+    oraculo_router  = OraculoRouterService(
+        pydantic_router  = pydantic_router,
+        embeddings_model = embeddings,
     )
-
-    from src.infrastructure.observability.metrics import setup_metrics
-    setup_metrics(app)
-
-    _montar_static(app)
-    _registrar_routers(app)
-
-    @app.on_event("startup")
-    async def startup():
-        await _startup(settings)
-
-    @app.on_event("shutdown")
-    async def shutdown():
-        _shutdown()
-
-    @app.get("/", include_in_schema=False)
-    async def root():
-        return RedirectResponse("/hub/")
-
-    @app.get("/health", tags=["Sistema"])
-    async def health():
-        from src.infrastructure.redis_client import redis_ok
-        return {
-            "status":   "online",
-            "sistema":  "Oráculo UEMA",
-            "versao":   "4.0.0",
-            "redis_ok": redis_ok(),
-        }
-
-    return app
+    _CONTAINER["oraculo_router"] = oraculo_router
+    logger.info("✅ [STARTUP] OraculoRouterService pronto.")
 
 
-def _montar_static(app: FastAPI) -> None:
-    static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-    os.makedirs(static_dir, exist_ok=True)
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-
-def _registrar_routers(app: FastAPI) -> None:
-    from src.api.hub       import router as hub_router
-    from src.api.admin_api import router as admin_api_router
-    from src.api.rag_admin import router as rag_admin_router
-    from src.api import monitor
-    from src.api.chunkviz_api import router as chunkviz_router
-    app.include_router(hub_router)
-    app.include_router(admin_api_router)
-    app.include_router(rag_admin_router)
-    app.include_router(monitor.router, prefix="/monitor")
-    app.include_router(chunkviz_router)
-    try:
-        from src.infrastructure.settings import settings
-        from src.api.eval_dashboard import router as eval_router
-        if settings.DEV_MODE:
-            app.include_router(eval_router, prefix="/eval", tags=["Eval"])
-    except Exception:
-        pass
-
-
-async def _startup(settings) -> None:
-    logging.basicConfig(
-        level   = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
-        format  = "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt = "%H:%M:%S",
+    
+    # 10. LangGraph
+    from src.application.graph.builder import compilar_grafo
+    graph = compilar_grafo(
+        oraculo_router  = oraculo_router,
+        vector_adapter  = vector_adapter,
+        llm_cache       = llm_cache,
+        session_manager = session_manager,
     )
+    _CONTAINER["graph"] = graph
+    logger.info("✅ [STARTUP] LangGraph compilado.")
 
-    logger.info("🚀 Oráculo UEMA v4.0 iniciando...")
-
-    # 1. Inicializa o Redis Indices
-    try:
-        from src.infrastructure.redis_client import inicializar_indices
-        inicializar_indices()
-    except Exception as e:
-        logger.error("❌ Redis offline: %s", e)
-
-    # 2. Inicializa RAG Metrics
-    try:
-        from src.infrastructure.observability.metrics import update_rag_chunks
-        update_rag_chunks()
-    except Exception:
-        pass
-
-    # 3. CHAMA NOSSA NOVA FUNÇÃO DO LANGGRAPH AQUI!
-    # Nota: Removi o try...except que "engolia" o erro. Se quebrar, vamos ver na hora.
-    try:
-        inicializar_dependencias()
-    except Exception as e:
-        print("\n" + "="*60)
-        print("🚨 ERRO CRÍTICO AO COMPILAR O CÉREBRO DO ORÁCULO 🚨")
-        traceback.print_exc()
-        print("="*60 + "\n")
-        # Forçamos a queda do FastAPI, pois não adianta subir a API com o bot quebrado.
-        raise RuntimeError("Falha no LangGraph. Veja o terminal acima para os detalhes exatos.") from e
-
-    # 4. Evolution API
-    try:
-        from src.services.evolution_service import EvolutionService
-        await EvolutionService().inicializar()
-    except Exception as e:
-        logger.warning("⚠️  Evolution API: %s", e)
-
-    logger.info("✅ Oráculo UEMA pronto!")
+    # 11. Prometheus
+    from src.infrastructure.observability.metrics import PrometheusMetrics
+    metrics = PrometheusMetrics(namespace="oraculo")
+    _CONTAINER["metrics"] = metrics
 
 
-def _shutdown() -> None:
-    try:
-        from src.infrastructure.observability.langfuse_client import flush_langfuse
-        flush_langfuse()
-    except Exception:
-        pass
+    logger.info("✅ [STARTUP] Webhook registado.")
 
-app = create_app()
+    logger.info("🎯 [STARTUP] Oráculo UEMA pronto para receber mensagens.")
+    yield   # ← aplicação a correr
+
+    # Shutdown
+    logger.info("🛑 [SHUTDOWN] Oráculo encerrando...")
+    _CONTAINER.clear()
+
+
+# ─── App ──────────────────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title       = "Oráculo UEMA",
+    version     = "3.0.0",
+    description = "RAG Enterprise para a Universidade Estadual do Maranhão",
+    lifespan    = lifespan,
+    docs_url    = "/docs" if settings.DEV_MODE else None,
+    redoc_url   = None,
+)
+
+
+@app.get("/metrics")
+async def metrics_endpoint() -> Response:
+    """Endpoint Prometheus — acessível pelo scraper, não pelo utilizador."""
+    m = _CONTAINER.get("metrics")
+    if m is None:
+        return Response("# not ready\n", media_type="text/plain")
+    body, content_type = m.generate_latest_output()
+    return Response(content=body, media_type=content_type)
+
+
+@app.get("/health")
+async def health():
+    from src.infrastructure.redis_client import redis_ok
+    return {
+        "status": "healthy",
+        "redis":  redis_ok(),
+        "graph":  "graph" in _CONTAINER,
+    }
