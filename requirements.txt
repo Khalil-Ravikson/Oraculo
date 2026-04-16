@@ -1,7 +1,7 @@
 # requirements.txt — Oráculo UEMA (Sprint 1: langfuse adicionado)
 # =================================================================
 # REGRA: não altere versões sem aprovação da equipe.
-# Sprint 1: adicionado langfuse>=2.0.0
+
 
 # ── Web Framework ─────────────────────────────────────────────────
 fastapi>=0.110.0
@@ -40,13 +40,13 @@ langchain-text-splitters
 pymupdf
 beautifulsoup4>=4.12.0
 marker-pdf>=0.3.0
-docling>=1.0.0
+#docling>=1.0.0
 #llama-parse>=0.4.0
-unstructured[all-docs]>=0.12.0
+#unstructured[all-docs]>=0.12.0
 
 # --- Observabilidade ---
 prometheus-client>=0.20.0
 
 # --- LangGraph e Persistência (Redis Checkpointer) ---
 langgraph>=0.2.0
-langgraph-checkpoint-redis>=2.0.0
+langgraph-checkpoint-redis>=0.4.0

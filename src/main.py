@@ -1,13 +1,6 @@
 """
-src/main.py — v4.1 (async startup correto)
-==========================================
-
-CORREÇÕES vs v4.0:
-  - inicializar_dependencias() tornou-se async (era sync com new_event_loop hack)
-  - inicializar_indices() chamado com await (agora é coroutine)
-  - OraculoRouterService recebe embeddings_model por DI
-  - Remoção do asyncio.new_event_loop() dentro de contexto async (RuntimeError)
-  - _startup() aguarda inicializar_dependencias() correctamente
+src/main.py — v4.2 (startup 100% async, sem MemorySaver)
+=========================================================
 """
 from __future__ import annotations
 
@@ -21,65 +14,9 @@ from fastapi.staticfiles import StaticFiles
 
 logger = logging.getLogger(__name__)
 
-# Grafo compilado — partilhado entre requests (thread-safe, LangGraph é imutável)
-oraculo_graph = None
+# Grafo compilado — inicializado no startup, acessado via get_compiled_graph()
+# NÃO importar o grafo aqui: importação tardia evita circular imports no startup
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Inicialização de dependências (ASYNC — chamado uma vez no startup)
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def inicializar_dependencias() -> None:
-    """
-    Monta o container de DI e compila o LangGraph.
-    DEVE ser chamado com await dentro de um contexto async.
-
-    ORDEM OBRIGATÓRIA:
-      1. Índices Redis → devem existir antes de qualquer query
-      2. Embeddings   → modelo carregado em memória (pode demorar ~3s)
-      3. SemanticRouter  → indexa routes no Redis (usa embeddings)
-      4. PydanticRouter  → apenas valida settings, sem I/O
-      5. OraculoRouter   → orquestra as camadas acima
-      6. LangGraph       → compila o grafo com o router injectado
-    """
-    logger.info("⚙️  [STARTUP] Inicializando dependências async...")
-
-    # 1. Índices Redis (async — cria SVS-VAMANA se não existir)
-    from src.infrastructure.redis_client import inicializar_indices
-    await inicializar_indices()
-
-    # 2. Modelo de embeddings (singleton — carregado uma vez)
-    from src.rag.embeddings import get_embeddings
-    embeddings = get_embeddings()
-    logger.info("✅ [STARTUP] Embeddings prontos.")
-
-    # 3. SemanticRouter (instanciado sync — indexa no Redis via __init__)
-    #    O SemanticRouter do redisvl 0.17.0 não tem __init__ async.
-    #    A indexação inicial das routes é feita no construtor de forma síncrona.
-    #    Justificado: acontece UMA vez no startup, não em runtime.
-    from src.domain.services.oraculo_router import OraculoRouterService
-    from src.rag.query.pydantic_router import PydanticRouter
-
-    logger.info("⚙️  [STARTUP] Instanciando PydanticRouter...")
-    pydantic_router = PydanticRouter()
-
-    logger.info("⚙️  [STARTUP] Instanciando OraculoRouterService (SemanticRouter + Pydantic)...")
-    oraculo_router = OraculoRouterService(
-        pydantic_router  = pydantic_router,
-        embeddings_model = embeddings,
-    )
-
-    # 4. Compila o LangGraph
-    from src.application.graph.builder import compilar_grafo
-    logger.info("⚙️  [STARTUP] Compilando grafo LangGraph...")
-    global oraculo_graph
-    oraculo_graph = compilar_grafo(oraculo_router)
-    logger.info("✅ [STARTUP] Grafo compilado. Oráculo pronto.")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Factory da aplicação FastAPI
-# ─────────────────────────────────────────────────────────────────────────────
 
 def create_app() -> FastAPI:
     from src.infrastructure.settings import settings
@@ -87,25 +24,28 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title       = "Oráculo UEMA",
         description = "Assistente Académico Inteligente da UEMA",
-        version     = "4.1.0",
+        version     = "4.2.0",
         docs_url    = "/api/docs" if settings.DEV_MODE else None,
         redoc_url   = None,
     )
 
-    # Prometheus /metrics (no-op se prometheus_client não instalado)
-    from src.infrastructure.observability.metrics import setup_metrics
-    setup_metrics(app)
-
     _montar_static(app)
     _registrar_routers(app)
 
+    # Prometheus /metrics (no-op se prometheus_client não instalado)
+    try:
+        from prometheus_client import make_asgi_app
+        app.mount("/metrics", make_asgi_app())
+    except ImportError:
+        pass
+
     @app.on_event("startup")
-    async def on_startup():
+    async def on_startup() -> None:
         await _startup(settings)
 
     @app.on_event("shutdown")
-    async def on_shutdown():
-        _shutdown()
+    async def on_shutdown() -> None:
+        await _shutdown()
 
     @app.get("/", include_in_schema=False)
     async def root():
@@ -117,72 +57,93 @@ def create_app() -> FastAPI:
         return {
             "status":   "online",
             "sistema":  "Oráculo UEMA",
-            "versao":   "4.1.0",
+            "versao":   "4.2.0",
             "redis_ok": redis_ok(),
         }
 
     return app
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Startup completo
-# ─────────────────────────────────────────────────────────────────────────────
-
 async def _startup(settings) -> None:
-    # Configura logging
+    """Pipeline de startup — cada etapa tem tratamento de erro independente."""
     logging.basicConfig(
         level   = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
         format  = "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         datefmt = "%H:%M:%S",
     )
+    logger.info("🚀 Oráculo UEMA v4.2 iniciando...")
 
-    logger.info("🚀 Oráculo UEMA v4.1 iniciando...")
+    # ── 1. Índices Redis (SVS-VAMANA / HNSW) ──────────────────────────────────
+    from src.infrastructure.redis_client import inicializar_indices
+    await inicializar_indices()
 
-    # RAG chunks gauge (Prometheus)
+    # ── 2. Modelo de Embeddings (singleton — ~3s na primeira carga) ───────────
+    from src.rag.embeddings import get_embeddings
+    embeddings = get_embeddings()
+    logger.info("✅ Embeddings prontos (provider=%s).", settings.EMBEDDING_PROVIDER)
+
+    # ── 3. SemanticRouter (async Redis nativo) ────────────────────────────────
+    import redis.asyncio as aioredis
+    from src.domain.services.semantic_router import SemanticRouterService
+
+    async_redis = aioredis.from_url(settings.REDIS_URL, decode_responses=False)
+    semantic_router = SemanticRouterService(
+        async_redis      = async_redis,
+        embeddings_model = embeddings,
+    )
+    logger.info("✅ SemanticRouterService pronto.")
+
+    # ── 4. PydanticRouter (Gemini structured output) ──────────────────────────
+    from src.rag.query.pydantic_router import PydanticRouter
+    pydantic_router = PydanticRouter()
+    logger.info("✅ PydanticRouter pronto.")
+
+    # ── 5. OraculoRouterService (orquestra as camadas 3 e 4) ──────────────────
+    from src.domain.services.oraculo_router import OraculoRouterService
+    oraculo_router = OraculoRouterService(
+        semantic_router = semantic_router,
+        pydantic_router = pydantic_router,
+    )
+    logger.info("✅ OraculoRouterService pronto.")
+
+    # ── 6. LangGraph com AsyncRedisSaver ──────────────────────────────────────
+    from src.application.graph.builder import init_graph
     try:
-        from src.infrastructure.observability.metrics import update_rag_chunks
-        update_rag_chunks()
-    except Exception:
-        pass
+        await init_graph(oraculo_router)
+    except Exception as e:
+        raise e
 
-    # Inicializa dependências (AWAIT — a função agora é coroutine)
-    try:
-        await inicializar_dependencias()
-    except Exception:
-        logger.error(
-            "🚨 ERRO CRÍTICO ao inicializar dependências:\n%s",
-            traceback.format_exc(),
-        )
-        # Falha no startup é fatal — o bot não funciona sem Redis + Grafo
-        raise RuntimeError(
-            "Falha no startup. Verifique os logs acima para o erro exato."
-        )
-
-    # WhatsApp gateway (não-fatal — bot funciona sem WhatsApp em modo dev)
+    # ── 7. Evolution API (não-fatal em DEV) ────────────────────────────────────
     try:
         from src.services.evolution_service import EvolutionService
         await EvolutionService().inicializar()
         logger.info("✅ Evolution API inicializada.")
     except Exception as exc:
-        logger.warning(
-            "⚠️  Evolution API indisponível (modo dev?): %s", exc
-        )
+        logger.warning("⚠️  Evolution API indisponível (DEV?): %s", exc)
 
-    logger.info("✅ Oráculo UEMA pronto para receber mensagens.")
+    logger.info("🟢 Oráculo UEMA pronto para receber mensagens.")
 
 
-def _shutdown() -> None:
+async def _shutdown() -> None:
+    """Libera recursos na ordem inversa da inicialização."""
+    logger.info("🛑 Iniciando shutdown...")
+
+    # Fecha AsyncRedisSaver do LangGraph
+    try:
+        from src.application.graph.builder import aclose_checkpointer
+        await aclose_checkpointer()
+    except Exception:
+        pass
+
+    # Flush Langfuse (se configurado)
     try:
         from src.infrastructure.observability.langfuse_client import flush_langfuse
         flush_langfuse()
     except Exception:
         pass
+
     logger.info("🛑 Oráculo UEMA encerrado.")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers de montagem
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _montar_static(app: FastAPI) -> None:
     static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
@@ -191,19 +152,20 @@ def _montar_static(app: FastAPI) -> None:
 
 
 def _registrar_routers(app: FastAPI) -> None:
-    from src.api.hub        import router as hub_router
-    from src.api.admin_api  import router as admin_api_router
-    from src.api.rag_admin  import router as rag_admin_router
-    from src.api            import monitor
-    from src.api.chunkviz_api import router as chunkviz_router
+    from src.api.hub           import router as hub_router
+    from src.api.admin_api     import router as admin_api_router
+    from src.api.rag_admin     import router as rag_admin_router
+    from src.api               import monitor
+    from src.api.chunkviz_api  import router as chunkviz_router
+    from src.api.routers.webhook import router as webhook_router
 
     app.include_router(hub_router)
     app.include_router(admin_api_router)
     app.include_router(rag_admin_router)
     app.include_router(monitor.router, prefix="/monitor")
     app.include_router(chunkviz_router)
+    app.include_router(webhook_router, prefix="/api/v1")
 
-    # Eval dashboard (só em DEV)
     try:
         from src.infrastructure.settings import settings
         if settings.DEV_MODE:
@@ -212,9 +174,5 @@ def _registrar_routers(app: FastAPI) -> None:
     except Exception:
         pass
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Entrypoint
-# ─────────────────────────────────────────────────────────────────────────────
 
 app = create_app()

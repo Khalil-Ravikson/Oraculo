@@ -39,13 +39,13 @@ import redis
 from redis.commands.search.query import Query
 from redisvl.index import AsyncSearchIndex
 from redisvl.schema import IndexSchema
-
+import numpy as np
 from src.infrastructure.settings import settings
 
 logger = logging.getLogger(__name__)
 
 # ─── Constantes ───────────────────────────────────────────────────────────────
-VECTOR_DIM     = 3071        # gemini-embedding-001, validado em produção
+VECTOR_DIM     = 3072        # gemini-embedding-001, validado em produção
 IDX_CHUNKS     = "idx:rag:chunks"
 IDX_TOOLS      = "idx:tools"
 PREFIX_CHUNKS  = "rag:chunk:"
@@ -77,14 +77,12 @@ def _schema_chunks() -> IndexSchema:
                 "name": "embedding",
                 "type": "vector",
                 "attrs": {
-                    "algorithm":               "SVS-VAMANA",
-                    "dims":                    VECTOR_DIM,
-                    "distance_metric":         "cosine",
-                    "datatype":                "float32",
-                    "graph_max_degree":        32,
-                    "construction_window_size": 200,
-                    "search_window_size":       20,
-                    "epsilon":                  0.01,
+                    "algorithm":       "HNSW",
+                    "dims":            VECTOR_DIM,
+                    "distance_metric": "cosine",
+                    "datatype":        "float32",
+                    "m":               16,
+                    "ef_construction": 200
                 },
             },
         ],
@@ -106,11 +104,12 @@ def _schema_tools() -> IndexSchema:
                 "name": "embedding",
                 "type": "vector",
                 "attrs": {
-                    "algorithm":        "SVS-VAMANA",
-                    "dims":             VECTOR_DIM,
-                    "distance_metric":  "cosine",
-                    "datatype":         "float32",
-                    "graph_max_degree": 16,
+                    "algorithm":       "HNSW",
+                    "dims":            VECTOR_DIM,
+                    "distance_metric": "cosine",
+                    "datatype":        "float32",
+                    "m":               16,
+                    "ef_construction": 200
                 },
             },
         ],
@@ -294,7 +293,7 @@ def busca_hibrida(
     r = get_redis()
 
     # ── Busca vectorial ────────────────────────────────────────────────────────
-    emb_bytes = struct.pack(f"{len(query_embedding)}f", *query_embedding)
+    emb_bytes = np.array(query_embedding, dtype=np.float32).tobytes()
 
     if source_filter:
         safe = source_filter.replace(".", "\\.").replace("-", "\\-")
@@ -463,3 +462,29 @@ def diagnosticar() -> dict:
         pass
 
     return resultado
+
+
+async def acquire_lock(identifier: str, ttl_seconds: int = 60) -> bool:
+    """
+    Tenta adquirir um lock no Redis. Retorna True se conseguiu, False se já existia.
+    Usado para evitar processamento duplicado de mensagens do mesmo usuário.
+    """
+    r = await get_redis_text()
+    lock_key = f"lock:{identifier}"
+    try:
+        # nx=True garante que o comando só funciona se a chave NÃO existir
+        adquirido = await r.set(lock_key, "locked", ex=ttl_seconds, nx=True)
+        return bool(adquirido)
+    except Exception as exc:
+        logger.warning("⚠️  Falha ao tentar adquirir lock para %s: %s", identifier, exc)
+        # Em caso de falha no Redis, permitimos a mensagem passar para não travar o bot
+        return True 
+
+async def release_lock(identifier: str) -> None:
+    """Remove o lock do usuário, permitindo novas mensagens."""
+    r = await get_redis_text()
+    lock_key = f"lock:{identifier}"
+    try:
+        await r.delete(lock_key)
+    except Exception as exc:
+        logger.warning("⚠️  Falha ao tentar liberar lock para %s: %s", identifier, exc)

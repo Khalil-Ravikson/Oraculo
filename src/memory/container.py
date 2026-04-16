@@ -1,34 +1,39 @@
 """
-src/memory/container.py
--------------------------
-Container de injeção de dependência para o sistema de memória.
-
-USO NO GRAPH:
-    from src.memory.container import create_memory_service
-    memory = create_memory_service()  # singleton por processo
-
-    # Nos nodes do LangGraph:
-    ctx = memory.carregar_contexto(user_id, session_id, query)
+src/memory/container.py — Container de DI para o sistema de memória
+====================================================================
+CORREÇÃO: remove importação circular de gemini_provider.py.
+O adaptador Gemini agora é importado de infrastructure/adapters/gemini_provider.py
+onde vive a classe GeminiProvider REAL.
 """
 from __future__ import annotations
 
-from functools import lru_cache
+import logging
 from typing import Any
 
+logger = logging.getLogger(__name__)
 
-@lru_cache(maxsize=1)
-def create_memory_service(redis_client: Any = None, embedding_model: Any = None):
+_memory_service_instance: Any | None = None
+
+
+def create_memory_service(
+    redis_client:    Any = None,
+    embedding_model: Any = None,
+) -> Any:
     """
     Fábrica singleton do MemoryService.
-    Cria todos os adapters e os injeta no serviço.
+    Primeira chamada cria e guarda a instância.
     """
-    from src.memory.adapters.redis_working_memory import RedisWorkingMemory
+    global _memory_service_instance
+    if _memory_service_instance is not None:
+        return _memory_service_instance
+
+    from src.memory.adapters.redis_working_memory  import RedisWorkingMemory
     from src.memory.adapters.redis_long_term_memory import RedisLongTermMemory
-    from src.memory.adapters.redis_menu_state import RedisMenuStateRepository
-    from src.memory.adapters.llm_fact_extractor import (
+    from src.memory.adapters.redis_menu_state       import RedisMenuStateRepository
+    from src.memory.adapters.llm_fact_extractor     import (
         CompositeFactExtractor,
-        LLMFactExtractor,
         RegexFactExtractor,
+        LLMFactExtractor,
     )
     from src.memory.services.memory_service import MemoryService
 
@@ -40,39 +45,64 @@ def create_memory_service(redis_client: Any = None, embedding_model: Any = None)
         from src.rag.embeddings import get_embeddings
         embedding_model = get_embeddings()
 
-    working = RedisWorkingMemory(redis_client)
+    working   = RedisWorkingMemory(redis_client)
     long_term = RedisLongTermMemory(redis_client, embedding_model)
-    menu_state = RedisMenuStateRepository(redis_client)
+    menu      = RedisMenuStateRepository(redis_client)
 
-    # Extrator composto: regex (0 tokens) + LLM (quando disponível)
+    extractors = [RegexFactExtractor()]
+
     try:
-        from src.providers.gemini_provider import get_gemini_client
-        llm_extractor = LLMFactExtractor(
-            llm_provider=_GeminiProviderAdapter(),
-            redis_client=redis_client,
-        )
-        extractor = CompositeFactExtractor([RegexFactExtractor(), llm_extractor])
-    except Exception:
-        extractor = CompositeFactExtractor([RegexFactExtractor()])
+        # ── CORREÇÃO: importa GeminiProvider do lugar correto ────────────────
+        # ANTES (circular): from src.infrastructure.adapters.gemini_provider import GeminiProvider
+        # DEPOIS (correto): importa a classe real que agora existe nesse arquivo
+        from src.infrastructure.adapters.gemini_provider import GeminiProvider
 
-    return MemoryService(
-        working=working,
-        long_term=long_term,
-        menu_state=menu_state,
-        fact_extractor=extractor,
+        llm_extractor = LLMFactExtractor(
+            llm_provider = _GeminiAdapterForExtractor(GeminiProvider()),
+            redis_client = redis_client,
+        )
+        extractors.append(llm_extractor)
+        logger.debug("✅ [MEMORY] LLMFactExtractor (Gemini) disponível.")
+    except Exception as exc:
+        logger.warning("⚠️  [MEMORY] LLMFactExtractor indisponível: %s", exc)
+
+    extractor = CompositeFactExtractor(extractors)
+
+    _memory_service_instance = MemoryService(
+        working        = working,
+        long_term      = long_term,
+        menu_state     = menu,
+        fact_extractor = extractor,
     )
 
+    logger.info("✅ [MEMORY] MemoryService criado.")
+    return _memory_service_instance
 
-class _GeminiProviderAdapter:
-    """Adapter mínimo para o LLMFactExtractor usar o Gemini existente."""
-    async def gerar_resposta_estruturada_async(self, prompt, response_schema, **kwargs):
-        from src.providers.gemini_provider import chamar_gemini_async
-        resp = await chamar_gemini_async(prompt=prompt, response_schema=response_schema, **kwargs)
-        if resp.sucesso and resp.conteudo:
-            import json
-            try:
-                data = json.loads(resp.conteudo)
-                return response_schema(**data)
-            except Exception:
-                return None
-        return None
+
+def reset_memory_service() -> None:
+    """Reseta o singleton — útil em testes."""
+    global _memory_service_instance
+    _memory_service_instance = None
+
+
+class _GeminiAdapterForExtractor:
+    """
+    Adapter mínimo que expõe a interface esperada pelo LLMFactExtractor.
+    Delega para GeminiProvider sem criar nova instância a cada chamada.
+    """
+
+    def __init__(self, provider: Any) -> None:
+        self._provider = provider
+
+    async def gerar_resposta_estruturada_async(
+        self,
+        prompt:          str,
+        response_schema: Any,
+        temperatura:     float = 0.05,
+        **kwargs,
+    ) -> Any | None:
+        return await self._provider.gerar_resposta_estruturada_async(
+            prompt          = prompt,
+            response_schema = response_schema,
+            temperatura     = temperatura,
+        )

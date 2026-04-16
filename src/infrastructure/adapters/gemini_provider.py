@@ -1,143 +1,172 @@
 """
-src/memory/container.py — v2 (adapter Gemini correto)
-=====================================================
-
-CORREÇÕES vs v1:
-  - _GeminiProviderAdapter chamava `chamar_gemini_async` (não existe).
-    Agora usa GeminiProvider.gerar_resposta_estruturada_async() directamente.
-  - lru_cache com parâmetros hashable (redis_client e embedding_model
-    não são hashable — o cache agora é manual via módulo singleton).
-  - Tratamento de erro robusto no extractor composto.
+infrastructure/adapters/gemini_provider.py — GeminiProvider (google-genai >= 0.5.0)
+=====================================================================================
+Implementa ILLMProvider para o modelo Gemini.
+RESPONSABILIDADE ÚNICA: comunicação com a API Gemini.
+A lógica de memória vive em src/memory/container.py — NÃO misturar.
 """
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Optional
+from functools import lru_cache
+from typing import Type, TypeVar
 
+from pydantic import BaseModel
+
+from src.domain.ports.llm_Provider import ILLMProvider, LLMResponse
+
+T = TypeVar("T", bound=BaseModel)
 logger = logging.getLogger(__name__)
 
-# Singleton do MemoryService — iniciado uma vez por processo
-_memory_service_instance: Optional[Any] = None
 
-
-def create_memory_service(
-    redis_client: Any = None,
-    embedding_model: Any = None,
-) -> Any:
+class GeminiProvider:
     """
-    Fábrica singleton do MemoryService.
+    Provider Gemini via google-genai SDK.
+    Implementa ILLMProvider — o domínio nunca importa google.genai diretamente.
 
-    Primeira chamada cria e guarda a instância.
-    Chamadas subsequentes retornam a mesma instância.
-
-    Args:
-        redis_client:    Cliente Redis (decode_responses=True).
-                         Se None, usa get_redis_text().
-        embedding_model: Modelo de embeddings.
-                         Se None, usa get_embeddings().
+    Thread-safe: o cliente Gemini é stateless e pode ser compartilhado.
+    Singleton recomendado via _get_default_provider().
     """
-    global _memory_service_instance
-    if _memory_service_instance is not None:
-        return _memory_service_instance
 
-    from src.memory.adapters.redis_working_memory import RedisWorkingMemory
-    from src.memory.adapters.redis_long_term_memory import RedisLongTermMemory
-    from src.memory.adapters.redis_menu_state import RedisMenuStateRepository
-    from src.memory.adapters.llm_fact_extractor import (
-        CompositeFactExtractor,
-        RegexFactExtractor,
-        LLMFactExtractor,
-    )
-    from src.memory.services.memory_service import MemoryService
+    def __init__(self, model: str | None = None, api_key: str | None = None) -> None:
+        import google.genai as genai
+        from src.infrastructure.settings import settings
 
-    # Resolve dependências se não injectadas
-    if redis_client is None:
-        from src.infrastructure.redis_client import get_redis_text
-        redis_client = get_redis_text()
+        self._model  = model   or settings.GEMINI_MODEL
+        self._client = genai.Client(api_key=api_key or settings.GEMINI_API_KEY)
 
-    if embedding_model is None:
-        from src.rag.embeddings import get_embeddings
-        embedding_model = get_embeddings()
+    # ─── Geração de texto livre ───────────────────────────────────────────────
 
-    # Adapters de memória
-    working   = RedisWorkingMemory(redis_client)
-    long_term = RedisLongTermMemory(redis_client, embedding_model)
-    menu      = RedisMenuStateRepository(redis_client)
+    async def gerar_resposta_async(
+        self,
+        prompt:             str,
+        system_instruction: str   = "",
+        temperatura:        float = 0.2,
+        max_tokens:         int   = 1024,
+    ) -> LLMResponse:
+        """Geração assíncrona de texto livre (await nativo google-genai)."""
+        from google.genai import types
 
-    # Extractor de fatos: regex (0 tokens) + LLM (quando disponível)
-    extractors = [RegexFactExtractor()]
-
-    try:
-        llm_extractor = LLMFactExtractor(
-            llm_provider = _GeminiProviderAdapter(),
-            redis_client = redis_client,
-        )
-        extractors.append(llm_extractor)
-        logger.debug("✅ [MEMORY] LLMFactExtractor (Gemini) disponível.")
-    except Exception as exc:
-        logger.warning(
-            "⚠️  [MEMORY] LLMFactExtractor indisponível, usando apenas regex: %s", exc
+        config = types.GenerateContentConfig(
+            system_instruction = system_instruction or None,
+            temperature        = temperatura,
+            max_output_tokens  = max_tokens,
         )
 
-    extractor = CompositeFactExtractor(extractors)
+        try:
+            response = await self._client.aio.models.generate_content(
+                model    = self._model,
+                contents = prompt,
+                config   = config,
+            )
+            text  = response.text or ""
+            usage = response.usage_metadata
 
-    _memory_service_instance = MemoryService(
-        working       = working,
-        long_term     = long_term,
-        menu_state    = menu,
-        fact_extractor= extractor,
-    )
+            return LLMResponse(
+                conteudo      = text,
+                model         = self._model,
+                input_tokens  = getattr(usage, "prompt_token_count",     0),
+                output_tokens = getattr(usage, "candidates_token_count", 0),
+                sucesso       = bool(text),
+            )
+        except Exception as exc:
+            logger.exception("❌ GeminiProvider.gerar_resposta_async | erro: %s", exc)
+            return LLMResponse(
+                conteudo = "",
+                model    = self._model,
+                sucesso  = False,
+                erro     = str(exc)[:300],
+            )
 
-    logger.info("✅ [MEMORY] MemoryService criado.")
-    return _memory_service_instance
-
-
-def reset_memory_service() -> None:
-    """Reseta o singleton (útil em testes)."""
-    global _memory_service_instance
-    _memory_service_instance = None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Adapter do Gemini para o LLMFactExtractor
-# ─────────────────────────────────────────────────────────────────────────────
-
-class _GeminiProviderAdapter:
-    """
-    Adapter mínimo que expõe a interface esperada pelo LLMFactExtractor.
-
-    LLMFactExtractor chama:
-        await provider.gerar_resposta_estruturada_async(
-            prompt=...,
-            response_schema=PydanticModel,
-            temperatura=0.05,
-        )
-
-    GeminiProvider (src/infrastructure/adapters/gemini_provider.py) já tem
-    este método — só precisamos de uma referência lazy para evitar import circular.
-    """
+    # ─── Geração estruturada (Pydantic) ───────────────────────────────────────
 
     async def gerar_resposta_estruturada_async(
         self,
-        prompt: str,
-        response_schema: Any,
-        temperatura: float = 0.05,
-        **kwargs,
-    ) -> Any | None:
+        prompt:             str,
+        response_schema:    Type[T],
+        system_instruction: str   = "",
+        temperatura:        float = 0.0,
+    ) -> T | None:
         """
-        Delega para GeminiProvider.gerar_resposta_estruturada_async().
-        Import lazy evita circular dependency entre memory e infrastructure.
+        Geração com structured output — Gemini garante JSON válido contra o schema.
+        Temperatura 0.0 por padrão: determinístico para extração de dados.
         """
+        from google.genai import types
+
+        config = types.GenerateContentConfig(
+            system_instruction = system_instruction or None,
+            temperature        = temperatura,
+            max_output_tokens  = 1024,
+            response_mime_type = "application/json",
+            response_schema    = response_schema,
+        )
+
         try:
-            from src.infrastructure.adapters.gemini_provider import GeminiProvider
-            provider = GeminiProvider()
-            return await provider.gerar_resposta_estruturada_async(
-                prompt          = prompt,
-                response_schema = response_schema,
-                temperatura     = temperatura,
+            response = await self._client.aio.models.generate_content(
+                model    = self._model,
+                contents = prompt,
+                config   = config,
             )
+            raw  = response.text or "{}"
+            data = json.loads(raw)
+            return response_schema(**data)
+
         except Exception as exc:
-            logger.warning(
-                "⚠️  [MEMORY:GEMINI] gerar_resposta_estruturada_async falhou: %s", exc
+            logger.exception(
+                "❌ GeminiProvider.gerar_resposta_estruturada_async "
+                "| schema=%s | erro: %s",
+                response_schema.__name__, exc,
             )
             return None
+
+    # ─── Versão síncrona (para Celery workers) ────────────────────────────────
+
+    def gerar_resposta_sincrono(
+        self,
+        prompt:      str,
+        temperatura: float = 0.2,
+        max_tokens:  int   = 1024,
+    ) -> LLMResponse:
+        """
+        Versão síncrona para tasks Celery que não podem usar await.
+        Usa o cliente síncrono do google-genai.
+        """
+        from google.genai import types
+
+        config = types.GenerateContentConfig(
+            temperature       = temperatura,
+            max_output_tokens = max_tokens,
+        )
+
+        try:
+            response = self._client.models.generate_content(
+                model    = self._model,
+                contents = prompt,
+                config   = config,
+            )
+            text  = response.text or ""
+            usage = response.usage_metadata
+
+            return LLMResponse(
+                conteudo      = text,
+                model         = self._model,
+                input_tokens  = getattr(usage, "prompt_token_count",     0),
+                output_tokens = getattr(usage, "candidates_token_count", 0),
+                sucesso       = bool(text),
+            )
+        except Exception as exc:
+            logger.exception("❌ GeminiProvider.gerar_resposta_sincrono | erro: %s", exc)
+            return LLMResponse(conteudo="", model=self._model, sucesso=False, erro=str(exc)[:300])
+
+
+# ─── Singleton ────────────────────────────────────────────────────────────────
+
+@lru_cache(maxsize=1)
+def _get_default_provider() -> GeminiProvider:
+    return GeminiProvider()
+
+
+def get_gemini_provider() -> GeminiProvider:
+    """Retorna o singleton do GeminiProvider."""
+    return _get_default_provider()
