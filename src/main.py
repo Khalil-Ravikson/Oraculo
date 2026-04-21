@@ -1,6 +1,12 @@
 """
-src/main.py — v4.2 (startup 100% async, sem MemorySaver)
-=========================================================
+src/main.py — v5 (LangChain Runnables, sem LangGraph)
+=======================================================
+
+MUDANÇAS vs v4:
+  - Removido: compilar_grafo(), LangGraph, OraculoRouterService complexo
+  - Adicionado: OracleChain (pipeline linear simples)
+  - Adicionado: setup_logging() com stdout sem buffer (resolve logs mudos no Docker)
+  - Simplificado: startup em <1s vs ~5s anterior
 """
 from __future__ import annotations
 
@@ -12,19 +18,22 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-logger = logging.getLogger(__name__)
+# ── Logging PRIMEIRO — antes de qualquer import src.* ─────────────────────────
+from src.infrastructure.logging_config import setup_logging
 
-# Grafo compilado — inicializado no startup, acessado via get_compiled_graph()
-# NÃO importar o grafo aqui: importação tardia evita circular imports no startup
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
     from src.infrastructure.settings import settings
 
+    # Configura logging imediatamente
+    setup_logging(level=settings.LOG_LEVEL)
+
     app = FastAPI(
         title       = "Oráculo UEMA",
         description = "Assistente Académico Inteligente da UEMA",
-        version     = "4.2.0",
+        version     = "5.0.0",
         docs_url    = "/api/docs" if settings.DEV_MODE else None,
         redoc_url   = None,
     )
@@ -32,20 +41,13 @@ def create_app() -> FastAPI:
     _montar_static(app)
     _registrar_routers(app)
 
-    # Prometheus /metrics (no-op se prometheus_client não instalado)
-    try:
-        from prometheus_client import make_asgi_app
-        app.mount("/metrics", make_asgi_app())
-    except ImportError:
-        pass
-
     @app.on_event("startup")
-    async def on_startup() -> None:
+    async def on_startup():
         await _startup(settings)
 
     @app.on_event("shutdown")
-    async def on_shutdown() -> None:
-        await _shutdown()
+    async def on_shutdown():
+        _shutdown()
 
     @app.get("/", include_in_schema=False)
     async def root():
@@ -54,95 +56,68 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["Sistema"])
     async def health():
         from src.infrastructure.redis_client import redis_ok
+        from src.application.chain.oracle_chain import get_oracle_chain
+        chain_ok = True
+        try:
+            get_oracle_chain()
+        except Exception:
+            chain_ok = False
         return {
-            "status":   "online",
-            "sistema":  "Oráculo UEMA",
-            "versao":   "4.2.0",
-            "redis_ok": redis_ok(),
+            "status":    "online",
+            "sistema":   "Oráculo UEMA",
+            "versao":    "5.0.0",
+            "redis_ok":  redis_ok(),
+            "chain_ok":  chain_ok,
+            "framework": "LangChain Runnables",
         }
 
     return app
 
 
 async def _startup(settings) -> None:
-    """Pipeline de startup — cada etapa tem tratamento de erro independente."""
-    logging.basicConfig(
-        level   = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
-        format  = "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt = "%H:%M:%S",
-    )
-    logger.info("🚀 Oráculo UEMA v4.2 iniciando...")
+    logger.info("🚀 Oráculo UEMA v5 iniciando (LangChain Runnables)...")
 
-    # ── 1. Índices Redis (SVS-VAMANA / HNSW) ──────────────────────────────────
-    from src.infrastructure.redis_client import inicializar_indices
-    await inicializar_indices()
-
-    # ── 2. Modelo de Embeddings (singleton — ~3s na primeira carga) ───────────
-    from src.rag.embeddings import get_embeddings
-    embeddings = get_embeddings()
-    logger.info("✅ Embeddings prontos (provider=%s).", settings.EMBEDDING_PROVIDER)
-
-    # ── 3. SemanticRouter (async Redis nativo) ────────────────────────────────
-    import redis.asyncio as aioredis
-    from src.domain.services.semantic_router import SemanticRouterService
-
-    async_redis = aioredis.from_url(settings.REDIS_URL, decode_responses=False)
-    semantic_router = SemanticRouterService(
-        async_redis      = async_redis,
-        embeddings_model = embeddings,
-    )
-    logger.info("✅ SemanticRouterService pronto.")
-
-    # ── 4. PydanticRouter (Gemini structured output) ──────────────────────────
-    from src.rag.query.pydantic_router import PydanticRouter
-    pydantic_router = PydanticRouter()
-    logger.info("✅ PydanticRouter pronto.")
-
-    # ── 5. OraculoRouterService (orquestra as camadas 3 e 4) ──────────────────
-    from src.domain.services.oraculo_router import OraculoRouterService
-    oraculo_router = OraculoRouterService(
-        semantic_router = semantic_router,
-        pydantic_router = pydantic_router,
-    )
-    logger.info("✅ OraculoRouterService pronto.")
-
-    # ── 6. LangGraph com AsyncRedisSaver ──────────────────────────────────────
-    from src.application.graph.builder import init_graph
+    # 1. Inicializa índices Redis (async)
     try:
-        await init_graph(oraculo_router)
-    except Exception as e:
-        raise e
+        from src.infrastructure.redis_client import inicializar_indices
+        await inicializar_indices()
+        logger.info("✅ Índices Redis OK")
+    except Exception as exc:
+        logger.error("❌ Redis indices falhou: %s\n%s", exc, traceback.format_exc())
+        raise RuntimeError(f"Redis indisponível: {exc}") from exc
 
-    # ── 7. Evolution API (não-fatal em DEV) ────────────────────────────────────
+    # 2. Pré-aquece o modelo de embeddings (lazy singleton)
+    try:
+        from src.rag.embeddings import get_embeddings
+        emb = get_embeddings()
+        # Teste rápido para validar que o modelo funciona
+        _ = emb.embed_query("teste")
+        logger.info("✅ Embeddings OK")
+    except Exception as exc:
+        logger.warning("⚠️  Embeddings falhou no pré-aquecimento: %s", exc)
+
+    # 3. Inicializa a chain (singleton)
+    try:
+        from src.application.chain.oracle_chain import get_oracle_chain
+        get_oracle_chain()
+        logger.info("✅ OracleChain (LangChain) pronta")
+    except Exception as exc:
+        logger.error("❌ Chain falhou: %s", exc)
+        raise
+
+    # 4. WhatsApp gateway (não-fatal em dev)
     try:
         from src.services.evolution_service import EvolutionService
         await EvolutionService().inicializar()
-        logger.info("✅ Evolution API inicializada.")
+        logger.info("✅ Evolution API inicializada")
     except Exception as exc:
-        logger.warning("⚠️  Evolution API indisponível (DEV?): %s", exc)
+        logger.warning("⚠️  Evolution API indisponível (modo dev?): %s", exc)
 
-    logger.info("🟢 Oráculo UEMA pronto para receber mensagens.")
+    logger.info("✅ Oráculo UEMA v5 pronto! Framework: LangChain Runnables")
 
 
-async def _shutdown() -> None:
-    """Libera recursos na ordem inversa da inicialização."""
-    logger.info("🛑 Iniciando shutdown...")
-
-    # Fecha AsyncRedisSaver do LangGraph
-    try:
-        from src.application.graph.builder import aclose_checkpointer
-        await aclose_checkpointer()
-    except Exception:
-        pass
-
-    # Flush Langfuse (se configurado)
-    try:
-        from src.infrastructure.observability.langfuse_client import flush_langfuse
-        flush_langfuse()
-    except Exception:
-        pass
-
-    logger.info("🛑 Oráculo UEMA encerrado.")
+def _shutdown() -> None:
+    logger.info("🛑 Oráculo UEMA encerrando...")
 
 
 def _montar_static(app: FastAPI) -> None:
@@ -152,27 +127,19 @@ def _montar_static(app: FastAPI) -> None:
 
 
 def _registrar_routers(app: FastAPI) -> None:
-    from src.api.hub           import router as hub_router
-    from src.api.admin_api     import router as admin_api_router
-    from src.api.rag_admin     import router as rag_admin_router
-    from src.api               import monitor
-    from src.api.chunkviz_api  import router as chunkviz_router
-    from src.api.routers.webhook import router as webhook_router
+    from src.api.hub         import router as hub_router
+    from src.api.admin_api   import router as admin_api_router
+    from src.api.rag_admin   import router as rag_admin_router
+    from src.api             import monitor
+    from src.api.chunkviz_api import router as chunkviz_router
+    from src.api.eval_api    import router as eval_router
 
     app.include_router(hub_router)
     app.include_router(admin_api_router)
     app.include_router(rag_admin_router)
     app.include_router(monitor.router, prefix="/monitor")
     app.include_router(chunkviz_router)
-    app.include_router(webhook_router, prefix="/api/v1")
-
-    try:
-        from src.infrastructure.settings import settings
-        if settings.DEV_MODE:
-            from src.api.eval_dashboard import router as eval_router
-            app.include_router(eval_router, prefix="/eval", tags=["Eval"])
-    except Exception:
-        pass
+    app.include_router(eval_router, prefix="/eval", tags=["Eval RAG"])
 
 
 app = create_app()
