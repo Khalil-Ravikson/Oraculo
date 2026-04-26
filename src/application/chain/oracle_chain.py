@@ -399,7 +399,7 @@ class OracleChain:
                               {"crag_score": round(normalized, 3)}))
 
     async def _step_generate(self, ctx: dict, emit) -> None:
-        """Gera resposta com Gemini usando contexto RAG."""
+        """Gera resposta com Gemini usando contexto RAG e Tool Binding."""
         t0 = time.monotonic()
         await emit(StepResult("generate", "running"))
 
@@ -474,16 +474,46 @@ class OracleChain:
                 temperature=0.2,
                 google_api_key=settings.GEMINI_API_KEY,
             )
-            messages = [SystemMessage(content=system_prompt),
-                        HumanMessage(content=prompt)]
 
-            response = await llm.ainvoke(messages)
+            # ── INÍCIO DO BLOCO CORRIGIDO ──
+            role = user_ctx.get("role", "guest").upper()
+            tools = []
+            try:
+                registry = _get_tool_registry()
+                tools = registry.get_for_role(role)
+            except Exception as e:
+                logger.warning("⚠️  [CHAIN] tools não carregadas: %s", e)
+
+            llm_bound = llm.bind_tools(tools) if tools else llm
+            messages = [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
+            
+            response = await llm_bound.ainvoke(messages)
+
+            # Desvio HITL: se LLM quer chamar tool
+            if hasattr(response, "tool_calls") and response.tool_calls:
+                tool_call = response.tool_calls[0]
+                import json
+                
+                hitl_key = f"hitl:{ctx['session_id']}"
+                r.setex(hitl_key, 300, json.dumps({
+                    "action":      tool_call["name"],
+                    "args":        tool_call["args"],
+                    "status":      "pending",
+                    "expires_at":  int(time.time()) + 300,
+                }))
+                
+                tool_desc = _descrever_tool_call(tool_call["name"], tool_call["args"])
+                ctx["answer"] = (
+                    f"⚠️ *Confirmação necessária*\n\n{tool_desc}\n\n"
+                    "Responda *SIM* para confirmar ou *NÃO* para cancelar."
+                )
+                ctx["hitl_pending"] = True
+                await emit(StepResult("generate", "ok", f"HITL disparado: {tool_call['name']}", 0))
+                return
+
+            # Fluxo RAG Normal (sem chamada de tool)
             answer = response.content or ""
-            tokens = (
-                response.usage_metadata.get("total_tokens", 0)
-                if hasattr(response, "usage_metadata") and response.usage_metadata
-                else 0
-            )
+            tokens = getattr(response, "usage_metadata", {}).get("total_tokens", 0) if hasattr(response, "usage_metadata") else 0
 
             ctx["answer"] = answer
             ctx["tokens_used"] = tokens
@@ -492,6 +522,7 @@ class OracleChain:
             detail = f"{len(answer)} chars | {tokens} tokens | {ms}ms"
             await emit(StepResult("generate", "ok", detail, ms,
                                   {"tokens": tokens, "chars": len(answer)}))
+            # ── FIM DO BLOCO CORRIGIDO ──
 
         except Exception as e:
             ms = int((time.monotonic() - t0) * 1000)
@@ -501,7 +532,6 @@ class OracleChain:
                 "Tente reformular sua pergunta. 🙏"
             )
             await emit(StepResult("generate", "error", str(e)[:100], ms))
-
     async def _step_save_memory(self, ctx: dict, emit) -> None:
         """Persiste turno no Redis (working memory)."""
         t0 = time.monotonic()
@@ -661,3 +691,34 @@ def get_oracle_chain() -> OracleChain:
         _chain_instance = OracleChain()
         logger.info("✅ [CHAIN] OracleChain inicializado (LangChain Runnables)")
     return _chain_instance
+    
+def _descrever_tool_call(name: str, args: dict) -> str:
+    desc = {
+        "abrir_chamado_glpi": f"Abrir chamado: *{args.get('titulo','?')}*",
+        "enviar_email":       f"Enviar e-mail para *{args.get('destinatario','?')}*",
+        "update_student_email": f"Alterar e-mail para *{args.get('novo_valor','?')}*",
+    }
+    return desc.get(name, f"Executar `{name}` com args: {args}")
+
+@lru_cache(maxsize=1)
+def _get_tool_registry():
+    # importe e instancie conforme seu container DI
+    from src.infrastructure.services.rag_search_service import (
+        HybridRAGSearchService, CalendarioService, EditalService,
+        ContatosService, WikiCTICService,
+    )
+    from src.infrastructure.services.glpi_service import MockGLPIService
+    from src.infrastructure.services.email_service import LogEmailService
+    from src.rag.embeddings import get_embeddings
+    from src.domain.tools.tool_registry import ToolRegistry
+
+    rag = HybridRAGSearchService(get_embeddings())
+    return ToolRegistry(
+        calendario_svc=CalendarioService(rag),
+        edital_svc=EditalService(rag),
+        contatos_svc=ContatosService(rag),
+        wiki_svc=WikiCTICService(rag),
+        glpi_svc=MockGLPIService(),
+        email_svc=LogEmailService(),
+        scraping_svc=None,
+    )
