@@ -210,7 +210,7 @@ async def listar_users(
         async with AsyncSessionLocal() as s:
             rows = await s.execute(
                 text(f'SELECT id, nome, email, telefone, role, status, curso, '
-                     f'verificado, criado_em FROM "Pessoas" {where} '
+                     f'verificado, criado_em FROM "pessoas" {where} '
                      f'ORDER BY criado_em DESC LIMIT :limit'),
                 params,
             )
@@ -247,7 +247,7 @@ async def atualizar_user(
         updates["id"] = pessoa_id
         async with AsyncSessionLocal() as s:
             await s.execute(
-                text(f'UPDATE "Pessoas" SET {set_clause} WHERE id = :id'),
+                text(f'UPDATE "pessoas" SET {set_clause} WHERE id = :id'),
                 updates,
             )
             await s.commit()

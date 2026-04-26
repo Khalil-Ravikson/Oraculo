@@ -196,7 +196,7 @@ class AdminCommandsUseCase:
             from sqlalchemy import text
             async with AsyncSessionLocal() as s:
                 r = await s.execute(text(
-                    "SELECT nome, telefone, role, status FROM \"Pessoas\" "
+                    "SELECT nome, telefone, role, status FROM \"pessoas\" "
                     "WHERE status = 'ativo' ORDER BY criado_em DESC LIMIT 10"
                 ))
                 rows = r.fetchall()
@@ -264,7 +264,7 @@ class AdminCommandsUseCase:
         from sqlalchemy import text
         async with AsyncSessionLocal() as s:
             await s.execute(
-                text('UPDATE "Pessoas" SET status = :s WHERE telefone = :p'),
+                text('UPDATE "pessoas" SET status = :s WHERE telefone = :p'),
                 {"s": status, "p": phone},
             )
             await s.commit()

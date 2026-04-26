@@ -42,6 +42,9 @@ def _get_pymupdf_parser() -> "IDocumentParser":
     from src.infrastructure.adapters.parsers.pymupdf_adapter import PyMuPDFAdapter
     return PyMuPDFAdapter()
 
+def _get_csv_parser() -> "IDocumentParser":
+    from src.infrastructure.adapters.parsers.csv_adapter import CsvAdapter
+    return CsvAdapter()
 
 def _get_docling_parser() -> "IDocumentParser":
     """
@@ -92,6 +95,7 @@ _REGISTRY: dict[str, callable] = {
     "marker":        _get_marker_parser,
     "unstructured":  _get_unstructured_parser,
     "txt":           _get_txt_parser,
+    "csv":           _get_csv_parser,
 }
 
 # Mapeamento extensão → lista de parsers candidatos (ordem de preferência)
@@ -105,7 +109,7 @@ _EXT_TO_PARSERS: dict[str, list[str]] = {
     ".htm":  ["unstructured"],
     ".txt":  ["txt"],
     ".md":   ["txt"],
-    ".csv":  ["txt"],
+    ".csv":  ["csv", "txt", "unstructured"],
 }
 
 # Threshold de chars/página para detectar PDF-scan (abaixo = provavelmente imagem)

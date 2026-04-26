@@ -29,21 +29,21 @@ logger = logging.getLogger(__name__)
 # Configuração de busca por tipo de documento
 _DOC_TYPE_CONFIG: dict[str, dict] = {
     "calendario": {
-        "source_filter": "calendario-academico-2026.pdf",
+        "source_filter": None,
         "k_vector": 5,
         "k_text": 8,       # BM25 é crítico para datas exatas
         "max_chars": 1200,
         "label": "CALENDÁRIO ACADÊMICO UEMA 2026",
     },
     "edital": {
-        "source_filter": "edital_paes_2026.pdf",
+        "source_filter": None,
         "k_vector": 4,
         "k_text": 10,      # edital tem muitas siglas exatas (AC, BR-PPI)
         "max_chars": 1400,
         "label": "EDITAL PAES 2026",
     },
     "contatos": {
-        "source_filter": "guia_contatos_2025.pdf",
+        "source_filter": None,
         "k_vector": 7,     # variações semânticas de nomes de setores
         "k_text": 5,
         "max_chars": 1500,

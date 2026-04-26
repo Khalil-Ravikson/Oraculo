@@ -103,3 +103,55 @@ class UEMAWikiScraper(BaseScraper):
     def _url_para_page_id(self, url: str) -> str:
         params = parse_qs(urlparse(url).query)
         return params.get("id", ["unknown"])[0]
+
+    def _extract_clean_content(self, soup: BeautifulSoup, url: str) -> str:
+        """Remove ruído e retorna Markdown limpo do conteúdo principal."""
+    # Remove elementos de ruído
+    for tag in soup.find_all([
+        "script", "style", "nav", "footer", "header",
+        "aside", "iframe", "noscript", "form", "button",
+    ]):
+        tag.decompose()
+
+    # DokuWiki: ruído adicional
+    for tag in soup.find_all(class_=[
+        "secedit", "toolbar", "breadcrumbs", "dokuwiki__footer",
+        "dokuwiki__header", "sidebar", "toc", "catlist",
+        "search_quickresult", "btn",
+    ]):
+        tag.decompose()
+
+    # Remove atributos de estilo inline
+    for tag in soup.find_all(True):
+        tag.attrs = {k: v for k, v in tag.attrs.items() if k in ("href", "src", "alt")}
+
+    # Conteúdo principal DokuWiki
+    main = (
+        soup.find("div", class_="page")
+        or soup.find("div", id="dokuwiki__content")
+        or soup.find("article")
+        or soup.find("main")
+        or soup.find("body")
+    )
+    if not main:
+        return ""
+
+    # Converte para Markdown simples
+    lines = []
+    for elem in main.find_all(["h1","h2","h3","h4","p","li","td","pre","code"]):
+        text = elem.get_text(separator=" ", strip=True)
+        if not text or len(text) < 5:
+            continue
+        prefix = {
+            "h1": "# ", "h2": "## ", "h3": "### ", "h4": "#### ",
+            "pre": "```\n", "code": "`",
+        }.get(elem.name, "")
+        suffix = "\n```" if elem.name == "pre" else ("`" if elem.name == "code" else "")
+        lines.append(f"{prefix}{text}{suffix}")
+
+    content = "\n\n".join(lines)
+    # Remove artefatos
+    import re
+    content = re.sub(r"\[edit\]|\[rev\]|\[top\]|\[backlink\]", "", content)
+    content = re.sub(r"\n{3,}", "\n\n", content)
+    return content.strip()

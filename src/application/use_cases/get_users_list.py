@@ -15,7 +15,7 @@ class GetUsersListUseCase:
                 where_clause = "WHERE role = :role" if role_filter else ""
                 query = text(f"""
                     SELECT id, nome, email, telefone, role, status, curso, criado_em 
-                    FROM "Pessoas" 
+                    FROM pessoas 
                     {where_clause} 
                     ORDER BY id DESC LIMIT 100
                 """)

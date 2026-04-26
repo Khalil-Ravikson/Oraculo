@@ -44,6 +44,37 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
     chat_id = identity.get("chat_id", "")
     message = identity.get("body", "")
 
+
+
+
+    # ── Validação de identidade (Porteiro) ────────────────────────────────────
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.pessoa_repository import PessoaRepository
+
+    async with AsyncSessionLocal() as db:
+        repo = PessoaRepository(db)
+        identidade = await repo.obter_identidade_por_telefone(phone, chat_id)
+
+    if not identidade:
+        logger.info("🚫 [TASK] Usuário não cadastrado: %s", phone[-6:])
+        await gateway.enviar_mensagem(
+            chat_id,
+            "👋 Para usar o Oráculo, você precisa estar cadastrado. "
+            "Entre em contato com a secretaria ou CTIC."
+        )
+        success = True
+        return
+
+    if identidade.status != "ativo":
+        logger.info("🚫 [TASK] Usuário inativo: %s | status=%s", phone[-6:], identidade.status)
+        success = True
+        return
+
+    # Monta user_context rico a partir da identidade
+    user_context = identidade.contexto_llm
+    user_context["role"] = identidade.role
+    user_context["is_admin"] = identidade.is_admin
+
     if not message.strip():
         logger.debug("⏭️  Mensagem vazia ignorada para %s", phone)
         return

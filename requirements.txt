@@ -2,7 +2,6 @@
 # =================================================================
 # REGRA: não altere versões sem aprovação da equipe.
 
-
 # ── Web Framework ─────────────────────────────────────────────────
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
@@ -18,9 +17,12 @@ sqlalchemy>=2.0.29
 asyncpg>=0.29.0
 alembic>=1.13.1
 
-# ── LLM & AI ─────────────────────────────────────────────────────
+# ── LLM & RAG (LangChain) ─────────────────────────────────────────
 google-genai>=0.5.0
 langchain-google-genai>=1.0.3
+langchain>=0.1.16
+langchain-core>=0.1.45
+langchain-text-splitters
 
 # ── Tasks ─────────────────────────────────────────────────────────
 tenacity>=8.2.3
@@ -28,27 +30,23 @@ celery>=5.3.6
 
 # ── Scraping ──────────────────────────────────────────────────────
 scrapling>=0.1.1
+beautifulsoup4>=4.12.0
 
-# ── Sprint 1: Observabilidade LLM ────────────────────────────────
-# Langfuse: tracing open-source self-hosted
-# Instalação: pip install langfuse
+# ── Parsers de Documentos ─────────────────────────────────────────
+pymupdf
+# Mantemos docling (IBM) e marker (ML) para layouts e PDFs complexos
+docling
+marker-pdf>=0.3.0
+llama-parse>=0.4.0
+# Usamos extensões específicas do unstructured ao invés de [all-docs] para evitar lentidão
+unstructured[docx,pptx]>=0.12.0
+
+# ── Sprint 1: Observabilidade LLM & Métricas ─────────────────────
 # Sem Langfuse → tracing desativado silenciosamente (sem erro)
 langfuse>=2.0.0
 prometheus-client>=0.20.0
 scikit-learn>=1.3.0
-langchain-text-splitters 
-pymupdf
-beautifulsoup4>=4.12.0
-marker-pdf>=0.3.0
-#docling>=1.0.0
-#llama-parse>=0.4.0
-#unstructured[all-docs]>=0.12.0
 
-# --- Observabilidade ---
-prometheus-client>=0.20.0
-
-# --- LangGraph e Persistência (Redis Checkpointer) ---
+# ── LangGraph e Persistência (Desativados) ────────────────────────
 #langgraph>=0.2.0
 #langgraph-checkpoint-redis>=0.4.0
-langchain>=0.1.16
-langchain-core>=0.1.45
