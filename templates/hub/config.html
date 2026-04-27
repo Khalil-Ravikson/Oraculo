@@ -1,0 +1,134 @@
+{% extends "hub/_base.html" %}
+{% block title %}Configuração — Oráculo UEMA{% endblock %}
+{% block content %}
+<header>
+  <div class="logo"><div class="logo-icon">⚙️</div>
+    <div class="logo-text"><h1>Configuração</h1><span>SISTEMA E INTEGRAÇÕES</span></div>
+  </div>
+  <div class="header-right">
+    <a href="/hub/" style="color:var(--accent);text-decoration:none;border:1px solid currentColor;padding:5px 10px;font-family:monospace;font-size:11px;border-radius:4px">← Hub</a>
+  </div>
+</header>
+<main style="padding:20px">
+
+  <!-- Monitoring Links -->
+  <div style="margin-bottom:24px">
+    <div style="font-family:monospace;color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px">// ferramentas de observabilidade</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+      <a href="http://localhost:3000" target="_blank" style="background:#111;border:1px solid #333;padding:18px;border-radius:8px;text-decoration:none;color:inherit;display:block">
+        <div style="font-size:22px;margin-bottom:8px">📊</div>
+        <div style="font-weight:bold;margin-bottom:4px">Grafana</div>
+        <div style="font-size:11px;color:#666">Dashboards de métricas e alertas</div>
+        <div style="font-size:10px;color:#ff6b35;margin-top:6px;font-family:monospace">localhost:3001</div>
+      </a>
+      <a href="http://localhost:9090" target="_blank" style="background:#111;border:1px solid #333;padding:18px;border-radius:8px;text-decoration:none;color:inherit;display:block">
+        <div style="font-size:22px;margin-bottom:8px">🔥</div>
+        <div style="font-weight:bold;margin-bottom:4px">Prometheus</div>
+        <div style="font-size:11px;color:#666">Coleta de métricas e alertas</div>
+        <div style="font-size:10px;color:#ff6b35;margin-top:6px;font-family:monospace">localhost:9090</div>
+      </a>
+      <a href="http://localhost:3000" target="_blank" style="background:#111;border:1px solid #333;padding:18px;border-radius:8px;text-decoration:none;color:inherit;display:block">
+        <div style="font-size:22px;margin-bottom:8px">🔭</div>
+        <div style="font-weight:bold;margin-bottom:4px">Langfuse</div>
+        <div style="font-size:11px;color:#666">Tracing de chamadas LLM</div>
+        <div style="font-size:10px;color:#ff6b35;margin-top:6px;font-family:monospace">localhost:3000</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- System Config -->
+  <div style="margin-bottom:24px">
+    <div style="font-family:monospace;color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px">// configuração do sistema</div>
+    <div style="background:#111;border:1px solid #333;border-radius:8px;padding:20px">
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:11px;color:#666;margin-bottom:6px;font-family:monospace">SYSTEM PROMPT GLOBAL (vazio = padrão)</label>
+        <textarea id="sys-prompt" style="width:100%;background:#0a0c0e;border:1px solid #333;color:#ddd;padding:10px;font-family:monospace;font-size:12px;border-radius:4px;min-height:80px;outline:none;resize:vertical" placeholder="Deixe vazio para usar o prompt padrão..."></textarea>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button onclick="savePrompt()" style="background:#ff6b35;color:#000;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:bold;font-family:monospace;font-size:12px">SALVAR PROMPT</button>
+        <button onclick="resetPrompt()" style="background:transparent;color:#888;border:1px solid #444;padding:8px 16px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:12px">RESETAR PADRÃO</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Maintenance -->
+  <div style="margin-bottom:24px">
+    <div style="font-family:monospace;color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px">// controles de emergência</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div style="background:#111;border:1px solid #333;border-radius:8px;padding:18px">
+        <div style="font-weight:bold;margin-bottom:6px">🔧 Modo Manutenção</div>
+        <div style="font-size:12px;color:#666;margin-bottom:12px">Bloqueia respostas LLM para todos os usuários</div>
+        <div style="display:flex;gap:8px">
+          <button onclick="setMaintenance(true)" style="background:rgba(232,64,64,.1);color:#e84040;border:1px solid #e84040;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:11px">ATIVAR</button>
+          <button onclick="setMaintenance(false)" style="background:rgba(46,184,114,.1);color:#2eb872;border:1px solid #2eb872;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:11px">DESATIVAR</button>
+        </div>
+        <div id="maint-status" style="font-size:11px;color:#666;margin-top:8px;font-family:monospace"></div>
+      </div>
+      <div style="background:#111;border:1px solid #333;border-radius:8px;padding:18px">
+        <div style="font-weight:bold;margin-bottom:6px">🗑️ Cache Semântico</div>
+        <div style="font-size:12px;color:#666;margin-bottom:12px">Limpa respostas cacheadas do Redis</div>
+        <button onclick="clearCache()" style="background:rgba(255,107,53,.1);color:#ff6b35;border:1px solid #ff6b35;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:11px">LIMPAR CACHE</button>
+        <div id="cache-status" style="font-size:11px;color:#666;margin-top:8px;font-family:monospace"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Celery Health -->
+  <div>
+    <div style="font-family:monospace;color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px">// workers celery</div>
+    <div style="background:#111;border:1px solid #333;border-radius:8px;padding:18px">
+      <button onclick="checkWorkers()" style="background:#ff6b35;color:#000;border:none;padding:7px 14px;border-radius:4px;cursor:pointer;font-weight:bold;font-family:monospace;font-size:11px;margin-bottom:12px">VERIFICAR WORKERS</button>
+      <div id="workers-result" style="font-family:monospace;font-size:12px;color:#888">Clique para verificar...</div>
+    </div>
+  </div>
+</main>
+
+<script>
+const KEY = sessionStorage.getItem('adminKey');
+const h = {'X-Admin-Key': KEY, 'Content-Type': 'application/json'};
+
+async function api(path, opts={}) {
+  opts.headers = {...(opts.headers||{}), ...h};
+  if(opts.body && typeof opts.body==='object') opts.body=JSON.stringify(opts.body);
+  const r = await fetch('/api/admin'+path, opts);
+  return r.json();
+}
+
+async function savePrompt() {
+  const p = document.getElementById('sys-prompt').value;
+  const d = await api('/system/prompt', {method:'POST', body:{prompt:p}});
+  alert(d.msg||'Salvo!');
+}
+async function resetPrompt() {
+  await api('/system/prompt', {method:'POST', body:{prompt:''}});
+  document.getElementById('sys-prompt').value = '';
+  alert('Resetado para padrão!');
+}
+async function setMaintenance(v) {
+  const d = await api('/system/maintenance', {method:'POST', body:{ativo:v}});
+  document.getElementById('maint-status').textContent = d.msg;
+}
+async function clearCache() {
+  const d = await api('/cache', {method:'DELETE'});
+  document.getElementById('cache-status').textContent = `${d.deleted} entradas removidas`;
+}
+async function checkWorkers() {
+  const d = await api('/celery/health');
+  const el = document.getElementById('workers-result');
+  if(d.ok) {
+    el.style.color='#2eb872';
+    el.textContent = '✅ Workers ativos: ' + d.workers.join(', ');
+  } else {
+    el.style.color='#e84040';
+    el.textContent = '❌ Nenhum worker respondendo: ' + (d.error||'timeout');
+  }
+}
+
+// Load current config
+(async()=>{
+  const d = await api('/system');
+  if(d.prompt_custom) document.getElementById('sys-prompt').value = d.prompt_custom;
+  if(d.manutencao) document.getElementById('maint-status').textContent = '⚠️ Manutenção ATIVA';
+})();
+</script>
+{% endblock %}

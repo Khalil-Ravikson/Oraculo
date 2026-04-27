@@ -18,13 +18,13 @@ import logging
 from celery import Celery
 from celery.schedules import crontab
 from celery.signals import worker_ready, worker_shutdown
-
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0").replace("/0", "/2")
-
+from infrastructure import settings
+celery_broker_url = settings.REDIS_URL.replace("/0", "/1")
+celery_backend_url = settings.REDIS_URL.replace("/0", "/2")
 celery_app = Celery(
     "bot_tasks",
-    broker  = REDIS_URL,
-    backend = REDIS_URL,
+    broker  = celery_broker_url,
+    backend = celery_backend_url,
 )
 
 celery_app.conf.update(
@@ -159,3 +159,7 @@ def stream_recovery_task(self) -> dict:
     except Exception as e:
         logger.error("❌ stream_recovery_task: %s", e)
         return {"recovered": 0, "status": "error", "error": str(e)}
+@celery_app.task(name="health_check", bind=True)
+def health_check_task(self) -> dict:
+    """Ping para verificar se o worker está vivo."""
+    return {"status": "ok", "worker": self.request.hostname}

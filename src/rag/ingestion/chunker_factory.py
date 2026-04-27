@@ -231,8 +231,8 @@ _REGISTRY: dict[str, callable] = {
     "markdown":  lambda **kw: MarkdownHeaderChunker(**kw),
     "semantic":  lambda **kw: SemanticChunker(**kw),
 }
-_REGISTRY["parent_child"] = lambda **kw: ParentChildChunker(**kw)
-
+if doc_type in ("edital",) and not embeddings:
+    return ChunkerFactory.get("recursive", chunk_size=300, overlap=80)  # era parent_child
 
 class ChunkerFactory:
     """

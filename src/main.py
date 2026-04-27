@@ -17,9 +17,10 @@ import traceback
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-
+from fastapi.responses import Response as FastAPIResponse
 # ── Logging PRIMEIRO — antes de qualquer import src.* ─────────────────────────
 from src.infrastructure.logging_config import setup_logging
+from src.infrastructure.observability.metrics import PrometheusMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -71,16 +72,16 @@ def create_app() -> FastAPI:
             "framework": "LangChain Runnables",
         }
 
-    return app
+    
 
 # 👇👇👇 ADICIONE ESTA NOVA ROTA AQUI 👇👇👇
-    @app.get("/metrics", tags=["Observabilidade"])
-    async def metrics():
+    @app.get("/metrics", tags=["Observabilidade"], include_in_schema=False)
+    async def prometheus_metrics():
         from src.infrastructure.observability.metrics import PrometheusMetrics
-        m = PrometheusMetrics()
-        body, content_type = m.generate_latest_output()
-        return Response(content=body, media_type=content_type)
-    # 👆👆👆 -------------------------------- 👆👆👆
+        body, ct = PrometheusMetrics().generate_latest_output()
+        return FastAPIResponse(content=body, media_type=ct)
+# 👆👆👆 -------------------------------- 👆👆👆
+    return app
 
 async def _startup(settings) -> None:
     logger.info("🚀 Oráculo UEMA v5 iniciando (LangChain Runnables)...")

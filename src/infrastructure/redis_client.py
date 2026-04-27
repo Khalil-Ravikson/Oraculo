@@ -59,35 +59,28 @@ HNSW_EF = 200
 
 
 # ─── Schemas RedisVL ──────────────────────────────────────────────────────────
-
 def _schema_chunks() -> IndexSchema:
-    """Schema SVS-VAMANA para chunks de RAG."""
     return IndexSchema.from_dict({
-        "index": {
-            "name":         IDX_CHUNKS,
-            "prefix":       PREFIX_CHUNKS,
-            "storage_type": "json",
-        },
+        "index": {"name": IDX_CHUNKS, "prefix": PREFIX_CHUNKS, "storage_type": "json"},
         "fields": [
-            {"name": "content",     "type": "text",    "attrs": {"weight": 2.0, "no_stem": True}},
+            {"name": "content",     "type": "text",    "attrs": {"weight": 2.0}},
             {"name": "source",      "type": "tag"},
             {"name": "doc_type",    "type": "tag"},
             {"name": "chunk_index", "type": "numeric"},
+            {"name": "semester",    "type": "tag"},      # NOVO: filtra por 2026.1/2026.2
+            {"name": "event_type",  "type": "tag"},      # NOVO: matricula/prova/feriado
+            {"name": "label",       "type": "text"},
+            {"name": "indexed_at",  "type": "numeric"},  # NOVO: ordenar por frescor
             {
-                "name": "embedding",
-                "type": "vector",
+                "name": "embedding", "type": "vector",
                 "attrs": {
-                    "algorithm":       "HNSW",
-                    "dims":            VECTOR_DIM,
-                    "distance_metric": "cosine",
-                    "datatype":        "float32",
-                    "m":               16,
-                    "ef_construction": 200
+                    "algorithm": "HNSW", "dims": VECTOR_DIM,
+                    "distance_metric": "cosine", "datatype": "float32",
+                    "m": 16, "ef_construction": 200
                 },
             },
         ],
     })
-
 
 def _schema_tools() -> IndexSchema:
     """Schema SVS-VAMANA para routing semântico."""
@@ -214,21 +207,10 @@ async def inicializar_indices() -> None:
 # O Celery usa redis-py sync internamente; wrappers async criariam deadlocks.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def salvar_chunk(
-    chunk_id:    str,
-    content:     str,
-    source:      str,
-    doc_type:    str,
-    embedding:   list[float],
-    chunk_index: int = 0,
-    metadata:    dict | None = None,
-) -> None:
-    """
-    Persiste um chunk no Redis (SÍNCRONO).
-    Usado por: ingestion/pipeline.py, tasks/ingestion_tasks.py.
-    NÃO remover — Celery workers não podem usar async.
-    """
-    r   = get_redis()
+# src/infrastructure/redis_client.py — salvar_chunk()
+def salvar_chunk(chunk_id, content, source, doc_type, embedding,
+                 chunk_index=0, metadata=None):
+    r = get_redis()
     key = f"{PREFIX_CHUNKS}{source}:{chunk_id}"
     doc = {
         "content":     content,
@@ -236,16 +218,13 @@ def salvar_chunk(
         "doc_type":    doc_type,
         "chunk_index": chunk_index,
         "embedding":   embedding,
-        "metadata":    metadata or {},
+        # NOVO: campos para filtros semânticos precisos
+        "semester":    (metadata or {}).get("semester", ""),
+        "event_type":  (metadata or {}).get("event_type", ""),
+        "label":       (metadata or {}).get("label", ""),
+        "indexed_at":  int(__import__("time").time()),
     }
-    try:
-        r.json().set(key, "$", doc)
-    except Exception as exc:
-        logger.exception(
-            "❌ salvar_chunk falhou | source=%s chunk_id=%s | erro: %s",
-            source, chunk_id, exc,
-        )
-        raise
+    r.json().set(key, "$", doc)
 
 
 def deletar_chunks_por_source(source: str) -> int:

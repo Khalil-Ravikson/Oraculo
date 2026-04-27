@@ -239,7 +239,7 @@ def build_default_scraping_service(
 
     service = ScrapingService(queue=queue, max_concurrency=5)
     service.register(_mk(WikipediaScraper))
-    service.register(_mk(UEMAWikiScraper))
+    
     service.register(_mk(GenericHTTPScraper), fallback=True)
     service.register(UEMAWikiScraper(anti_block=anti_block, retry_policy=retry, cache=cache))
     return service

@@ -442,3 +442,12 @@ async def chunkviz_page(request: Request):
             "modelo": settings.GEMINI_MODEL
         },
     )
+@router.get("/config", response_class=HTMLResponse)
+async def config_page(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/config.html",
+        context={"request": request, "username": payload.sub},
+    )

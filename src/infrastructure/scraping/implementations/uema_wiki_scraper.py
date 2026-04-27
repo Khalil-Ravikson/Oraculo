@@ -25,15 +25,18 @@ class UEMAWikiScraper(BaseScraper):
     @property
     def supported_domains(self) -> list[str]:
         return ["ctic.uema.br", "uema.br"]
-
-    async def fetch(self, request: ScrapeRequest) -> str:
-        async with self.get_client() as client:
-            response = await client.get(request.url, timeout=15.0)
-            response.raise_for_status()
-            return response.text
-
-    async def parse(self, content: str, request: ScrapeRequest) -> ScrapedDocument:
-        soup = BeautifulSoup(content, "lxml")
+    # fetch() deve seguir BaseScraper (url, headers), não (request)
+    async def fetch(self, url: str, headers: dict) -> str:
+        import httpx
+        async with httpx.AsyncClient(timeout=self._timeout, headers=headers) as client:
+            r = await client.get(url, follow_redirects=True)
+            r.raise_for_status()
+            return r.text
+        
+    async def parse(self, raw_content: str, url: str) -> ScrapedDocument:
+        from bs4 import BeautifulSoup
+        import re
+        soup = BeautifulSoup(raw_content, "lxml")
 
         # 1. Extrair Links Internos ANTES de destruir o HTML (para o Crawler continuar)
         div_page = soup.find("div", class_="page") or soup.find("div", id="dokuwiki__content") or soup.find("body")

@@ -37,7 +37,7 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-
+from src.infrastructure.redis_client import get_redis, PREFIX_CHUNKS
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -784,42 +784,20 @@ async def scraping_status(x_admin_key: str = Header(None, alias="X-Admin-Key")):
 
 
 @router.post("/scraping/run")
-async def scraping_run(
-    request: Request,
-    x_admin_key: str = Header(None, alias="X-Admin-Key"),
-):
-    """NOVO FLUXO: Dispara o Scraping jogando a URL na Fila do RabbitMQ."""
-    require_admin(x_admin_key)
-    try:
-        body = await request.json()
-        url  = body.get("url", "https://ctic.uema.br/wiki/doku.php?id=start")
-        
-        # Importa o producer global que instanciamos no main.py
-        from src.main import mq_producer
-        from src.infrastructure.scraping.base_scraper import ScrapeRequest
-
-        if not mq_producer:
-            raise HTTPException(503, "A fila do RabbitMQ não está conectada.")
-
-        # Cria a requisição de scraping e enfileira!
-        req = ScrapeRequest(
-            url=url, 
-            doc_type="wiki_ctic", 
-            priority=1, # Prioridade alta pois foi disparado pelo admin
-            force_refresh=True
-        )
-        await mq_producer.publish(req)
-
-        return {
-            "ok": True, 
-            "msg": "Scraping enviado para a fila com sucesso!", 
-            "url": url,
-            "request_id": req.request_id
-        }
-    except Exception as e:
-        logger.error("Erro ao disparar scraping manual: %s", e)
-        raise HTTPException(500, str(e))
-      
+async def scraping_run(request, x_admin_key=...):
+    body = await request.json()
+    url = body.get("url", "https://ctic.uema.br/wiki/doku.php?id=start")
+    
+    # Disparar diretamente via ScrapingService em background
+    from src.infrastructure.scraping.base_scraper import ScrapeRequest
+    from src.infrastructure.scraping.scraping_service import build_default_scraping_service
+    import asyncio
+    
+    req = ScrapeRequest(url=url, doc_type="wiki_ctic", force_refresh=True, priority=1)
+    asyncio.create_task(build_default_scraping_service().scrape(req))
+    return {"ok": True, "msg": "Scraping enfileirado.", "url": url}
+  
+  
 @router.delete("/scraping/cache")
 async def scraping_clear_cache(x_admin_key: str = Header(None, alias="X-Admin-Key")):
     require_admin(x_admin_key)

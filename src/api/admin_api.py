@@ -347,3 +347,14 @@ async def clear_cache(
     )
 
     return {"ok": True, "deleted": n, "rota": rota or "all"}
+
+
+@router.get("/celery/health")
+async def celery_health(_: TokenPayload = Depends(require_admin_jwt)):
+    from src.infrastructure.celery_app import celery_app
+    try:
+        result = celery_app.control.ping(timeout=3)
+        workers = list(result[0].keys()) if result else []
+        return {"ok": bool(workers), "workers": workers}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
