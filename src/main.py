@@ -73,6 +73,14 @@ def create_app() -> FastAPI:
 
     return app
 
+# 👇👇👇 ADICIONE ESTA NOVA ROTA AQUI 👇👇👇
+    @app.get("/metrics", tags=["Observabilidade"])
+    async def metrics():
+        from src.infrastructure.observability.metrics import PrometheusMetrics
+        m = PrometheusMetrics()
+        body, content_type = m.generate_latest_output()
+        return Response(content=body, media_type=content_type)
+    # 👆👆👆 -------------------------------- 👆👆👆
 
 async def _startup(settings) -> None:
     logger.info("🚀 Oráculo UEMA v5 iniciando (LangChain Runnables)...")
@@ -124,6 +132,9 @@ def _montar_static(app: FastAPI) -> None:
     static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
     os.makedirs(static_dir, exist_ok=True)
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+
 
 
 def _registrar_routers(app: FastAPI) -> None:

@@ -9,11 +9,17 @@ WORKDIR /build
 
 # Dependências de sistema apenas para compilação
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
+    libpq5 \
+    curl \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libxcb1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+# 👆👆👆 ----------------------- 👆👆👆
 # Copia e instala dependências em venv isolado
 COPY requirements.txt .
 RUN python -m venv /opt/venv && \

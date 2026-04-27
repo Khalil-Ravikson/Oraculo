@@ -35,7 +35,7 @@ import time
 import unicodedata
 from dataclasses import dataclass, field
 from typing import AsyncIterator
-
+from functools import lru_cache
 logger = logging.getLogger(__name__)
 
 
@@ -342,9 +342,9 @@ class OracleChain:
 
             # Mapeamento rota → source_filter
             source_map = {
-                "CALENDARIO": "calendario-academico-2026.pdf",
-                "EDITAL":     "edital_paes_2026.pdf",
-                "CONTATOS":   "guia_contatos_2025.pdf",
+                "CALENDARIO": None,
+                "EDITAL":     None,
+                "CONTATOS":   None,
             }
             source_filter = source_map.get(route)
 
@@ -691,7 +691,7 @@ def get_oracle_chain() -> OracleChain:
         _chain_instance = OracleChain()
         logger.info("✅ [CHAIN] OracleChain inicializado (LangChain Runnables)")
     return _chain_instance
-    
+
 def _descrever_tool_call(name: str, args: dict) -> str:
     desc = {
         "abrir_chamado_glpi": f"Abrir chamado: *{args.get('titulo','?')}*",

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class UnstructuredAdapter(IDocumentParser):
     """
     Extrai texto estruturado usando partition_auto.
-    Requer: pip install "unstructured[all-docs]"
+    Requer: pip install "unstructured[x]"
     """
     
     def extract_text(self, file_stream: BinaryIO, **kwargs) -> str:
@@ -38,3 +38,6 @@ class UnstructuredAdapter(IDocumentParser):
         except Exception as e:
             logger.error("❌ Erro ao extrair texto com UnstructuredAdapter: %s", e)
             raise ValueError(f"Falha na extração com Unstructured: {str(e)}") from e
+    def parse(self, file_path: str, instruction: str = "") -> str:
+        with open(file_path, "rb") as f:
+            return self.extract_text(f)
