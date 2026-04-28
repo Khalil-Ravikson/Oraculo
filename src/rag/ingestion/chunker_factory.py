@@ -284,3 +284,4 @@ class ChunkerFactory:
         if doc_type in ("edital",) and not embeddings:
             return ChunkerFactory.get("parent_child", parent_size=1200, child_size=300)
         return ChunkerFactory.get("recursive", **kwargs)
+

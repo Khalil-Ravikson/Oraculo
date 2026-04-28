@@ -1,134 +1,565 @@
 {% extends "hub/_base.html" %}
 {% block title %}Configuração — Oráculo UEMA{% endblock %}
-{% block content %}
-<header>
-  <div class="logo"><div class="logo-icon">⚙️</div>
-    <div class="logo-text"><h1>Configuração</h1><span>SISTEMA E INTEGRAÇÕES</span></div>
-  </div>
-  <div class="header-right">
-    <a href="/hub/" style="color:var(--accent);text-decoration:none;border:1px solid currentColor;padding:5px 10px;font-family:monospace;font-size:11px;border-radius:4px">← Hub</a>
-  </div>
-</header>
-<main style="padding:20px">
 
-  <!-- Monitoring Links -->
-  <div style="margin-bottom:24px">
-    <div style="font-family:monospace;color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px">// ferramentas de observabilidade</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
-      <a href="http://localhost:3000" target="_blank" style="background:#111;border:1px solid #333;padding:18px;border-radius:8px;text-decoration:none;color:inherit;display:block">
-        <div style="font-size:22px;margin-bottom:8px">📊</div>
-        <div style="font-weight:bold;margin-bottom:4px">Grafana</div>
-        <div style="font-size:11px;color:#666">Dashboards de métricas e alertas</div>
-        <div style="font-size:10px;color:#ff6b35;margin-top:6px;font-family:monospace">localhost:3001</div>
+{% block content %}
+<style>
+  :root {
+    --bg: #090b0d; --surface: #0f1214; --surface2: #141719;
+    --border: #1e2225; --border-hover: #2e3235;
+    --accent: #ff6b35; --accent-dim: rgba(255,107,53,.1);
+    --green: #2eb872; --red: #e84040; --blue: #5a8dee;
+    --text: #c8d0d8; --muted: #5a6370;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  .header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(9,11,13,.92); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px; height: 58px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-icon { width: 30px; height: 30px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; display: grid; place-items: center; font-size: 14px; }
+  .brand-title { font-size: 14px; font-weight: 700; }
+  .brand-sub { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+  .back-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); padding: 5px 12px; border-radius: 5px; cursor: pointer; font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-decoration: none; transition: all .2s; }
+  .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .main { padding: 32px 28px; max-width: 1100px; margin: 0 auto; }
+
+  .section-label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  .section { margin-bottom: 36px; }
+
+  /* ── Cards de ferramentas externas ── */
+  .tools-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    margin-bottom: 0;
+  }
+  .tool-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px;
+    text-decoration: none; color: inherit; display: block;
+    transition: all .2s;
+  }
+  .tool-card:hover { border-color: var(--border-hover); transform: translateY(-1px); }
+  .tool-icon { font-size: 22px; margin-bottom: 8px; }
+  .tool-name { font-weight: 700; font-size: 14px; margin-bottom: 3px; }
+  .tool-desc { font-size: 11px; color: var(--muted); line-height: 1.4; }
+  .tool-url { font-family: var(--mono); font-size: 9px; color: var(--accent); margin-top: 6px; letter-spacing: .06em; }
+
+  /* ── Painel de API Keys ── */
+  .keys-panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  .keys-panel-header {
+    background: var(--surface2); border-bottom: 1px solid var(--border);
+    padding: 14px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .keys-panel-title { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+  .save-all-btn {
+    background: var(--accent); color: #000; border: none;
+    padding: 7px 16px; border-radius: 5px; cursor: pointer;
+    font-weight: 700; font-family: var(--mono); font-size: 10px;
+    letter-spacing: .06em; transition: opacity .2s;
+  }
+  .save-all-btn:hover { opacity: .85; }
+  .save-all-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  .key-group {
+    border-bottom: 1px solid var(--border);
+    padding: 20px;
+  }
+  .key-group:last-child { border-bottom: none; }
+
+  .key-group-label {
+    font-family: var(--mono); font-size: 9px;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .key-row {
+    display: grid; grid-template-columns: 200px 1fr auto;
+    align-items: center; gap: 10px; margin-bottom: 10px;
+  }
+  .key-row:last-child { margin-bottom: 0; }
+
+  .key-name {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--muted); letter-spacing: .04em;
+  }
+
+  .key-input {
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 12px;
+    font-family: var(--mono); font-size: 12px;
+    border-radius: 5px; outline: none; width: 100%;
+    transition: border-color .2s;
+  }
+  .key-input:focus { border-color: var(--accent); }
+  .key-input::placeholder { color: var(--muted); }
+
+  .key-toggle {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--muted); padding: 7px 10px; border-radius: 5px;
+    cursor: pointer; font-size: 12px; transition: border-color .2s;
+    white-space: nowrap;
+  }
+  .key-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Config do sistema ── */
+  .system-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+
+  .config-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+  }
+
+  .config-card-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .config-card-desc { font-size: 12px; color: var(--muted); margin-bottom: 16px; line-height: 1.4; }
+
+  .config-textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 10px 12px;
+    font-family: var(--mono); font-size: 11px;
+    border-radius: 6px; outline: none; resize: vertical;
+    min-height: 80px; transition: border-color .2s;
+  }
+  .config-textarea:focus { border-color: var(--accent); }
+
+  .btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+
+  .btn-primary {
+    background: var(--accent); color: #000; border: none;
+    padding: 7px 14px; border-radius: 5px; cursor: pointer;
+    font-weight: 700; font-family: var(--mono); font-size: 10px;
+    transition: opacity .2s;
+  }
+  .btn-primary:hover { opacity: .85; }
+
+  .btn-secondary {
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border); padding: 7px 14px;
+    border-radius: 5px; cursor: pointer;
+    font-family: var(--mono); font-size: 10px; transition: all .2s;
+  }
+  .btn-secondary:hover { border-color: var(--muted); color: var(--text); }
+
+  .btn-danger {
+    background: rgba(232,64,64,.1); color: var(--red);
+    border: 1px solid var(--red); padding: 7px 14px;
+    border-radius: 5px; cursor: pointer;
+    font-family: var(--mono); font-size: 10px; transition: all .2s;
+  }
+  .btn-danger:hover { background: rgba(232,64,64,.2); }
+
+  .btn-success {
+    background: rgba(46,184,114,.1); color: var(--green);
+    border: 1px solid var(--green); padding: 7px 14px;
+    border-radius: 5px; cursor: pointer;
+    font-family: var(--mono); font-size: 10px; transition: all .2s;
+  }
+  .btn-success:hover { background: rgba(46,184,114,.2); }
+
+  /* ── Workers ── */
+  .workers-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+  }
+  #workers-list { font-family: var(--mono); font-size: 12px; margin-top: 12px; }
+  .worker-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid var(--border);
+  }
+  .worker-item:last-child { border-bottom: none; }
+
+  /* ── Feedback toast ── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--surface); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 12px 18px;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--accent); z-index: 1000;
+    opacity: 0; transform: translateY(8px);
+    transition: all .3s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+</style>
+
+<!-- Header -->
+<header class="header">
+  <div class="brand">
+    <div class="brand-icon">⚙️</div>
+    <div>
+      <div class="brand-title">Configuração</div>
+      <div class="brand-sub">Sistema &amp; Integrações</div>
+    </div>
+  </div>
+  <a href="/hub/" class="back-btn">← Hub</a>
+</header>
+
+<main class="main">
+
+  <!-- Links externos -->
+  <div class="section">
+    <div class="section-label">// ferramentas de observabilidade</div>
+    <div class="tools-grid">
+      <a class="tool-card" href="http://localhost:3001" target="_blank">
+        <div class="tool-icon">📊</div>
+        <div class="tool-name">Grafana</div>
+        <div class="tool-desc">Dashboards visuais, alertas e séries temporais de métricas</div>
+        <div class="tool-url">localhost:3001 ↗</div>
       </a>
-      <a href="http://localhost:9090" target="_blank" style="background:#111;border:1px solid #333;padding:18px;border-radius:8px;text-decoration:none;color:inherit;display:block">
-        <div style="font-size:22px;margin-bottom:8px">🔥</div>
-        <div style="font-weight:bold;margin-bottom:4px">Prometheus</div>
-        <div style="font-size:11px;color:#666">Coleta de métricas e alertas</div>
-        <div style="font-size:10px;color:#ff6b35;margin-top:6px;font-family:monospace">localhost:9090</div>
+      <a class="tool-card" href="http://localhost:9090" target="_blank">
+        <div class="tool-icon">🔥</div>
+        <div class="tool-name">Prometheus</div>
+        <div class="tool-desc">Coleta de métricas, alertas e exploração de séries</div>
+        <div class="tool-url">localhost:9090 ↗</div>
       </a>
-      <a href="http://localhost:3000" target="_blank" style="background:#111;border:1px solid #333;padding:18px;border-radius:8px;text-decoration:none;color:inherit;display:block">
-        <div style="font-size:22px;margin-bottom:8px">🔭</div>
-        <div style="font-weight:bold;margin-bottom:4px">Langfuse</div>
-        <div style="font-size:11px;color:#666">Tracing de chamadas LLM</div>
-        <div style="font-size:10px;color:#ff6b35;margin-top:6px;font-family:monospace">localhost:3000</div>
+      <a class="tool-card" href="http://localhost:3000" target="_blank">
+        <div class="tool-icon">🔍</div>
+        <div class="tool-name">Langfuse</div>
+        <div class="tool-desc">Tracing LangChain, custo de tokens e avaliação de qualidade</div>
+        <div class="tool-url">localhost:3000 ↗</div>
       </a>
+    </div>
+  </div>
+
+  <!-- API Keys -->
+  <div class="section">
+    <div class="section-label">// api keys &amp; credenciais</div>
+    <div class="keys-panel">
+      <div class="keys-panel-header">
+        <span class="keys-panel-title">⚠️ As keys são salvas no .env do servidor. Não compartilhe esta tela.</span>
+        <button class="save-all-btn" onclick="saveAllKeys()" id="save-all-btn">SALVAR TODAS</button>
+      </div>
+
+      <!-- Google / LLM -->
+      <div class="key-group">
+        <div class="key-group-label">🤖 Google Gemini &amp; Embeddings</div>
+        <div class="key-row">
+          <span class="key-name">GEMINI_API_KEY</span>
+          <input class="key-input" type="password" id="key-gemini" placeholder="AIza..." data-env="GEMINI_API_KEY">
+          <button class="key-toggle" onclick="toggleKey('key-gemini')">👁</button>
+        </div>
+        <div class="key-row">
+          <span class="key-name">GEMINI_MODEL</span>
+          <input class="key-input" type="text" id="key-gemini-model" placeholder="gemini-2.0-flash-lite" data-env="GEMINI_MODEL">
+          <span style="width:44px"></span>
+        </div>
+        <div class="key-row">
+          <span class="key-name">EMBEDDING_PROVIDER</span>
+          <select class="key-input" id="key-embed-provider" data-env="EMBEDDING_PROVIDER">
+            <option value="google">google (Gemini API)</option>
+            <option value="local">local (BAAI/bge-m3)</option>
+          </select>
+          <span style="width:44px"></span>
+        </div>
+      </div>
+
+      <!-- Evolution / WhatsApp -->
+      <div class="key-group">
+        <div class="key-group-label">📱 Evolution API (WhatsApp)</div>
+        <div class="key-row">
+          <span class="key-name">EVOLUTION_API_KEY</span>
+          <input class="key-input" type="password" id="key-evolution" placeholder="B6D711..." data-env="EVOLUTION_API_KEY">
+          <button class="key-toggle" onclick="toggleKey('key-evolution')">👁</button>
+        </div>
+        <div class="key-row">
+          <span class="key-name">EVOLUTION_BASE_URL</span>
+          <input class="key-input" type="text" id="key-evolution-url" placeholder="http://evolution:8080" data-env="EVOLUTION_BASE_URL">
+          <span style="width:44px"></span>
+        </div>
+        <div class="key-row">
+          <span class="key-name">EVOLUTION_INSTANCE</span>
+          <input class="key-input" type="text" id="key-evolution-inst" placeholder="OraculoUEMA" data-env="EVOLUTION_INSTANCE_NAME">
+          <span style="width:44px"></span>
+        </div>
+      </div>
+
+      <!-- Langfuse -->
+      <div class="key-group">
+        <div class="key-group-label">🔍 Langfuse (Tracing LLM)</div>
+        <div class="key-row">
+          <span class="key-name">LANGFUSE_SECRET_KEY</span>
+          <input class="key-input" type="password" id="key-lf-secret" placeholder="sk-lf-..." data-env="LANGFUSE_SECRET_KEY">
+          <button class="key-toggle" onclick="toggleKey('key-lf-secret')">👁</button>
+        </div>
+        <div class="key-row">
+          <span class="key-name">LANGFUSE_PUBLIC_KEY</span>
+          <input class="key-input" type="password" id="key-lf-public" placeholder="pk-lf-..." data-env="LANGFUSE_PUBLIC_KEY">
+          <button class="key-toggle" onclick="toggleKey('key-lf-public')">👁</button>
+        </div>
+        <div class="key-row">
+          <span class="key-name">LANGFUSE_HOST</span>
+          <input class="key-input" type="text" id="key-lf-host" placeholder="http://langfuse:3000" data-env="LANGFUSE_HOST">
+          <span style="width:44px"></span>
+        </div>
+      </div>
+
+      <!-- PostgreSQL / Redis -->
+      <div class="key-group">
+        <div class="key-group-label">🗄️ Banco de Dados</div>
+        <div class="key-row">
+          <span class="key-name">DATABASE_URL</span>
+          <input class="key-input" type="password" id="key-db" placeholder="postgresql+asyncpg://..." data-env="DATABASE_URL">
+          <button class="key-toggle" onclick="toggleKey('key-db')">👁</button>
+        </div>
+        <div class="key-row">
+          <span class="key-name">REDIS_URL</span>
+          <input class="key-input" type="text" id="key-redis" placeholder="redis://redis:6379/0" data-env="REDIS_URL">
+          <span style="width:44px"></span>
+        </div>
+      </div>
+
+      <!-- Admin -->
+      <div class="key-group">
+        <div class="key-group-label">🔑 Segurança Admin</div>
+        <div class="key-row">
+          <span class="key-name">ADMIN_JWT_SECRET</span>
+          <input class="key-input" type="password" id="key-jwt" placeholder="segredo 32+ chars..." data-env="ADMIN_JWT_SECRET">
+          <button class="key-toggle" onclick="toggleKey('key-jwt')">👁</button>
+        </div>
+        <div class="key-row">
+          <span class="key-name">ADMIN_API_KEY</span>
+          <input class="key-input" type="password" id="key-admin-api" placeholder="chave da API admin..." data-env="ADMIN_API_KEY">
+          <button class="key-toggle" onclick="toggleKey('key-admin-api')">👁</button>
+        </div>
+        <div class="key-row">
+          <span class="key-name">ADMIN_NUMBERS</span>
+          <input class="key-input" type="text" id="key-admin-numbers" placeholder="5598999999999,5598888888888" data-env="ADMIN_NUMBERS">
+          <span style="width:44px"></span>
+        </div>
+      </div>
+
+      <!-- Extras opcionais -->
+      <div class="key-group">
+        <div class="key-group-label">🔧 Extras Opcionais</div>
+        <div class="key-row">
+          <span class="key-name">LLAMA_CLOUD_API_KEY</span>
+          <input class="key-input" type="password" id="key-llama" placeholder="llx-..." data-env="LLAMA_CLOUD_API_KEY">
+          <button class="key-toggle" onclick="toggleKey('key-llama')">👁</button>
+        </div>
+        <div class="key-row">
+          <span class="key-name">HF_TOKEN</span>
+          <input class="key-input" type="password" id="key-hf" placeholder="hf_..." data-env="HF_TOKEN">
+          <button class="key-toggle" onclick="toggleKey('key-hf')">👁</button>
+        </div>
+        <div class="key-row">
+          <span class="key-name">DEV_MODE</span>
+          <select class="key-input" id="key-dev-mode" data-env="DEV_MODE">
+            <option value="True">True (desenvolvimento)</option>
+            <option value="False">False (produção)</option>
+          </select>
+          <span style="width:44px"></span>
+        </div>
+      </div>
     </div>
   </div>
 
   <!-- System Config -->
-  <div style="margin-bottom:24px">
-    <div style="font-family:monospace;color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px">// configuração do sistema</div>
-    <div style="background:#111;border:1px solid #333;border-radius:8px;padding:20px">
-      <div style="margin-bottom:16px">
-        <label style="display:block;font-size:11px;color:#666;margin-bottom:6px;font-family:monospace">SYSTEM PROMPT GLOBAL (vazio = padrão)</label>
-        <textarea id="sys-prompt" style="width:100%;background:#0a0c0e;border:1px solid #333;color:#ddd;padding:10px;font-family:monospace;font-size:12px;border-radius:4px;min-height:80px;outline:none;resize:vertical" placeholder="Deixe vazio para usar o prompt padrão..."></textarea>
-      </div>
-      <div style="display:flex;gap:10px">
-        <button onclick="savePrompt()" style="background:#ff6b35;color:#000;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:bold;font-family:monospace;font-size:12px">SALVAR PROMPT</button>
-        <button onclick="resetPrompt()" style="background:transparent;color:#888;border:1px solid #444;padding:8px 16px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:12px">RESETAR PADRÃO</button>
-      </div>
-    </div>
-  </div>
+  <div class="section">
+    <div class="section-label">// configuração do sistema</div>
+    <div class="system-grid">
 
-  <!-- Maintenance -->
-  <div style="margin-bottom:24px">
-    <div style="font-family:monospace;color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px">// controles de emergência</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div style="background:#111;border:1px solid #333;border-radius:8px;padding:18px">
-        <div style="font-weight:bold;margin-bottom:6px">🔧 Modo Manutenção</div>
-        <div style="font-size:12px;color:#666;margin-bottom:12px">Bloqueia respostas LLM para todos os usuários</div>
-        <div style="display:flex;gap:8px">
-          <button onclick="setMaintenance(true)" style="background:rgba(232,64,64,.1);color:#e84040;border:1px solid #e84040;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:11px">ATIVAR</button>
-          <button onclick="setMaintenance(false)" style="background:rgba(46,184,114,.1);color:#2eb872;border:1px solid #2eb872;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:11px">DESATIVAR</button>
+      <!-- System Prompt -->
+      <div class="config-card" style="grid-column: span 2">
+        <div class="config-card-title">🤖 System Prompt Global</div>
+        <div class="config-card-desc">Sobrescreve o prompt padrão para todos os usuários. Deixe vazio para restaurar o padrão interno.</div>
+        <textarea class="config-textarea" id="sys-prompt" rows="4" placeholder="Você é o Oráculo, assistente institucional da UEMA..."></textarea>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="savePrompt()">SALVAR PROMPT</button>
+          <button class="btn-secondary" onclick="resetPrompt()">RESTAURAR PADRÃO</button>
         </div>
-        <div id="maint-status" style="font-size:11px;color:#666;margin-top:8px;font-family:monospace"></div>
       </div>
-      <div style="background:#111;border:1px solid #333;border-radius:8px;padding:18px">
-        <div style="font-weight:bold;margin-bottom:6px">🗑️ Cache Semântico</div>
-        <div style="font-size:12px;color:#666;margin-bottom:12px">Limpa respostas cacheadas do Redis</div>
-        <button onclick="clearCache()" style="background:rgba(255,107,53,.1);color:#ff6b35;border:1px solid #ff6b35;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:11px">LIMPAR CACHE</button>
-        <div id="cache-status" style="font-size:11px;color:#666;margin-top:8px;font-family:monospace"></div>
+
+      <!-- Manutenção -->
+      <div class="config-card">
+        <div class="config-card-title">🔧 Modo Manutenção</div>
+        <div class="config-card-desc">Bloqueia respostas LLM para todos os usuários. Use durante deploys ou incidentes.</div>
+        <div class="btn-row">
+          <button class="btn-danger" onclick="setMaintenance(true)">ATIVAR</button>
+          <button class="btn-success" onclick="setMaintenance(false)">DESATIVAR</button>
+        </div>
+        <div id="maint-status" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:10px;"></div>
       </div>
+
+      <!-- Cache -->
+      <div class="config-card">
+        <div class="config-card-title">🗑️ Cache Semântico</div>
+        <div class="config-card-desc">Limpa respostas cacheadas no Redis. Use quando os documentos foram atualizados.</div>
+        <div class="btn-row">
+          <button class="btn-danger" onclick="clearCache()">LIMPAR CACHE</button>
+        </div>
+        <div id="cache-status" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:10px;"></div>
+      </div>
+
     </div>
   </div>
 
-  <!-- Celery Health -->
-  <div>
-    <div style="font-family:monospace;color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px">// workers celery</div>
-    <div style="background:#111;border:1px solid #333;border-radius:8px;padding:18px">
-      <button onclick="checkWorkers()" style="background:#ff6b35;color:#000;border:none;padding:7px 14px;border-radius:4px;cursor:pointer;font-weight:bold;font-family:monospace;font-size:11px;margin-bottom:12px">VERIFICAR WORKERS</button>
-      <div id="workers-result" style="font-family:monospace;font-size:12px;color:#888">Clique para verificar...</div>
+  <!-- Workers -->
+  <div class="section">
+    <div class="section-label">// workers celery</div>
+    <div class="workers-card">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div>
+          <div style="font-weight:700; font-size:14px; margin-bottom:4px;">⚡ Status dos Workers</div>
+          <div style="font-size:12px; color:var(--muted);">Verifica se os processos Celery estão respondendo.</div>
+        </div>
+        <button class="btn-primary" onclick="checkWorkers()">VERIFICAR</button>
+      </div>
+      <div id="workers-list" style="color:var(--muted);">Clique em verificar para checar os workers...</div>
     </div>
   </div>
+
 </main>
 
-<script>
-const KEY = sessionStorage.getItem('adminKey');
-const h = {'X-Admin-Key': KEY, 'Content-Type': 'application/json'};
+<!-- Toast -->
+<div id="toast"></div>
 
-async function api(path, opts={}) {
-  opts.headers = {...(opts.headers||{}), ...h};
-  if(opts.body && typeof opts.body==='object') opts.body=JSON.stringify(opts.body);
-  const r = await fetch('/api/admin'+path, opts);
+<script>
+const ADMIN_KEY = sessionStorage.getItem('adminKey');
+const headers = { 'X-Admin-Key': ADMIN_KEY, 'Content-Type': 'application/json' };
+
+function toast(msg, type='ok') {
+  const el = document.getElementById('toast');
+  el.textContent = type === 'ok' ? '✅ ' + msg : '❌ ' + msg;
+  el.style.borderColor = type === 'ok' ? 'var(--green)' : 'var(--red)';
+  el.style.color = type === 'ok' ? 'var(--green)' : 'var(--red)';
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+async function api(path, opts = {}) {
+  opts.headers = { ...headers, ...(opts.headers || {}) };
+  if (opts.body && typeof opts.body === 'object') opts.body = JSON.stringify(opts.body);
+  const r = await fetch('/api/admin' + path, opts);
+  if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
-async function savePrompt() {
-  const p = document.getElementById('sys-prompt').value;
-  const d = await api('/system/prompt', {method:'POST', body:{prompt:p}});
-  alert(d.msg||'Salvo!');
+// ── API Keys ──
+function toggleKey(id) {
+  const el = document.getElementById(id);
+  el.type = el.type === 'password' ? 'text' : 'password';
 }
-async function resetPrompt() {
-  await api('/system/prompt', {method:'POST', body:{prompt:''}});
-  document.getElementById('sys-prompt').value = '';
-  alert('Resetado para padrão!');
-}
-async function setMaintenance(v) {
-  const d = await api('/system/maintenance', {method:'POST', body:{ativo:v}});
-  document.getElementById('maint-status').textContent = d.msg;
-}
-async function clearCache() {
-  const d = await api('/cache', {method:'DELETE'});
-  document.getElementById('cache-status').textContent = `${d.deleted} entradas removidas`;
-}
-async function checkWorkers() {
-  const d = await api('/celery/health');
-  const el = document.getElementById('workers-result');
-  if(d.ok) {
-    el.style.color='#2eb872';
-    el.textContent = '✅ Workers ativos: ' + d.workers.join(', ');
-  } else {
-    el.style.color='#e84040';
-    el.textContent = '❌ Nenhum worker respondendo: ' + (d.error||'timeout');
+
+async function saveAllKeys() {
+  const btn = document.getElementById('save-all-btn');
+  btn.disabled = true;
+  btn.textContent = 'SALVANDO...';
+
+  const inputs = document.querySelectorAll('.key-input[data-env]');
+  const envs = {};
+  inputs.forEach(el => {
+    if (el.value.trim()) envs[el.dataset.env] = el.value.trim();
+  });
+
+  try {
+    await api('/system/env', { method: 'POST', body: { env: envs } });
+    toast('API keys salvas com sucesso! Reinicie os serviços.');
+  } catch (e) {
+    toast('Erro ao salvar keys: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'SALVAR TODAS';
   }
 }
 
-// Load current config
-(async()=>{
-  const d = await api('/system');
-  if(d.prompt_custom) document.getElementById('sys-prompt').value = d.prompt_custom;
-  if(d.manutencao) document.getElementById('maint-status').textContent = '⚠️ Manutenção ATIVA';
-})();
+async function loadCurrentConfig() {
+  try {
+    const sys = await api('/system');
+    if (sys.prompt_custom) document.getElementById('sys-prompt').value = sys.prompt_custom;
+    if (sys.manutencao) {
+      document.getElementById('maint-status').textContent = '⚠️ Manutenção ATIVA';
+      document.getElementById('maint-status').style.color = '#f59e0b';
+    } else {
+      document.getElementById('maint-status').textContent = '✅ Sistema operando normalmente';
+      document.getElementById('maint-status').style.color = 'var(--green)';
+    }
+    // Pré-preencher campos não-sensíveis se retornados pela API
+    if (sys.gemini_model)      document.getElementById('key-gemini-model').value = sys.gemini_model;
+    if (sys.evolution_url)     document.getElementById('key-evolution-url').value = sys.evolution_url;
+    if (sys.evolution_instance) document.getElementById('key-evolution-inst').value = sys.evolution_instance;
+    if (sys.langfuse_host)     document.getElementById('key-lf-host').value = sys.langfuse_host;
+    if (sys.redis_url)         document.getElementById('key-redis').value = sys.redis_url;
+    if (sys.dev_mode != null) {
+      document.getElementById('key-dev-mode').value = sys.dev_mode ? 'True' : 'False';
+    }
+    if (sys.embedding_provider) document.getElementById('key-embed-provider').value = sys.embedding_provider;
+  } catch (e) {
+    console.warn('loadCurrentConfig:', e.message);
+  }
+}
+
+// ── System Prompt ──
+async function savePrompt() {
+  try {
+    await api('/system/prompt', { method: 'POST', body: { prompt: document.getElementById('sys-prompt').value } });
+    toast('Prompt salvo com sucesso!');
+  } catch (e) { toast('Erro: ' + e.message, 'err'); }
+}
+
+async function resetPrompt() {
+  try {
+    await api('/system/prompt', { method: 'POST', body: { prompt: '' } });
+    document.getElementById('sys-prompt').value = '';
+    toast('Prompt restaurado para o padrão.');
+  } catch (e) { toast('Erro: ' + e.message, 'err'); }
+}
+
+// ── Manutenção ──
+async function setMaintenance(v) {
+  try {
+    const d = await api('/system/maintenance', { method: 'POST', body: { ativo: v } });
+    const el = document.getElementById('maint-status');
+    el.textContent = v ? '⚠️ Manutenção ATIVA — usuários bloqueados' : '✅ Sistema operando normalmente';
+    el.style.color = v ? '#f59e0b' : 'var(--green)';
+    toast(d.msg || (v ? 'Manutenção ativada.' : 'Manutenção desativada.'));
+  } catch (e) { toast('Erro: ' + e.message, 'err'); }
+}
+
+// ── Cache ──
+async function clearCache() {
+  if (!confirm('Limpar todo o cache semântico? Isso vai forçar o Redis a reprocessar perguntas já respondidas.')) return;
+  try {
+    const d = await api('/cache', { method: 'DELETE' });
+    document.getElementById('cache-status').textContent = `🗑️ ${d.deleted ?? '?'} entradas removidas.`;
+    toast('Cache limpo com sucesso!');
+  } catch (e) { toast('Erro: ' + e.message, 'err'); }
+}
+
+// ── Workers ──
+async function checkWorkers() {
+  const el = document.getElementById('workers-list');
+  el.innerHTML = '<span style="color:var(--muted)">Verificando...</span>';
+  try {
+    const d = await api('/celery/health');
+    if (d.ok && d.workers?.length) {
+      el.innerHTML = d.workers.map(w =>
+        `<div class="worker-item"><span style="color:var(--green)">●</span> <span>${w}</span> <span style="color:var(--green);margin-left:auto">ONLINE</span></div>`
+      ).join('');
+    } else {
+      el.innerHTML = `<div style="color:var(--red)">⚠️ Nenhum worker respondendo. ${d.error || 'Timeout.'}</div>`;
+    }
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--red)">❌ Erro: ${e.message}</div>`;
+  }
+}
+
+loadCurrentConfig();
 </script>
 {% endblock %}

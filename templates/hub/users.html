@@ -1,90 +1,584 @@
 {% extends "hub/_base.html" %}
-
-{% block title %}Utilizadores — Oráculo UEMA{% endblock %}
+{% block title %}Usuários — Oráculo UEMA{% endblock %}
 
 {% block content %}
-<header>
-  <div class="logo">
-    <div class="logo-icon">👥</div>
-    <div class="logo-text">
-      <h1>Gestão de Acessos</h1>
-      <span>DADOS SINCRONIZADOS COM POSTGRESQL</span>
+<style>
+  :root {
+    --bg: #090b0d; --surface: #0f1214; --surface2: #141719;
+    --border: #1e2225; --border-hover: #2e3235;
+    --accent: #ff6b35; --accent-dim: rgba(255,107,53,.1);
+    --green: #2eb872; --red: #e84040; --amber: #f59e0b;
+    --text: #c8d0d8; --muted: #5a6370;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+
+  .header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(9,11,13,.92); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px; height: 58px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-icon { width: 30px; height: 30px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; display: grid; place-items: center; font-size: 14px; }
+  .brand-title { font-size: 14px; font-weight: 700; }
+  .brand-sub { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+  .back-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); padding: 5px 12px; border-radius: 5px; cursor: pointer; font-family: var(--mono); font-size: 10px; text-decoration: none; transition: all .2s; }
+  .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .main { padding: 28px; max-width: 1200px; margin: 0 auto; }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap;
+  }
+  .search-input {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 14px;
+    border-radius: 6px; font-size: 13px; outline: none;
+    flex: 1; min-width: 200px; transition: border-color .2s;
+  }
+  .search-input:focus { border-color: var(--accent); }
+  .search-input::placeholder { color: var(--muted); }
+
+  select.filter-sel {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 10px;
+    border-radius: 6px; font-size: 12px; outline: none;
+    cursor: pointer; transition: border-color .2s;
+  }
+  select.filter-sel:focus { border-color: var(--accent); }
+
+  .btn-new {
+    background: var(--accent); color: #000; border: none;
+    padding: 8px 16px; border-radius: 6px; cursor: pointer;
+    font-weight: 700; font-family: var(--mono); font-size: 11px;
+    letter-spacing: .05em; transition: opacity .2s; white-space: nowrap;
+  }
+  .btn-new:hover { opacity: .85; }
+
+  /* ── Stats strip ── */
+  .stats-strip {
+    display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap;
+  }
+  .stat-chip {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 16px;
+    font-family: var(--mono); font-size: 11px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .stat-chip .sv { font-size: 22px; font-weight: 800; color: var(--accent); line-height: 1; }
+  .stat-chip .sl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+
+  /* ── Table ── */
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead { background: var(--surface2); }
+  th {
+    padding: 12px 16px; text-align: left;
+    font-family: var(--mono); font-size: 9px;
+    letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 13px 16px; font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+
+  .badge {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 10px;
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: .05em;
+  }
+  .badge-estudante { background: rgba(90,141,238,.12); color: #5a8dee; border: 1px solid rgba(90,141,238,.3); }
+  .badge-professor  { background: rgba(46,184,114,.12); color: var(--green); border: 1px solid rgba(46,184,114,.3); }
+  .badge-admin      { background: rgba(255,107,53,.12); color: var(--accent); border: 1px solid rgba(255,107,53,.3); }
+  .badge-servidor   { background: rgba(245,158,11,.12); color: var(--amber); border: 1px solid rgba(245,158,11,.3); }
+  .badge-coordenador { background: rgba(139,92,246,.12); color: #8b5cf6; border: 1px solid rgba(139,92,246,.3); }
+  .badge-publico    { background: rgba(90,99,112,.12); color: var(--muted); border: 1px solid rgba(90,99,112,.3); }
+
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .dot-green { background: var(--green); box-shadow: 0 0 5px var(--green); }
+  .dot-red   { background: var(--red);   box-shadow: 0 0 5px var(--red); }
+
+  .actions { display: flex; gap: 6px; }
+  .btn-icon {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--muted); width: 30px; height: 30px;
+    border-radius: 5px; cursor: pointer; font-size: 13px;
+    display: grid; place-items: center; transition: all .2s;
+  }
+  .btn-icon:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-icon.del:hover { border-color: var(--red); color: var(--red); }
+  .btn-icon.toggle:hover { border-color: var(--amber); color: var(--amber); }
+
+  /* ── Paginação ── */
+  .pagination {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px; border-top: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+  }
+  .pag-btns { display: flex; gap: 6px; }
+  .pag-btn {
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 12px; border-radius: 4px;
+    cursor: pointer; font-family: var(--mono); font-size: 11px;
+    transition: all .2s;
+  }
+  .pag-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .pag-btn:disabled { opacity: .3; cursor: not-allowed; }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.75); z-index: 200;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 28px; width: 520px; max-width: 95vw;
+    max-height: 90vh; overflow-y: auto;
+    animation: modal-in .2s ease;
+  }
+  @keyframes modal-in { from { transform: scale(.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+  .modal-title {
+    font-size: 16px; font-weight: 700; margin-bottom: 4px;
+  }
+  .modal-sub { font-size: 12px; color: var(--muted); margin-bottom: 24px; }
+
+  .form-group { margin-bottom: 16px; }
+  .form-label {
+    display: block; font-family: var(--mono); font-size: 10px;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .form-input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 9px 12px;
+    border-radius: 6px; font-size: 13px; outline: none;
+    transition: border-color .2s;
+  }
+  .form-input:focus { border-color: var(--accent); }
+  .form-input::placeholder { color: var(--muted); }
+
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .modal-footer { display: flex; gap: 10px; margin-top: 24px; justify-content: flex-end; }
+
+  .btn-cancel {
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border); padding: 9px 18px;
+    border-radius: 6px; cursor: pointer;
+    font-family: var(--mono); font-size: 11px; transition: all .2s;
+  }
+  .btn-cancel:hover { border-color: var(--text); color: var(--text); }
+
+  .btn-submit {
+    background: var(--accent); color: #000; border: none;
+    padding: 9px 22px; border-radius: 6px; cursor: pointer;
+    font-weight: 700; font-family: var(--mono); font-size: 11px;
+    transition: opacity .2s;
+  }
+  .btn-submit:hover { opacity: .85; }
+  .btn-submit:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--surface); border: 1px solid var(--green);
+    border-radius: 8px; padding: 12px 18px;
+    font-family: var(--mono); font-size: 12px; color: var(--green);
+    z-index: 1000; opacity: 0; transform: translateY(8px);
+    transition: all .3s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #toast.err { border-color: var(--red); color: var(--red); }
+
+  .empty-state {
+    text-align: center; padding: 60px 20px;
+    color: var(--muted); font-family: var(--mono); font-size: 13px;
+  }
+</style>
+
+<!-- Header -->
+<header class="header">
+  <div class="brand">
+    <div class="brand-icon">👥</div>
+    <div>
+      <div class="brand-title">Gestão de Usuários</div>
+      <div class="brand-sub">CRUD · PostgreSQL</div>
     </div>
   </div>
-  <div class="header-right">
-    <a href="/hub/" style="color: var(--accent); text-decoration: none; border: 1px solid var(--accent); padding: 5px 10px; border-radius: 4px; font-family: monospace;">VOLTAR AO HUB</a>
-  </div>
+  <a href="/hub/" class="back-btn">← Hub</a>
 </header>
 
-<main style="padding: 20px;">
-    <div style="margin-bottom: 20px; display: flex; gap: 10px; background: #111; padding: 15px; border-radius: 8px; border: 1px solid #333;">
-        <select id="role-filter" style="background: #0a0c0e; color: #fff; border: 1px solid #333; padding: 8px; border-radius: 4px; font-family: monospace; outline: none; flex: 1; max-width: 300px;">
-            <option value="">Todos os Perfis (Roles)</option>
-            <option value="admin">Administradores</option>
-            <option value="student">Estudantes</option>
-            <option value="guest">Convidados</option>
-        </select>
-        <button onclick="loadUsers()" style="background: var(--accent); color: #000; border: none; padding: 0 25px; border-radius: 4px; cursor: pointer; font-weight: bold; font-family: 'Share Tech Mono';">FILTRAR</button>
-    </div>
+<main class="main">
 
-    <div style="background: #0a0c0e; border: 1px solid #2a3140; border-radius: 8px; padding: 20px; overflow-x: auto;">
-        <table style="width: 100%; text-align: left; border-collapse: collapse; font-family: monospace;">
-            <thead>
-                <tr style="color: #666; border-bottom: 1px solid #222;">
-                    <th style="padding: 10px;">ID (DB)</th>
-                    <th style="padding: 10px;">Nome / Identificação</th>
-                    <th style="padding: 10px;">Telefone (Chave)</th>
-                    <th style="padding: 10px;">Role</th>
-                    <th style="padding: 10px;">Status</th>
-                    <th style="padding: 10px;">Registado a</th>
-                </tr>
-            </thead>
-            <tbody id="users-body" style="color: #ccc;">
-                <tr><td colspan="6" style="text-align:center; padding: 20px;">A conectar à base de dados relacional...</td></tr>
-            </tbody>
-        </table>
+  <!-- Stats -->
+  <div class="stats-strip" id="stats-strip">
+    <div class="stat-chip"><span class="sv" id="s-total">—</span><span class="sl">total</span></div>
+    <div class="stat-chip"><span class="sv" id="s-ativos">—</span><span class="sl">ativos</span></div>
+    <div class="stat-chip"><span class="sv" id="s-estudantes">—</span><span class="sl">estudantes</span></div>
+    <div class="stat-chip"><span class="sv" id="s-professores">—</span><span class="sl">professores</span></div>
+    <div class="stat-chip"><span class="sv" id="s-admins">—</span><span class="sl">admins</span></div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <input class="search-input" type="text" id="search-input" placeholder="🔍  Buscar por nome, telefone ou email..." oninput="debounceLoad()">
+    <select class="filter-sel" id="filter-role" onchange="loadUsers()">
+      <option value="">Todos os roles</option>
+      <option value="publico">Público</option>
+      <option value="estudante">Estudante</option>
+      <option value="professor">Professor</option>
+      <option value="servidor">Servidor</option>
+      <option value="coordenador">Coordenador</option>
+      <option value="admin">Admin</option>
+    </select>
+    <select class="filter-sel" id="filter-ativo" onchange="loadUsers()">
+      <option value="">Todos</option>
+      <option value="true">Ativos</option>
+      <option value="false">Inativos</option>
+    </select>
+    <button class="btn-new" onclick="openModal()">+ NOVO USUÁRIO</button>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nome</th>
+          <th>Telefone</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Curso / Matrícula</th>
+          <th>Status</th>
+          <th>Criado em</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody id="users-tbody">
+        <tr><td colspan="9" class="empty-state">Carregando...</td></tr>
+      </tbody>
+    </table>
+    <div class="pagination">
+      <span id="pag-info">—</span>
+      <div class="pag-btns">
+        <button class="pag-btn" id="btn-prev" onclick="changePage(-1)" disabled>← Anterior</button>
+        <button class="pag-btn" id="btn-next" onclick="changePage(1)" disabled>Próximo →</button>
+      </div>
     </div>
+  </div>
+
 </main>
 
-<script>
-    async function loadUsers() {
-        const role = document.getElementById('role-filter').value;
-        const tbody = document.getElementById('users-body');
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 20px;">Carregando dados estruturados...</td></tr>';
-        
-        try {
-            const res = await fetch(`/hub/users/data?role=${role}`);
-            const data = await res.json();
-            
-            tbody.innerHTML = '';
-            
-            if (data.users && data.users.length > 0) {
-                data.users.forEach(u => {
-                    const tr = document.createElement('tr');
-                    tr.style.borderBottom = "1px solid #1a1a1a";
-                    
-                    let roleColor = u.role === 'admin' ? '#f44336' : (u.role === 'student' ? '#4CAF50' : '#888');
-                    let statusColor = u.status === 'ativo' ? '#4CAF50' : '#ffb700';
+<!-- Modal Criar/Editar -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-title" id="modal-title">Novo Usuário</div>
+    <div class="modal-sub" id="modal-sub">Preencha os dados. O telefone deve ser único.</div>
+    <input type="hidden" id="edit-id">
 
-                    tr.innerHTML = `
-                        <td style="padding: 10px; color: #888;">#${u.id}</td>
-                        <td style="padding: 10px; color: #fff;">${u.nome} <br><small style="color: #666;">${u.curso}</small></td>
-                        <td style="padding: 10px; color: #00bcd4;">${u.telefone}</td>
-                        <td style="padding: 10px; color: ${roleColor}; font-weight: bold;">[${u.role.toUpperCase()}]</td>
-                        <td style="padding: 10px; color: ${statusColor};">${u.status}</td>
-                        <td style="padding: 10px; color: #888;">${u.criado_em}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            } else {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;">Nenhum registo encontrado na base de dados.</td></tr>';
-            }
-        } catch (error) {
-            console.error("Erro ao carregar utilizadores:", error);
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#f44336;">Falha de ligação ao PostgreSQL.</td></tr>';
-        }
+    <div class="form-group">
+      <label class="form-label">Nome completo *</label>
+      <input class="form-input" type="text" id="f-nome" placeholder="João da Silva" required>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Telefone * (só números)</label>
+        <input class="form-input" type="text" id="f-telefone" placeholder="5598999999999" maxlength="15">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" id="f-email" placeholder="joao@aluno.uema.br">
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Role *</label>
+        <select class="form-input" id="f-role">
+          <option value="estudante">Estudante</option>
+          <option value="publico">Público</option>
+          <option value="professor">Professor</option>
+          <option value="servidor">Servidor</option>
+          <option value="coordenador">Coordenador</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Turno</label>
+        <select class="form-input" id="f-turno">
+          <option value="">— nenhum —</option>
+          <option value="matutino">Matutino</option>
+          <option value="vespertino">Vespertino</option>
+          <option value="noturno">Noturno</option>
+          <option value="ead">EAD</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Curso</label>
+        <input class="form-input" type="text" id="f-curso" placeholder="Ciência da Computação">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Matrícula</label>
+        <input class="form-input" type="text" id="f-matricula" placeholder="202111000001">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">
+        <input type="checkbox" id="f-ativo" checked style="margin-right:6px">
+        Usuário ativo (pode usar o chatbot)
+      </label>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="btn-submit" id="modal-submit-btn" onclick="submitForm()">CRIAR USUÁRIO</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const KEY = sessionStorage.getItem('adminKey');
+const h   = { 'X-Admin-Key': KEY, 'Content-Type': 'application/json' };
+
+let currentPage  = 1;
+let totalPages   = 1;
+let debounceTimer;
+
+// ─── API helper ─────────────────────────
+async function api(path, opts = {}) {
+  opts.headers = { ...h, ...(opts.headers || {}) };
+  if (opts.body && typeof opts.body === 'object') opts.body = JSON.stringify(opts.body);
+  const r = await fetch('/api/admin/users' + path, opts);
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(err.detail || 'Erro desconhecido');
+  }
+  if (r.status === 204) return null;
+  return r.json();
+}
+
+// ─── Toast ──────────────────────────────
+function toast(msg, type = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = (type === 'ok' ? '✅ ' : '❌ ') + msg;
+  el.className   = 'show' + (type !== 'ok' ? ' err' : '');
+  setTimeout(() => el.className = '', 3000);
+}
+
+// ─── Load users ─────────────────────────
+async function loadUsers() {
+  const busca = document.getElementById('search-input').value;
+  const role  = document.getElementById('filter-role').value;
+  const ativo = document.getElementById('filter-ativo').value;
+
+  let qs = `?pagina=${currentPage}&por_pag=15`;
+  if (busca)  qs += `&busca=${encodeURIComponent(busca)}`;
+  if (role)   qs += `&role=${role}`;
+  if (ativo)  qs += `&ativo=${ativo}`;
+
+  try {
+    const data = await api('/' + qs);
+    renderTable(data.usuarios);
+    updatePagination(data.total, data.pagina, data.por_pag);
+    await loadStats();
+  } catch (e) {
+    document.getElementById('users-tbody').innerHTML =
+      `<tr><td colspan="9" class="empty-state" style="color:var(--red)">❌ ${e.message}</td></tr>`;
+  }
+}
+
+function debounceLoad() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => { currentPage = 1; loadUsers(); }, 350);
+}
+
+// ─── Render ─────────────────────────────
+function roleBadge(role) {
+  return `<span class="badge badge-${role}">${role}</span>`;
+}
+
+function statusDot(ativo) {
+  return `<span class="status-dot ${ativo ? 'dot-green' : 'dot-red'}" title="${ativo ? 'Ativo' : 'Inativo'}"></span>`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderTable(users) {
+  const tbody = document.getElementById('users-tbody');
+  if (!users.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Nenhum usuário encontrado.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = users.map(u => `
+    <tr>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${u.id}</td>
+      <td style="font-weight:600">${u.nome}</td>
+      <td style="font-family:var(--mono);font-size:12px">${u.telefone}</td>
+      <td style="font-size:12px;color:var(--muted)">${u.email || '—'}</td>
+      <td>${roleBadge(u.role)}</td>
+      <td style="font-size:12px;color:var(--muted)">${u.curso || '—'} ${u.matricula ? '<br><span style="font-family:var(--mono);font-size:10px">'+u.matricula+'</span>' : ''}</td>
+      <td>${statusDot(u.ativo)} <span style="font-size:12px;margin-left:4px">${u.ativo ? 'Ativo' : 'Inativo'}</span></td>
+      <td style="font-size:11px;color:var(--muted)">${fmtDate(u.criado_em)}</td>
+      <td>
+        <div class="actions">
+          <button class="btn-icon" onclick='editUser(${JSON.stringify(u)})' title="Editar">✏️</button>
+          <button class="btn-icon toggle" onclick="toggleUser(${u.id}, ${u.ativo})" title="${u.ativo ? 'Desativar' : 'Ativar'}">${u.ativo ? '🔴' : '🟢'}</button>
+          <button class="btn-icon del" onclick="deleteUser(${u.id}, '${u.nome.replace(/'/g,"\\'")}')">🗑️</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function updatePagination(total, pagina, porPag) {
+  totalPages = Math.ceil(total / porPag);
+  const from = (pagina - 1) * porPag + 1;
+  const to   = Math.min(pagina * porPag, total);
+  document.getElementById('pag-info').textContent = `Exibindo ${from}–${to} de ${total}`;
+  document.getElementById('btn-prev').disabled = pagina <= 1;
+  document.getElementById('btn-next').disabled = pagina >= totalPages;
+}
+
+function changePage(dir) {
+  currentPage = Math.max(1, Math.min(totalPages, currentPage + dir));
+  loadUsers();
+}
+
+// ─── Stats ──────────────────────────────
+async function loadStats() {
+  try {
+    const [all, ativos, estudantes, professores, admins] = await Promise.all([
+      api('/'),
+      api('/?ativo=true&por_pag=1'),
+      api('/?role=estudante&por_pag=1'),
+      api('/?role=professor&por_pag=1'),
+      api('/?role=admin&por_pag=1'),
+    ]);
+    document.getElementById('s-total').textContent      = all.total;
+    document.getElementById('s-ativos').textContent     = ativos.total;
+    document.getElementById('s-estudantes').textContent = estudantes.total;
+    document.getElementById('s-professores').textContent = professores.total;
+    document.getElementById('s-admins').textContent     = admins.total;
+  } catch {}
+}
+
+// ─── Modal ──────────────────────────────
+function openModal(u = null) {
+  const editing = !!u;
+  document.getElementById('modal-title').textContent   = editing ? 'Editar Usuário' : 'Novo Usuário';
+  document.getElementById('modal-sub').textContent     = editing ? `Editando ID ${u.id} — ${u.nome}` : 'Preencha os dados. O telefone deve ser único.';
+  document.getElementById('modal-submit-btn').textContent = editing ? 'SALVAR ALTERAÇÕES' : 'CRIAR USUÁRIO';
+  document.getElementById('edit-id').value      = u?.id || '';
+  document.getElementById('f-nome').value        = u?.nome || '';
+  document.getElementById('f-telefone').value    = u?.telefone || '';
+  document.getElementById('f-email').value       = u?.email || '';
+  document.getElementById('f-role').value        = u?.role || 'estudante';
+  document.getElementById('f-turno').value       = u?.turno || '';
+  document.getElementById('f-curso').value       = u?.curso || '';
+  document.getElementById('f-matricula').value   = u?.matricula || '';
+  document.getElementById('f-ativo').checked     = u?.ativo ?? true;
+  // Lock telefone ao editar (não pode mudar identificador)
+  document.getElementById('f-telefone').disabled = editing;
+  document.getElementById('modal').classList.add('open');
+}
+
+function editUser(u) { openModal(u); }
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+}
+
+async function submitForm() {
+  const btn    = document.getElementById('modal-submit-btn');
+  const editId = document.getElementById('edit-id').value;
+  const isEdit = !!editId;
+
+  const body = {
+    nome:      document.getElementById('f-nome').value.trim(),
+    telefone:  document.getElementById('f-telefone').value.trim(),
+    email:     document.getElementById('f-email').value.trim() || null,
+    role:      document.getElementById('f-role').value,
+    turno:     document.getElementById('f-turno').value || null,
+    curso:     document.getElementById('f-curso').value.trim() || null,
+    matricula: document.getElementById('f-matricula').value.trim() || null,
+    ativo:     document.getElementById('f-ativo').checked,
+  };
+
+  if (!body.nome || (!isEdit && !body.telefone)) {
+    toast('Nome e telefone são obrigatórios.', 'err');
+    return;
+  }
+
+  btn.disabled = true;
+  try {
+    if (isEdit) {
+      delete body.telefone;
+      await api(`/${editId}`, { method: 'PUT', body });
+      toast(`Usuário #${editId} atualizado!`);
+    } else {
+      await api('/', { method: 'POST', body });
+      toast('Usuário criado com sucesso!');
     }
-    
-    loadUsers();
+    closeModal();
+    await loadUsers();
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ─── Toggle ativo ───────────────────────
+async function toggleUser(id, atualAtivo) {
+  const acao = atualAtivo ? 'desativar' : 'ativar';
+  if (!confirm(`Tem certeza que deseja ${acao} o usuário #${id}?`)) return;
+  try {
+    await api(`/${id}/toggle`, { method: 'PATCH' });
+    toast(`Usuário ${atualAtivo ? 'desativado' : 'ativado'}!`);
+    await loadUsers();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ─── Delete ─────────────────────────────
+async function deleteUser(id, nome) {
+  if (!confirm(`REMOVER PERMANENTEMENTE o usuário #${id} — ${nome}?\n\nEsta ação não pode ser desfeita!`)) return;
+  try {
+    await api(`/${id}`, { method: 'DELETE' });
+    toast(`Usuário "${nome}" removido.`);
+    await loadUsers();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// Fechar modal clicando fora
+document.getElementById('modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+// Init
+loadUsers();
 </script>
 {% endblock %}

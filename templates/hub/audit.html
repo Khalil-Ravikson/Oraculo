@@ -1,76 +1,354 @@
 {% extends "hub/_base.html" %}
-
 {% block title %}Audit Log — Oráculo UEMA{% endblock %}
 
 {% block content %}
-<header>
-  <div class="logo">
-    <div class="logo-icon">📋</div>
-    <div class="logo-text">
-      <h1>Audit Log</h1>
-      <span>REGISTO DE AÇÕES CRÍTICAS DO SISTEMA</span>
+<style>
+  :root {
+    --bg:#090b0d;--surface:#0f1214;--surface2:#141719;
+    --border:#1e2225;--border-hover:#2e3235;
+    --accent:#ff6b35;--accent-dim:rgba(255,107,53,.1);
+    --green:#2eb872;--red:#e84040;--amber:#f59e0b;--blue:#5a8dee;
+    --text:#c8d0d8;--muted:#5a6370;
+    --mono:'JetBrains Mono','Fira Code',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;}
+
+  .header{position:sticky;top:0;z-index:50;background:rgba(9,11,13,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 28px;height:58px;display:flex;align-items:center;justify-content:space-between;}
+  .brand{display:flex;align-items:center;gap:10px;}
+  .brand-icon{width:30px;height:30px;background:var(--accent-dim);border:1px solid var(--accent);border-radius:6px;display:grid;place-items:center;font-size:14px;}
+  .brand-title{font-size:14px;font-weight:700;}
+  .brand-sub{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;}
+  .header-right{display:flex;align-items:center;gap:10px;}
+  .back-btn{background:transparent;color:var(--muted);border:1px solid var(--border);padding:5px 12px;border-radius:5px;cursor:pointer;font-family:var(--mono);font-size:10px;text-decoration:none;transition:all .2s;}
+  .back-btn:hover{border-color:var(--accent);color:var(--accent);}
+
+  .main{padding:28px;max-width:1200px;margin:0 auto;}
+
+  /* ── Tabs ── */
+  .tabs{display:flex;gap:4px;margin-bottom:20px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:4px;}
+  .tab{flex:1;text-align:center;padding:8px 16px;border-radius:5px;cursor:pointer;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);transition:all .2s;}
+  .tab.active{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(255,107,53,.3);}
+  .tab:hover:not(.active){color:var(--text);}
+
+  /* ── Filtros ── */
+  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:18px;flex-wrap:wrap;}
+  .filter-sel,.search-input{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:6px;font-size:12px;outline:none;cursor:pointer;transition:border-color .2s;}
+  .search-input{min-width:220px;flex:1;}
+  .search-input:focus,.filter-sel:focus{border-color:var(--accent);}
+  .search-input::placeholder{color:var(--muted);}
+  .btn-refresh{background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:8px 14px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:10px;transition:all .2s;}
+  .btn-refresh:hover{border-color:var(--accent);color:var(--accent);}
+
+  /* ── Log entries ── */
+  .log-list{display:flex;flex-direction:column;gap:8px;}
+
+  .log-entry{
+    background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;
+    cursor:pointer;transition:all .2s;position:relative;
+  }
+  .log-entry:hover{border-color:var(--border-hover);}
+  .log-entry.expanded{border-color:var(--accent);}
+
+  .log-header{display:flex;align-items:flex-start;gap:14px;}
+  .log-type-badge{
+    display:inline-flex;align-items:center;
+    padding:3px 8px;border-radius:5px;
+    font-family:var(--mono);font-size:9px;letter-spacing:.06em;
+    white-space:nowrap;flex-shrink:0;
+  }
+  .type-langchain{background:rgba(46,184,114,.1);color:var(--green);border:1px solid rgba(46,184,114,.3);}
+  .type-admin{background:rgba(255,107,53,.1);color:var(--accent);border:1px solid rgba(255,107,53,.3);}
+  .type-rag{background:rgba(90,141,238,.1);color:var(--blue);border:1px solid rgba(90,141,238,.3);}
+  .type-celery{background:rgba(245,158,11,.1);color:var(--amber);border:1px solid rgba(245,158,11,.3);}
+  .type-auth{background:rgba(139,92,246,.1);color:#8b5cf6;border:1px solid rgba(139,92,246,.3);}
+  .type-error{background:rgba(232,64,64,.1);color:var(--red);border:1px solid rgba(232,64,64,.3);}
+  .type-system{background:rgba(90,99,112,.1);color:var(--muted);border:1px solid rgba(90,99,112,.3);}
+
+  .log-content{flex:1;min-width:0;}
+  .log-title{font-size:13px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .log-meta{display:flex;gap:12px;font-family:var(--mono);font-size:10px;color:var(--muted);}
+  .log-time{font-family:var(--mono);font-size:10px;color:var(--muted);flex-shrink:0;}
+
+  /* ── Expanded detail (LangChain pipeline steps) ── */
+  .log-detail{
+    display:none;margin-top:14px;padding-top:14px;
+    border-top:1px solid var(--border);
+  }
+  .log-entry.expanded .log-detail{display:block;}
+
+  .steps-timeline{display:flex;flex-direction:column;gap:0;}
+  .step-item{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);}
+  .step-item:last-child{border-bottom:none;}
+  .step-num{font-family:var(--mono);font-size:9px;color:var(--muted);width:20px;flex-shrink:0;padding-top:2px;}
+  .step-name{font-family:var(--mono);font-size:11px;color:var(--accent);width:140px;flex-shrink:0;}
+  .step-duration{font-family:var(--mono);font-size:10px;color:var(--muted);width:60px;flex-shrink:0;text-align:right;}
+  .step-info{font-size:12px;color:var(--text);flex:1;}
+  .step-ok{color:var(--green);}
+  .step-err{color:var(--red);}
+
+  .meta-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:14px;}
+  .meta-item{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;}
+  .meta-key{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;}
+  .meta-val{font-size:12px;word-break:break-all;}
+
+  .crag-bar{height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px;}
+  .crag-fill{height:100%;border-radius:3px;transition:width .4s;}
+
+  /* ── Empty / Loading ── */
+  .empty-msg{text-align:center;padding:60px 20px;color:var(--muted);font-family:var(--mono);font-size:13px;}
+
+  /* ── Paginação ── */
+  .pagination{display:flex;align-items:center;justify-content:space-between;margin-top:16px;font-family:var(--mono);font-size:11px;color:var(--muted);}
+  .pag-btns{display:flex;gap:6px;}
+  .pag-btn{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 14px;border-radius:5px;cursor:pointer;font-family:var(--mono);font-size:10px;transition:all .2s;}
+  .pag-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
+  .pag-btn:disabled{opacity:.3;cursor:not-allowed;}
+
+  /* live pill */
+  .live-pill{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:var(--green);}
+  .live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:blink 1.5s infinite;}
+  @keyframes blink{0%,100%{opacity:1;}50%{opacity:.3;}}
+</style>
+
+<!-- Header -->
+<header class="header">
+  <div class="brand">
+    <div class="brand-icon">📋</div>
+    <div>
+      <div class="brand-title">Audit Log</div>
+      <div class="brand-sub">LangChain · Celery · Admin</div>
     </div>
   </div>
   <div class="header-right">
-    <a href="/hub/" style="color: var(--accent); text-decoration: none; border: 1px solid var(--accent); padding: 5px 10px; border-radius: 4px; font-family: monospace;">VOLTAR AO HUB</a>
+    <div class="live-pill"><div class="live-dot"></div>LIVE</div>
+    <a href="/hub/" class="back-btn">← Hub</a>
   </div>
 </header>
 
-<main style="padding: 20px;">
-    <div style="background: #0a0c0e; border: 1px solid #2a3140; border-radius: 8px; padding: 20px; overflow-x: auto;">
-        <table style="width: 100%; text-align: left; border-collapse: collapse; font-family: monospace;">
-            <thead>
-                <tr style="color: #666; border-bottom: 1px solid #222;">
-                    <th style="padding: 10px;">Data/Hora</th>
-                    <th style="padding: 10px;">Admin Responsável</th>
-                    <th style="padding: 10px;">Ação Executada</th>
-                    <th style="padding: 10px;">Alvo / Payload</th>
-                    <th style="padding: 10px;">Status</th>
-                </tr>
-            </thead>
-            <tbody id="audit-body" style="color: #ccc;">
-                <tr><td colspan="5" style="text-align:center; padding: 20px;">A extrair logs seguros...</td></tr>
-            </tbody>
-        </table>
+<main class="main">
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('langchain', this)">⛓ LangChain Traces</div>
+    <div class="tab" onclick="switchTab('admin', this)">🔑 Ações Admin</div>
+    <div class="tab" onclick="switchTab('rag', this)">📄 Ingestão RAG</div>
+    <div class="tab" onclick="switchTab('celery', this)">⚡ Celery Tasks</div>
+    <div class="tab" onclick="switchTab('error', this)">🔴 Erros</div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <input class="search-input" type="text" id="search-input" placeholder="🔍  Buscar por usuário, telefone, ação..." oninput="debounceLoad()">
+    <select class="filter-sel" id="filter-period" onchange="loadLog()">
+      <option value="1h">Última 1h</option>
+      <option value="6h">Últimas 6h</option>
+      <option value="24h" selected>Últimas 24h</option>
+      <option value="7d">7 dias</option>
+      <option value="30d">30 dias</option>
+    </select>
+    <button class="btn-refresh" onclick="loadLog()">🔄 Atualizar</button>
+  </div>
+
+  <!-- Log List -->
+  <div class="log-list" id="log-list">
+    <div class="empty-msg">Carregando logs...</div>
+  </div>
+
+  <!-- Paginação -->
+  <div class="pagination">
+    <span id="pag-info">—</span>
+    <div class="pag-btns">
+      <button class="pag-btn" id="btn-prev" onclick="changePage(-1)" disabled>← Anterior</button>
+      <button class="pag-btn" id="btn-next" onclick="changePage(1)" disabled>Próximo →</button>
     </div>
+  </div>
+
 </main>
 
 <script>
-    async function loadAuditLogs() {
-        try {
-            const res = await fetch('/hub/audit/data');
-            const data = await res.json();
-            
-            const tbody = document.getElementById('audit-body');
-            tbody.innerHTML = '';
-            
-            if (data.logs && data.logs.length > 0) {
-                data.logs.forEach(log => {
-                    const tr = document.createElement('tr');
-                    tr.style.borderBottom = "1px solid #1a1a1a";
-                    
-                    const statusColor = log.resultado === 'ok' ? '#4CAF50' : '#f44336';
-                    const targetInfo = log.target ? `[Alvo: ${log.target}] ` : '';
-                    const payloadStr = log.payload ? JSON.stringify(log.payload) : '';
-                    
-                    tr.innerHTML = `
-                        <td style="padding: 10px; color: #888;">${log.ts || '--'}</td>
-                        <td style="padding: 10px; color: var(--accent); font-weight: bold;">${log.admin_id || '--'}</td>
-                        <td style="padding: 10px; color: #fff;">${log.action || '--'}</td>
-                        <td style="padding: 10px; color: #00bcd4; font-size: 11px;">${targetInfo}${payloadStr}</td>
-                        <td style="padding: 10px; color: ${statusColor}; font-weight: bold;">${log.resultado || '--'}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            } else {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">Nenhum registo de auditoria encontrado.</td></tr>';
-            }
-        } catch (error) {
-            console.error("Erro ao carregar auditoria:", error);
-            document.getElementById('audit-body').innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:#f44336;">Falha de comunicação com o servidor.</td></tr>';
-        }
-    }
-    
-    loadAuditLogs();
+const KEY = sessionStorage.getItem('adminKey');
+const h   = { 'X-Admin-Key': KEY };
+
+let currentTab  = 'langchain';
+let currentPage = 1;
+let totalPages  = 1;
+let debounceTimer;
+
+function switchTab(tab, el) {
+  currentTab  = tab;
+  currentPage = 1;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  loadLog();
+}
+
+function debounceLoad() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => { currentPage = 1; loadLog(); }, 350);
+}
+
+function changePage(dir) {
+  currentPage = Math.max(1, Math.min(totalPages, currentPage + dir));
+  loadLog();
+}
+
+// ─── API ────────────────────────────────
+async function api(path) {
+  const r = await fetch('/api/admin' + path, { headers: h });
+  if (!r.ok) throw new Error(r.statusText);
+  return r.json();
+}
+
+// ─── Load ───────────────────────────────
+async function loadLog() {
+  const busca  = document.getElementById('search-input').value;
+  const period = document.getElementById('filter-period').value;
+
+  try {
+    const data = await api(`/audit?tab=${currentTab}&page=${currentPage}&period=${period}&busca=${encodeURIComponent(busca)}`);
+    renderLog(data.entries || []);
+
+    totalPages = data.total_pages || 1;
+    const total = data.total || 0;
+    document.getElementById('pag-info').textContent = `${total} entradas`;
+    document.getElementById('btn-prev').disabled = currentPage <= 1;
+    document.getElementById('btn-next').disabled = currentPage >= totalPages;
+  } catch (e) {
+    document.getElementById('log-list').innerHTML =
+      `<div class="empty-msg" style="color:var(--red)">❌ ${e.message}</div>`;
+  }
+}
+
+// ─── Render ─────────────────────────────
+function typeClass(tab) {
+  const map = { langchain:'type-langchain', admin:'type-admin', rag:'type-rag', celery:'type-celery', error:'type-error', auth:'type-auth' };
+  return map[tab] || 'type-system';
+}
+
+function typeLabel(tab) {
+  const map = { langchain:'LANGCHAIN', admin:'ADMIN', rag:'RAG', celery:'CELERY', error:'ERROR', auth:'AUTH' };
+  return map[tab] || 'SYSTEM';
+}
+
+function fmtDur(ms) {
+  if (!ms) return '—';
+  if (ms < 1000) return ms + 'ms';
+  return (ms / 1000).toFixed(1) + 's';
+}
+
+function cragColor(score) {
+  if (score >= 0.7) return 'var(--green)';
+  if (score >= 0.4) return 'var(--amber)';
+  return 'var(--red)';
+}
+
+function renderLangChainDetail(e) {
+  // Render pipeline steps from LangChain trace
+  const steps = e.steps || [];
+  const stepsHtml = steps.map((s, i) => `
+    <div class="step-item">
+      <span class="step-num">${String(i+1).padStart(2,'0')}</span>
+      <span class="step-name">${s.name || '—'}</span>
+      <span class="step-duration">${fmtDur(s.duration_ms)}</span>
+      <span class="step-info ${s.error ? 'step-err' : 'step-ok'}">
+        ${s.error ? '❌ ' + s.error : (s.summary || '✓')}
+      </span>
+    </div>
+  `).join('');
+
+  const crag = e.crag_score;
+  const cragHtml = crag != null ? `
+    <div class="meta-item">
+      <div class="meta-key">CRAG Score</div>
+      <div class="meta-val" style="color:${cragColor(crag)}">${(crag * 100).toFixed(0)}%</div>
+      <div class="crag-bar"><div class="crag-fill" style="width:${crag*100}%;background:${cragColor(crag)}"></div></div>
+    </div>
+  ` : '';
+
+  return `
+    <div class="meta-grid">
+      <div class="meta-item"><div class="meta-key">Run ID</div><div class="meta-val" style="font-family:var(--mono);font-size:10px">${e.run_id || '—'}</div></div>
+      <div class="meta-item"><div class="meta-key">Usuário</div><div class="meta-val">${e.user_name || '—'} <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">${e.phone || ''}</span></div></div>
+      <div class="meta-item"><div class="meta-key">Latência Total</div><div class="meta-val">${fmtDur(e.total_ms)}</div></div>
+      <div class="meta-item"><div class="meta-key">Tokens (in/out)</div><div class="meta-val">${e.tokens_in || 0} / ${e.tokens_out || 0}</div></div>
+      <div class="meta-item"><div class="meta-key">Intenção</div><div class="meta-val">${e.intent || '—'}</div></div>
+      <div class="meta-item"><div class="meta-key">Chunks Recuperados</div><div class="meta-val">${e.chunks_retrieved ?? '—'}</div></div>
+      ${cragHtml}
+    </div>
+    ${steps.length ? `<div style="font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">// Pipeline Steps</div>
+    <div class="steps-timeline">${stepsHtml}</div>` : ''}
+    ${e.user_message ? `<div style="margin-top:12px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px"><div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:4px">MENSAGEM</div>${escHtml(e.user_message)}</div>` : ''}
+  `;
+}
+
+function renderAdminDetail(e) {
+  return `
+    <div class="meta-grid">
+      <div class="meta-item"><div class="meta-key">Admin</div><div class="meta-val">${e.admin_user || '—'}</div></div>
+      <div class="meta-item"><div class="meta-key">Ação</div><div class="meta-val" style="color:var(--accent)">${e.action || '—'}</div></div>
+      <div class="meta-item"><div class="meta-key">IP</div><div class="meta-val" style="font-family:var(--mono);font-size:11px">${e.ip || '—'}</div></div>
+      <div class="meta-item"><div class="meta-key">Resultado</div><div class="meta-val ${e.success ? 'step-ok' : 'step-err'}">${e.success ? '✅ Sucesso' : '❌ Falha'}</div></div>
+    </div>
+    ${e.payload ? `<div style="margin-top:8px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:11px;white-space:pre-wrap;overflow:auto;max-height:200px">${escHtml(JSON.stringify(e.payload, null, 2))}</div>` : ''}
+  `;
+}
+
+function renderGenericDetail(e) {
+  return `<pre style="font-family:var(--mono);font-size:10px;color:var(--muted);white-space:pre-wrap;overflow:auto;max-height:200px">${escHtml(JSON.stringify(e, null, 2))}</pre>`;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+
+function renderLog(entries) {
+  const el = document.getElementById('log-list');
+  if (!entries.length) {
+    el.innerHTML = '<div class="empty-msg">Nenhuma entrada encontrada neste período.</div>';
+    return;
+  }
+  el.innerHTML = entries.map((e, i) => {
+    const tab = e.type || currentTab;
+    let detail = '';
+    if (tab === 'langchain') detail = renderLangChainDetail(e);
+    else if (tab === 'admin') detail = renderAdminDetail(e);
+    else detail = renderGenericDetail(e);
+
+    return `
+      <div class="log-entry" id="entry-${i}" onclick="toggleEntry(${i})">
+        <div class="log-header">
+          <span class="log-type-badge ${typeClass(tab)}">${typeLabel(tab)}</span>
+          <div class="log-content">
+            <div class="log-title">${escHtml(e.title || e.action || e.name || 'Sem título')}</div>
+            <div class="log-meta">
+              <span>${e.phone || e.user_name || e.admin_user || '—'}</span>
+              ${e.total_ms ? `<span>${fmtDur(e.total_ms)}</span>` : ''}
+              ${e.crag_score != null ? `<span style="color:${cragColor(e.crag_score)}">CRAG ${(e.crag_score*100).toFixed(0)}%</span>` : ''}
+              ${e.run_id ? `<span style="font-size:9px">run:${e.run_id.slice(0,8)}</span>` : ''}
+            </div>
+          </div>
+          <span class="log-time">${fmtTime(e.created_at || e.timestamp)}</span>
+        </div>
+        <div class="log-detail">${detail}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function toggleEntry(i) {
+  const el = document.getElementById('entry-' + i);
+  el.classList.toggle('expanded');
+}
+
+// Auto-refresh a cada 15s
+loadLog();
+setInterval(loadLog, 15000);
 </script>
 {% endblock %}

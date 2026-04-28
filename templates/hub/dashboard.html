@@ -1,104 +1,458 @@
 {% extends "hub/_base.html" %}
-
-{% block title %}Dashboard — Oráculo UEMA{% endblock %}
+{% block title %}Hub — Oráculo UEMA{% endblock %}
 
 {% block content %}
-<header>
-  <div class="logo">
-    <div class="logo-icon">⬡</div>
-    <div class="logo-text">
+<style>
+  :root {
+    --bg: #090b0d;
+    --surface: #0f1214;
+    --border: #1e2225;
+    --border-hover: #2e3235;
+    --accent: #ff6b35;
+    --accent-dim: rgba(255,107,53,.12);
+    --green: #2eb872;
+    --red: #e84040;
+    --text: #c8d0d8;
+    --muted: #5a6370;
+    --mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+  }
+
+  /* ── Header ──────────────────────── */
+  .hub-header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(9,11,13,.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 58px;
+  }
+
+  .hub-brand {
+    display: flex; align-items: center; gap: 12px;
+  }
+
+  .hub-brand-icon {
+    width: 32px; height: 32px;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+
+  .hub-brand-text h1 {
+    font-size: 15px; font-weight: 700; letter-spacing: .02em;
+  }
+
+  .hub-brand-text span {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+
+  .hub-header-right {
+    display: flex; align-items: center; gap: 16px;
+  }
+
+  .status-pill {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+    animation: pulse-dot 2s infinite;
+  }
+
+  .status-dot.red   { background: var(--red);  box-shadow: 0 0 6px var(--red); }
+  .status-dot.amber { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
+
+  @keyframes pulse-dot {
+    0%,100% { opacity: 1; }
+    50%      { opacity: .4; }
+  }
+
+  .btn-logout {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 5px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    transition: all .2s;
+  }
+  .btn-logout:hover { border-color: var(--red); color: var(--red); }
+
+  /* ── Main ────────────────────────── */
+  .hub-main { padding: 32px 28px; max-width: 1200px; margin: 0 auto; }
+
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── Status Bar ──────────────────── */
+  .status-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 36px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    transition: border-color .2s;
+  }
+  .stat-card:hover { border-color: var(--border-hover); }
+
+  .stat-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-size: 26px;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--accent);
+  }
+
+  .stat-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* ── Cards Grid ──────────────────── */
+  .cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+  }
+
+  .nav-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    transition: all .25s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .nav-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px; height: 0;
+    background: var(--accent);
+    border-radius: 0 2px 2px 0;
+    transition: height .25s;
+  }
+
+  .nav-card:hover {
+    border-color: var(--border-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+
+  .nav-card:hover::before { height: 100%; }
+
+  .card-num {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: .1em;
+    margin-bottom: 6px;
+  }
+
+  .card-tag {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--accent);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .card-icon { font-size: 28px; margin-bottom: 12px; }
+
+  .card-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    letter-spacing: .01em;
+  }
+
+  .card-desc {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  /* card externo */
+  .nav-card.external .card-tag { color: #5a8dee; }
+  .nav-card.external::before   { background: #5a8dee; }
+
+  /* ── LangChain status badge ─────── */
+  .lc-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(46,184,114,.1);
+    border: 1px solid rgba(46,184,114,.3);
+    border-radius: 12px;
+    padding: 3px 9px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--green);
+    letter-spacing: .08em;
+    margin-top: 6px;
+  }
+</style>
+
+<!-- Header -->
+<header class="hub-header">
+  <div class="hub-brand">
+    <div class="hub-brand-icon">🔮</div>
+    <div class="hub-brand-text">
       <h1>Oráculo UEMA</h1>
-      <span>SISTEMA CENTRAL DE CONTROLO // v6.0</span>
+      <span>Hub Administrativo</span>
     </div>
   </div>
-  <div class="header-right">
-    <div class="status-pill" style="display:flex; align-items:center; gap:10px;">
-      <span style="color:var(--muted); font-size:12px;">Logado como: <strong style="color:var(--accent);">{{ username }}</strong></span>
-      <a href="/hub/logout" style="color: #e84040; text-decoration: none; font-size: 12px; border: 1px solid #e84040; padding: 2px 6px; border-radius: 4px;">SAIR</a>
+  <div class="hub-header-right">
+    <div class="status-pill" id="chain-status">
+      <div class="status-dot amber" id="chain-dot"></div>
+      <span id="chain-label">verificando...</span>
     </div>
+    <div class="lc-badge">⛓ LangChain</div>
+    <button class="btn-logout" onclick="logout()">SAIR</button>
   </div>
 </header>
 
-<div class="boot-banner" style="margin: 20px; padding: 15px; background: var(--surf, #1a1f28); border-left: 3px solid var(--accent, #ff6b35); font-family: monospace; font-size: 12px; color: var(--txt);">
-  <div class="boot-line">[ BOOT ] Oráculo UEMA v6.0 — Assistente Acadêmico Inteligente</div>
-  <div class="boot-line">[ INIT ] Redis Stack ▸ PostgreSQL ▸ Modelo: <strong>{{ modelo }}</strong> ▸ Dev Mode: <strong>{{ dev_mode }}</strong></div>
-  <div class="boot-line">[ RAG  ] Busca híbrida BM25+Vetor ▸ Roteamento Semântico</div>
-  <div class="boot-line">[ REDY ] Autenticação confirmada. Selecione um módulo abaixo.</div>
-</div>
+<!-- Main -->
+<main class="hub-main">
 
-<main style="padding: 0 20px;">
-  <div class="section-label" style="font-family: 'Share Tech Mono'; color: var(--accent); margin-bottom: 15px;">// módulos principais</div>
+  <!-- Stats -->
+  <div class="section-label">// métricas rápidas</div>
+  <div class="status-bar" id="stats-bar">
+    <div class="stat-card">
+      <div class="stat-label">mensagens hoje</div>
+      <div class="stat-value" id="stat-msgs">—</div>
+      <div class="stat-sub">via WhatsApp</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">usuários ativos</div>
+      <div class="stat-value" id="stat-users">—</div>
+      <div class="stat-sub">no banco</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">chunks no Redis</div>
+      <div class="stat-value" id="stat-chunks">—</div>
+      <div class="stat-sub">indexados</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">cache hit rate</div>
+      <div class="stat-value" id="stat-cache">—</div>
+      <div class="stat-sub">semântico</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">manutenção</div>
+      <div class="stat-value" id="stat-maint" style="font-size:18px">—</div>
+      <div class="stat-sub" id="stat-maint-sub"></div>
+    </div>
+  </div>
 
-  <div class="primary-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
-    <a class="card" href="/monitor" target="_blank" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block;">
-      <div style="font-family: monospace; color: #666; font-size: 10px;">01</div>
-      <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// MONITOR</div>
-      <div style="font-size: 24px; margin-bottom: 10px;">📊</div>
-      <div style="font-weight: bold; margin-bottom: 5px;">Dashboard Live</div>
-      <div style="font-size: 12px; color: #888;">Métricas em tempo real via SSE. Tokens e latência.</div>
+  <!-- Nav Cards -->
+  <div class="section-label">// plataforma</div>
+  <div class="cards-grid">
+
+    <a class="nav-card" href="/hub/chat">
+      <div class="card-num">01</div>
+      <div class="card-tag">// chat</div>
+      <div class="card-icon">💬</div>
+      <div class="card-title">Simulador de Chat</div>
+      <div class="card-desc">Teste o agente diretamente. Debug de intenções, CRAG score e memória.</div>
     </a>
 
-    <a class="card" href="/hub/audit" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block;">
-      <div style="font-family: monospace; color: #666; font-size: 10px;">02</div>
-      <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// AUDITORIA</div>
-      <div style="font-size: 24px; margin-bottom: 10px;">📋</div>
-      <div style="font-weight: bold; margin-bottom: 5px;">Audit Log</div>
-      <div style="font-size: 12px; color: #888;">Registo de ações críticas e comandos do Admin.</div>
+    <a class="nav-card" href="/hub/chunkviz">
+      <div class="card-num">02</div>
+      <div class="card-tag">// rag</div>
+      <div class="card-icon">📄</div>
+      <div class="card-title">ChunkViz</div>
+      <div class="card-desc">Upload e visualização de chunks. Ingestão de documentos ao Redis.</div>
     </a>
 
-    <a class="card" href="/hub/users" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block;">
-      <div style="font-family: monospace; color: #666; font-size: 10px;">03</div>
-      <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// UTILIZADORES</div>
-      <div style="font-size: 24px; margin-bottom: 10px;">👥</div>
-      <div style="font-weight: bold; margin-bottom: 5px;">Gestão de Acessos</div>
-      <div style="font-size: 12px; color: #888;">Listar alunos e permissões do PostgreSQL.</div>
+    <a class="nav-card" href="/hub/users">
+      <div class="card-num">03</div>
+      <div class="card-tag">// acesso</div>
+      <div class="card-icon">👥</div>
+      <div class="card-title">Gestão de Usuários</div>
+      <div class="card-desc">CRUD completo. Cadastro, roles, ativo/inativo, busca e filtros.</div>
     </a>
 
-    <a class="card" href="/api/docs" target="_blank" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block;">
-      <div style="font-family: monospace; color: #666; font-size: 10px;">04</div>
-      <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// API</div>
-      <div style="font-size: 24px; margin-bottom: 10px;">📡</div>
-      <div style="font-weight: bold; margin-bottom: 5px;">API Docs</div>
-      <div style="font-size: 12px; color: #888;">Swagger UI automático. Endpoints documentados.</div>
-    </a>    
-    
-    <a class="card" href="/hub/chat" style="background: #111; border: 1px solid #333; padding: 20px; border-radius: 8px; text-decoration: none; color: inherit; display: block; border-left: 3px solid #ff6b35;">
-      <div style="font-family: monospace; color: #666; font-size: 10px;">05</div>
-      <div style="color: #ff6b35; font-weight: bold; margin-bottom: 10px;">// TESTE</div>
-      <div style="font-size: 24px; margin-bottom: 10px;">💬</div>
-      <div style="font-weight: bold; margin-bottom: 5px;">Simulador Web</div>
-      <div style="font-size: 12px; color: #888;">Chat direto com o Grafo para testar RAG, HITL e comandos.</div>
+    <a class="nav-card" href="/hub/audit">
+      <div class="card-num">04</div>
+      <div class="card-tag">// logs</div>
+      <div class="card-icon">📋</div>
+      <div class="card-title">Audit Log</div>
+      <div class="card-desc">Todas as ações do sistema. Traces LangChain, ações admin e eventos.</div>
     </a>
 
-    <a class="card" href="/hub/config" style="background:#111;border:1px solid #333;padding:20px;border-radius:8px;text-decoration:none;color:inherit;display:block;">
-  <div style="font-family:monospace;color:#666;font-size:10px">07</div>
-  <div style="color:#ff6b35;font-weight:bold;margin-bottom:10px">// CONFIG</div>
-  <div style="font-size:22px;margin-bottom:10px">⚙️</div>
-  <div style="font-weight:bold;margin-bottom:5px">Configuração</div>
-  <div style="font-size:12px;color:#888">System prompt, manutenção, cache e workers.</div>
-</a>
-<a class="card" href="/eval/" target="_blank" style="background:#111;border:1px solid #333;padding:20px;border-radius:8px;text-decoration:none;color:inherit;display:block;">
-  <div style="font-family:monospace;color:#666;font-size:10px">08</div>
-  <div style="color:#ff6b35;font-weight:bold;margin-bottom:10px">// EVAL RAG</div>
-  <div style="font-size:22px;margin-bottom:10px">🔬</div>
-  <div style="font-weight:bold;margin-bottom:5px">Avaliação RAG</div>
-  <div style="font-size:12px;color:#888">Hit rate, MRR, CRAG score, faithfulness.</div>
-</a>
-<a class="card" href="/hub/chunkviz" style="background:#111;border:1px solid #333;padding:20px;border-radius:8px;text-decoration:none;color:inherit;display:block;border-left:3px solid #ff6b35;">
-  <div style="font-family:monospace;color:#666;font-size:10px">06</div>
-  <div style="color:#ff6b35;font-weight:bold;margin-bottom:10px">// CHUNKVIZ</div>
-  <div style="font-size:22px;margin-bottom:10px">🧩</div>
-  <div style="font-weight:bold;margin-bottom:5px">ChunkViz</div>
-  <div style="font-size:12px;color:#888">Upload interativo, visualize chunks<br>coloridos e ingira ao Redis.</div>
-</a>
+    <a class="nav-card" href="/monitor/">
+      <div class="card-num">05</div>
+      <div class="card-tag">// live</div>
+      <div class="card-icon">📡</div>
+      <div class="card-title">Monitor Live</div>
+      <div class="card-desc">Conversas em tempo real, pipeline steps e latências LangChain.</div>
+    </a>
+
+    <a class="nav-card" href="/eval/">
+      <div class="card-num">06</div>
+      <div class="card-tag">// qualidade</div>
+      <div class="card-icon">🔬</div>
+      <div class="card-title">Avaliação RAG</div>
+      <div class="card-desc">Hit rate, MRR, CRAG score médio e faithfulness por documento.</div>
+    </a>
+
+    <a class="nav-card" href="/hub/config">
+      <div class="card-num">07</div>
+      <div class="card-tag">// config</div>
+      <div class="card-icon">⚙️</div>
+      <div class="card-title">Configuração</div>
+      <div class="card-desc">API keys, system prompt, modo manutenção, cache e workers Celery.</div>
+    </a>
+
+    <a class="nav-card" href="/admin/">
+      <div class="card-num">08</div>
+      <div class="card-tag">// admin</div>
+      <div class="card-icon">🛠️</div>
+      <div class="card-title">Portal Admin</div>
+      <div class="card-desc">Configurações avançadas, scraping, ingestão e controle total.</div>
+    </a>
+
+    <!-- Links externos -->
+    <a class="nav-card external" href="http://localhost:3001" target="_blank">
+      <div class="card-num">09</div>
+      <div class="card-tag">// grafana ↗</div>
+      <div class="card-icon">📊</div>
+      <div class="card-title">Grafana</div>
+      <div class="card-desc">Dashboards visuais de métricas, latência P95 e uso de recursos.</div>
+    </a>
+
+    <a class="nav-card external" href="http://localhost:9090" target="_blank">
+      <div class="card-num">10</div>
+      <div class="card-tag">// prometheus ↗</div>
+      <div class="card-icon">🔥</div>
+      <div class="card-title">Prometheus</div>
+      <div class="card-desc">Métricas raw, alertas e séries temporais do sistema.</div>
+    </a>
+
+    <a class="nav-card external" href="http://localhost:3000" target="_blank">
+      <div class="card-num">11</div>
+      <div class="card-tag">// langfuse ↗</div>
+      <div class="card-icon">🔍</div>
+      <div class="card-title">Langfuse</div>
+      <div class="card-desc">Tracing completo das chamadas LangChain e Gemini. Custo de tokens.</div>
+    </a>
+
   </div>
 </main>
 
-<div class="terminal-bar" style="position: fixed; bottom: 0; left: 0; right: 0; padding: 10px 20px; background: #0a0c0e; border-top: 1px solid #2a3140; font-family: monospace; font-size: 12px; color: #6b7a8d;">
-  <span style="color: #ff6b35; margin-right: 8px;">oraculo@uema:~$</span>
-  <span id="term-msg">sessão estabelecida — privilégios de administrador concedidos</span>
-  <span style="display: inline-block; width: 6px; height: 12px; background: #ff6b35; animation: blink 1s step-end infinite; vertical-align: middle; margin-left: 4px;"></span>
-</div>
+<script>
+const KEY = sessionStorage.getItem('adminKey');
+const h   = { 'X-Admin-Key': KEY, 'Content-Type': 'application/json' };
 
+async function api(path) {
+  try {
+    const r = await fetch('/api/admin' + path, { headers: h });
+    return r.json();
+  } catch { return null; }
+}
 
+async function loadStats() {
+  const sys    = await api('/system');
+  const rag    = await api('/rag/status');
+  const users  = await api('/users/?por_pag=1');
+
+  // status da chain
+  const dot   = document.getElementById('chain-dot');
+  const label = document.getElementById('chain-label');
+  if (sys) {
+    dot.className   = 'status-dot' + (sys.manutencao ? ' amber' : '');
+    label.textContent = sys.manutencao ? 'MANUTENÇÃO' : 'ONLINE';
+
+    const m    = document.getElementById('stat-maint');
+    const msub = document.getElementById('stat-maint-sub');
+    m.textContent    = sys.manutencao ? '⚠️' : '✅';
+    msub.textContent = sys.manutencao ? 'MODO MANUTENÇÃO' : 'Sistema normal';
+  } else {
+    dot.className   = 'status-dot red';
+    label.textContent = 'OFFLINE';
+  }
+
+  if (rag) {
+    document.getElementById('stat-chunks').textContent = (rag.chunks_count ?? '—').toLocaleString?.() ?? rag.chunks_count;
+    document.getElementById('stat-msgs').textContent   = rag.messages_today ?? '—';
+    const hitRate = rag.cache_hit_rate;
+    document.getElementById('stat-cache').textContent = hitRate != null ? (hitRate * 100).toFixed(0) + '%' : '—';
+  }
+
+  if (users) {
+    document.getElementById('stat-users').textContent = users.total ?? '—';
+  }
+}
+
+function logout() {
+  sessionStorage.removeItem('adminKey');
+  window.location.href = '/hub/login';
+}
+
+loadStats();
+setInterval(loadStats, 30000);
+</script>
 {% endblock %}
