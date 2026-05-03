@@ -34,7 +34,8 @@ class Pessoa(Base):
 
     criado_em = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     atualizado_em = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     @property
     def display_name(self) -> str:
         return self.nome.split()[0] if self.nome else "usuário"

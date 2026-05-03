@@ -15,7 +15,6 @@ class Mensagem(BaseModel):
     
     # Tornando a mensagem imutável (similar ao frozen=True do dataclass)
     model_config = {"frozen": True}
-
 class IdentidadeRica(BaseModel):
     """O DTO Ouro: Viaja pelo Celery e LangGraph sem tocar no banco."""
     user_id:      str

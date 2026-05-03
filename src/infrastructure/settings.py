@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     LOG_LEVEL:     str  = "INFO"
 
     # ── Banco de Dados ────────────────────────────────────────────
-    DATABASE_URL:  str  = "postgresql+asyncpg://user:pass@localhost/oraculo"
+    DATABASE_URL:  str  
     REDIS_URL:     str  = "redis://redis:6379/0"
 
     # ── LLM ──────────────────────────────────────────────────────

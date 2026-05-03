@@ -23,7 +23,7 @@ from src.infrastructure.logging_config import setup_logging
 from src.infrastructure.observability.metrics import PrometheusMetrics
 
 logger = logging.getLogger(__name__)
-
+metrics_service = PrometheusMetrics()
 
 def create_app() -> FastAPI:
     from src.infrastructure.settings import settings
@@ -71,16 +71,14 @@ def create_app() -> FastAPI:
             "chain_ok":  chain_ok,
             "framework": "LangChain Runnables",
         }
-
-    
-
-# 👇👇👇 ADICIONE ESTA NOVA ROTA AQUI 👇👇👇
+    # 👇👇👇 ADICIONE ESTA NOVA ROTA AQUI 👇👇👇
     @app.get("/metrics", tags=["Observabilidade"], include_in_schema=False)
     async def prometheus_metrics():
-        from src.infrastructure.observability.metrics import PrometheusMetrics
-        body, ct = PrometheusMetrics().generate_latest_output()
+        body, ct = metrics_service.generate_latest_output()
         return FastAPIResponse(content=body, media_type=ct)
-# 👆👆👆 -------------------------------- 👆👆👆
+    # 👆👆👆 -------------------------------- 👆👆👆
+
+
     return app
 
 async def _startup(settings) -> None:
@@ -145,7 +143,8 @@ def _registrar_routers(app: FastAPI) -> None:
     from src.api             import monitor
     from src.api.chunkviz_api import router as chunkviz_router
     from src.api.eval_api    import router as eval_router
-
+    from src.api.admin_users_api import router as users_router
+    app.include_router(users_router, prefix="/api/admin/users", tags=["Usuários"])
     app.include_router(hub_router)
     app.include_router(admin_api_router)
     app.include_router(rag_admin_router)

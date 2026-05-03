@@ -27,7 +27,6 @@ NOTA — SINCRONISMO:
 
 COMPATIBILIDADE:
   Mantém a mesma interface do working_memory.py anterior para que os
-  nodes do LangGraph não precisem de alterações.
 """
 from __future__ import annotations
 

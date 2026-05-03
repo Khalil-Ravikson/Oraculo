@@ -18,7 +18,7 @@ async def get_async_redis() -> redis.Redis:
     
     if _redis_async_client is None:
         # Puxa a URL do .env ou usa o padrão do Docker
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6380/0")
+        redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
         
         logger.info(f"🔌 Abrindo nova autoestrada assíncrona para o Redis: {redis_url}")
         

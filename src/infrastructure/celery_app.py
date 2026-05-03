@@ -18,11 +18,12 @@ import logging
 from celery import Celery
 from celery.schedules import crontab
 from celery.signals import worker_ready, worker_shutdown
-from src.infrastructure import settings
+from src.infrastructure.settings import settings as _settings
+celery_broker_url = _settings.REDIS_URL.replace("/0", "/1")
+celery_backend_url = _settings.REDIS_URL.replace("/0", "/2")
 
 
-celery_broker_url = settings.redis_url.replace("/0", "/1")
-celery_backend_url = settings.REDIS_URL.replace("/0", "/2")
+
 celery_app = Celery(
     "bot_tasks",
     broker  = celery_broker_url,

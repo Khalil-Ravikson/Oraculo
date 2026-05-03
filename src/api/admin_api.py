@@ -36,7 +36,7 @@ from src.api.middleware.auth_middleware import (
 )
 from src.application.use_cases.admin_auth import get_admin_auth
 from src.api.admin_users_api import router as users_router
-app.include_router(users_router, prefix="/api/admin/users", tags=["Usuários"])
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["Admin API"])
