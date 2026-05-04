@@ -7,7 +7,20 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
-# Dependências de sistema apenas para compilação
+# No builder, precisamos apenas do essencial para compilar os pacotes Python
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade pip --no-cache-dir && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
+FROM python:3.11-slim AS runtime
+
+# 🚨 AQUI É O LUGAR CORRETO: As bibliotecas do OpenCV precisam estar no Runtime!
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
@@ -17,22 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libxrender-dev \
     libxcb1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
-# 👆👆👆 ----------------------- 👆👆👆
-# Copia e instala dependências em venv isolado
-COPY requirements.txt .
-RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip --no-cache-dir && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
-
-# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
-FROM python:3.11-slim AS runtime
-
-# Copia apenas o runtime das libs de sistema (não os headers de compilação)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
-    curl \
+    libx11-xcb1 \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -56,7 +54,6 @@ COPY --chown=oraculo:oraculo templates/ ./templates/
 COPY --chown=oraculo:oraculo static/    ./static/
 COPY --chown=oraculo:oraculo alembic.ini ./
 COPY --chown=oraculo:oraculo migrations/ ./migrations/
-# COPY --chown=oraculo:oraculo alembic/    ./alembic/
 
 USER oraculo
 EXPOSE 9000
