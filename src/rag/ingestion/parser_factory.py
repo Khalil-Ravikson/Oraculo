@@ -83,13 +83,21 @@ def _get_unstructured_parser() -> "IDocumentParser":
 def _get_txt_parser() -> "IDocumentParser":
     from src.infrastructure.adapters.parsers.txt_adapter import TxtAdapter
     return TxtAdapter()
-
+def _get_llamaparse_parser() -> "IDocumentParser":
+    """
+    LlamaParse (Cloud) — parser otimizado para RAG.
+    Instalação: pip install llama-parse
+    Requer variável LLAMA_CLOUD_API_KEY.
+    """
+    from src.infrastructure.adapters.parsers.llamaparse_adapter import LlamaParseAdapter
+    return LlamaParseAdapter()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Registry
 # ─────────────────────────────────────────────────────────────────────────────
 
 _REGISTRY: dict[str, callable] = {
+    "llamaparse":    _get_llamaparse_parser,
     "pymupdf":       _get_pymupdf_parser,
     "docling":       _get_docling_parser,
     "marker":        _get_marker_parser,
@@ -216,6 +224,7 @@ def _detect_pdf_scan(file_path: str, pages_to_check: int = 3) -> bool:
 
 
 _INSTALL_HINTS = {
+    "llamaparse":   "llama-parse", # Adicionado
     "pymupdf":      "pymupdf",
     "docling":      "docling",
     "marker":       "marker-pdf",

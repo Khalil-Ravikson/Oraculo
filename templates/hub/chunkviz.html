@@ -37,13 +37,15 @@
       
       <div style="margin-bottom: 8px;">
         <label class="cv-lbl">Extrator de PDF</label>
-        <select id="cv-parser" class="cv-sel" onchange="CV.parserChanged()">
-          <option value="pymupdf" selected>⚡  PyMuPDF (Rápido / Recomendado)</option>
-          <option value="auto">🤖  Auto-detect</option>
-          <option value="marker">🧠  Marker (ML / tabelas - Requer GPU)</option>
-          <option value="docling">📊  Docling IBM (layout)</option>
-          <option value="txt">📝  Texto puro</option>
-        </select>
+          <select id="cv-parser" class="cv-sel" onchange="CV.parserChanged()">
+            <option value="pymupdf" selected>⚡ PyMuPDF — PDFs com texto nativo (rápido)</option>
+            <option value="llamaparse">☁️ LlamaParse — Nuvem (Tabelas perfeitas, requer internet/API)</option> <!-- NOVO -->
+            <option value="docling">📊 Docling IBM — PDFs com tabelas/layout complexo</option>
+            <option value="marker">🧠 Marker ML — converte PDF→Markdown (requer GPU)</option>
+            <option value="csv">📋 CSV Semântico — transforma linhas em frases</option>
+            <option value="txt">📝 Texto puro — .txt / .md / .html</option>
+            <option value="auto">🤖 Auto-detect pela extensão</option>
+          </select>
         <div id="cv-parserhint" class="cv-hint" style="margin-top: 4px;">Rápido — ideal para PDFs com texto nativo</div>
       </div>
 

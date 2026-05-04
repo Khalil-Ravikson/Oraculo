@@ -40,7 +40,7 @@ marker-pdf>=0.3.0
 llama-parse>=0.4.0
 # Usamos extensões específicas do unstructured ao invés de [all-docs] para evitar lentidão
 unstructured[docx,pptx]>=0.12.0
-
+llama-cloud>=1.0
 # ── Sprint 1: Observabilidade LLM & Métricas ─────────────────────
 # Sem Langfuse → tracing desativado silenciosamente (sem erro)
 langfuse>=2.0.0

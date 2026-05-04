@@ -13,9 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+
+# 🔥 AQUI ESTÁ A CORREÇÃO: Usando cache do BuildKit e timeout estendido 🔥
 RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip --no-cache-dir && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+    /opt/venv/bin/pip install --upgrade pip
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    /opt/venv/bin/pip install --default-timeout=120 -r requirements.txt
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime

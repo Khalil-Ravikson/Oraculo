@@ -72,7 +72,30 @@ def processar_documento(
 
         emb_model  = get_embeddings()
         textos_raw = [c["text"] for c in chunks]
-        embeddings = emb_model.embed_documents(textos_raw)
+        
+        # --- RATE LIMIT CONTROL: Vetorização em Lotes ---
+        embeddings = []
+        batch_size = 50  # Processa 50 chunks por vez (limite do Gemini free é 100/min)
+        sleep_time = 15  # Espera 15 segundos entre lotes
+        
+        total_lotes = (len(textos_raw) + batch_size - 1) // batch_size
+        logger.info("Iniciando vetorização: %d chunks em %d lotes.", len(textos_raw), total_lotes)
+        
+        for i in range(0, len(textos_raw), batch_size):
+            lote_atual = textos_raw[i:i + batch_size]
+            num_lote = (i // batch_size) + 1
+            
+            logger.info("Vetorizando lote %d/%d (%d chunks)...", num_lote, total_lotes, len(lote_atual))
+            
+            # Chama a API do Gemini apenas para este lote
+            embeddings_lote = emb_model.embed_documents(lote_atual)
+            embeddings.extend(embeddings_lote)
+            
+            # Se não for o último lote, aplica a pausa para não estourar a cota
+            if i + batch_size < len(textos_raw):
+                logger.info("Aguardando %ds para controle de Rate Limit (429)...", sleep_time)
+                time.sleep(sleep_time)
+        # ------------------------------------------------
 
         for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
             chunk_id = hashlib.md5(f"{source}:{i}".encode()).hexdigest()[:16]

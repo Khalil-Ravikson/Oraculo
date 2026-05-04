@@ -16,18 +16,19 @@ class LlamaParseAdapter(IDocumentParser):
         try:
             from llama_parse import LlamaParse
             
-            # Instrução padrão caso não seja enviada uma específica
-            system_prompt = instruction or (
-                "Extrai todo o texto preservando a estrutura de tabelas. "
-                "Para tabelas, usa: COLUNA1: valor | COLUNA2: valor. Responde em português."
+            # Instrução otimizada para manter o Markdown nativo das tabelas
+            parsing_instruction = instruction or (
+                "Extraia todo o texto com máxima precisão. "
+                "Preserve rigorosamente a estrutura de tabelas usando a formatação padrão do Markdown. "
+                "Mantenha títulos, subtítulos e listas estruturados. Responda em português."
             )
 
             parser = LlamaParse(
                 api_key=settings.LLAMA_CLOUD_API_KEY,
                 result_type="markdown",
-                language="pt",
+                language="pt", # Se der warning de parametro desconhecido na nova versão, pode remover
                 verbose=False,
-                system_prompt=system_prompt,
+                parsing_instruction=parsing_instruction, # <--- Ajustado aqui!
             )
             
             docs = parser.load_data(file_path)

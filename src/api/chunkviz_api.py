@@ -23,11 +23,13 @@ MAX_MB   = 50
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 PARSER_HINTS = {
-    "auto":    "Detecta automaticamente pelo formato",
-    "pymupdf": "⚡ Rápido para PDFs com texto nativo",
-    "marker":  "🧠 ML para PDFs com tabelas (mais lento)",
-    "docling": "📊 IBM Docling — layout-aware para DOCX/PDF",
-    "txt":     "📝 Texto puro sem processamento especial",
+    "auto":       "Detecta automaticamente pelo tipo de arquivo",
+    "llamaparse": "☁️ Cloud ML — Excelente para editais e tabelas (Requer token no .env)", # NOVO
+    "pymupdf":    "⚡ Rápido para PDFs com texto nativo — NÃO funciona em PDFs escaneados",
+    "marker":     "🧠 ML para PDFs escaneados/complexos — mais lento, requer mais RAM",
+    "docling":    "📊 IBM Docling — preserva layout de tabelas e hierarquia",
+    "csv":        "📋 Transforma cada linha CSV em frases semânticas ricas",
+    "txt":        "📝 Leitura direta de texto puro",
 }
 
 
