@@ -25,3 +25,8 @@ class StatusMatriculaEnum(str, enum.Enum):
     inativo  = "inativo"
     trancado = "trancado"
     pendente = "pendente"
+
+class TurnoEnum(str, enum.Enum):
+    MATUTINO = "Matutino"
+    VESPERTINO = "Vespertino"
+    NOTURNO = "Noturno"

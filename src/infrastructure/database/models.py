@@ -2,9 +2,8 @@
 from __future__ import annotations
 from sqlalchemy import Boolean, Column, DateTime, Enum as SQLEnum, Integer, String, func
 from sqlalchemy.orm import DeclarativeBase
-
 # Importa os Enums do domínio para tipar as colunas
-from src.domain.entities.enums import RoleEnum, CentroEnum, StatusMatriculaEnum
+from src.domain.entities.enums import RoleEnum, CentroEnum, StatusMatriculaEnum,TurnoEnum
 
 class Base(DeclarativeBase):
     pass
@@ -25,7 +24,7 @@ class Pessoa(Base):
     centro = Column(SQLEnum(CentroEnum), nullable=True)
     curso = Column(String(200), nullable=True)
     semestre_ingresso = Column(String(10), nullable=True)
-
+    turno = Column(SQLEnum(TurnoEnum, name="turno_enum", create_type=False), nullable=True)
     role = Column(SQLEnum(RoleEnum), default=RoleEnum.publico, nullable=False)
     status = Column(SQLEnum(StatusMatriculaEnum), default=StatusMatriculaEnum.pendente, nullable=False)
     

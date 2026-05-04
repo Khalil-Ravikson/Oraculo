@@ -150,7 +150,7 @@ def _registrar_routers(app: FastAPI) -> None:
     app.include_router(rag_admin_router)
     app.include_router(monitor.router, prefix="/monitor")
     app.include_router(chunkviz_router)
-    app.include_router(eval_router, prefix="/eval", tags=["Eval RAG"])
+    app.include_router(eval_router)
 
 
 app = create_app()

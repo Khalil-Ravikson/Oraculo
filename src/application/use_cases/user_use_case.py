@@ -26,14 +26,20 @@ class UserUseCase:
         
         dados["telefone"] = tel
         
-        # Uso do método otimizado do repositório
+        # O repositório já tem o método otimizado telefone_existe
         if await self._repo.telefone_existe(tel):
             return UserResult(ok=False, error=f"Telefone {tel} já cadastrado.", error_code="CONFLICT")
         
-        # AJUSTE: Chamada correta para o método 'criar_pessoa' do repositório
+        # === TRADUÇÃO DE CONTRATO (FRONTEND -> BANCO) ===
+        # O frontend envia 'ativo' (checkbox), mas a entidade do banco espera 'is_active'
+        if "ativo" in dados:
+            dados["is_active"] = dados.pop("ativo")
+        # ================================================
+
+        # Agora passamos os dados limpos e traduzidos para o repositório
         p = await self._repo.criar_pessoa(dados)
         
-        # O Use Case comanda a transação (Commit da Unit of Work)
+        # O Use Case comanda a transação
         await self._repo._session.commit()
         return UserResult(ok=True, data=p)
 

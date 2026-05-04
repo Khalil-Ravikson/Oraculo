@@ -34,7 +34,7 @@ from typing import AsyncIterator
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
-router = APIRouter()
+router = APIRouter(prefix="/eval", tags=["Avaliação RAG"])
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SSE Log Handler — intercepta logs Python e coloca na fila
