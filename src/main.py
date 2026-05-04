@@ -144,13 +144,15 @@ def _registrar_routers(app: FastAPI) -> None:
     from src.api.chunkviz_api import router as chunkviz_router
     from src.api.eval_api    import router as eval_router
     from src.api.admin_users_api import router as users_router
+    from src.api.eval_dashboard import router as eval_dash_router
     app.include_router(users_router, prefix="/api/admin/users", tags=["Usuários"])
     app.include_router(hub_router)
     app.include_router(admin_api_router)
     app.include_router(rag_admin_router)
     app.include_router(monitor.router, prefix="/monitor")
     app.include_router(chunkviz_router)
-    app.include_router(eval_router)
-
+    
+    app.include_router(eval_dash_router, prefix="/eval")   # HTML + SSE
+    app.include_router(eval_router, prefix="/eval/api")    # dataset runner
 
 app = create_app()
