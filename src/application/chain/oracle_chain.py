@@ -405,6 +405,10 @@ class OracleChain:
 
     async def _step_generate(self, ctx: dict, emit) -> None:
         """Gera resposta com Gemini usando contexto RAG e Tool Binding."""
+        from src.infrastructure.observability.langfuse_client import get_langfuse_handler, flush_langfuse, _get_langfuse
+        
+        
+        
         t0 = time.monotonic()
         await emit(StepResult("generate", "running"))
 
@@ -498,10 +502,45 @@ class OracleChain:
             from langfuse.langchain import CallbackHandler
             # 2. Inicializa ambos
             langfuse_client = Langfuse()
-            langfuse_handler = CallbackHandler()
-            # 3. Invoca o modelo
-            response = await llm_bound.ainvoke(messages,config={"callbacks": [langfuse_handler]})
 
+            handler = get_langfuse_handler(
+                session_id=ctx.get("session_id", ""),
+                user_id=ctx.get("user_id", "")
+            )
+            config = {"callbacks": [handler]} if handler else {}
+
+            response = await llm_bound.ainvoke(messages, config=config)
+
+            # Após receber a resposta, extrai tokens e registra custo estimado
+            usage = getattr(response, "usage_metadata", None) or {}
+            tokens_in  = usage.get("input_tokens", 0)
+            tokens_out = usage.get("output_tokens", 0)
+
+            # Custo estimado Gemini 2.0 Flash Lite (USD por 1M tokens)
+            # Ajuste os valores se mudar o modelo
+            CUSTO_INPUT_PER_1M  = 0.075
+            CUSTO_OUTPUT_PER_1M = 0.30
+            custo_usd = (tokens_in / 1_000_000 * CUSTO_INPUT_PER_1M) + \
+                        (tokens_out / 1_000_000 * CUSTO_OUTPUT_PER_1M)
+
+            # Registra o custo no trace do Langfuse
+            if handler:
+                try:
+                    # Captura o ID do trace gerado automaticamente
+                    current_trace_id = handler.get_trace_id()
+                    
+                    # Na V2, acessamos o cliente através de handler.langfuse
+                    handler.langfuse.score(
+                        trace_id=current_trace_id,
+                        name="estimated_cost_usd",
+                        value=round(custo_usd, 6),
+                        comment=f"in={tokens_in} out={tokens_out}"
+                    )
+                    # Força o envio imediato
+                    handler.langfuse.flush()
+                except Exception as e:
+                    print(f"Erro ao registrar score no Langfuse: {e}")
+            ctx["tokens_used"] = tokens_in + tokens_out
             # Desvio HITL: se LLM quer chamar tool
             if hasattr(response, "tool_calls") and response.tool_calls:
                 tool_call = response.tool_calls[0]

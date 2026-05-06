@@ -168,18 +168,11 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
         raise task.retry(exc=exc, countdown=5 ** (task.request.retries + 1))
 
     finally:
-        # ── FORÇAR ENVIO PARA O LANGFUSE ──
         try:
-            from langfuse import Langfuse
-            
-            # Inicializa VAZIO e manda dar o flush
-            langfuse_client = Langfuse()
-            langfuse_client.flush()
-            logger.info("📡 [LANGFUSE] Flush de métricas concluído para %s", phone[-6:])
-        except Exception as e:
-            logger.error("⚠️ [LANGFUSE] Erro no flush: %s", e)
-
-        # Liberação do Lock e Ack do Stream
+            from src.infrastructure.observability.langfuse_client import flush_langfuse
+            flush_langfuse()
+        except Exception:
+            pass
         try:
             lock.release()
         except Exception:

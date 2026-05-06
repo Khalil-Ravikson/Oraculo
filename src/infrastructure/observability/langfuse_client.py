@@ -34,40 +34,59 @@ import functools
 import logging
 from contextlib import contextmanager
 from typing import Any, Callable, Generator
-
+from langfuse import Langfuse
+from langfuse.langchain import CallbackHandler
 logger = logging.getLogger(__name__)
-
+# Singleton robusto
+_lf_instance: Langfuse | None = None
 # ─────────────────────────────────────────────────────────────────────────────
 # Setup do cliente Langfuse (lazy init)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_langfuse():
-    """
-    Retorna o cliente Langfuse singleton.
-    Retorna None silenciosamente se Langfuse não estiver configurado/instalado.
-    Isso garante que o sistema não quebra se Langfuse estiver offline.
-    """
-    try:
-        from src.infrastructure.settings import settings
-        if not getattr(settings, "LANGFUSE_SECRET_KEY", "") or \
-           not getattr(settings, "LANGFUSE_PUBLIC_KEY", ""):
-            return None
+def _get_langfuse() -> Langfuse | None:
+    global _lf_instance
+    if _lf_instance is None:
+        try:
+            from src.infrastructure.settings import settings
+            if not settings.LANGFUSE_SECRET_KEY or not settings.LANGFUSE_PUBLIC_KEY:
+                return None
+            _lf_instance = Langfuse(
+                secret_key=settings.LANGFUSE_SECRET_KEY,
+                public_key=settings.LANGFUSE_PUBLIC_KEY,
+                host=settings.LANGFUSE_HOST,
+                flush_at=1,          # ← flush imediato, não em batch
+                flush_interval=0.5,  # ← máx 500ms de espera
+            )
+        except Exception as e:
+            logger.warning("Langfuse indisponível: %s", e)
+    return _lf_instance
 
-        from langfuse import Langfuse
-        return Langfuse(
-            secret_key = settings.LANGFUSE_SECRET_KEY,
-            public_key = settings.LANGFUSE_PUBLIC_KEY,
-            host       = getattr(settings, "LANGFUSE_HOST", "http://localhost:3000"),
-        )
-    except ImportError:
-        logger.debug("ℹ️  Langfuse não instalado (pip install langfuse) — tracing desativado.")
+def get_langfuse_handler(session_id: str = "", user_id: str = "") -> CallbackHandler | None:
+    """Retorna handler pronto para passar ao LangChain .ainvoke()"""
+    from src.infrastructure.settings import settings
+    
+    if not settings.LANGFUSE_SECRET_KEY or not settings.LANGFUSE_PUBLIC_KEY:
         return None
-    except Exception as e:
-        logger.debug("ℹ️  Langfuse offline: %s — tracing desativado.", e)
-        return None
 
+    # Na V2, passamos as credenciais direto pro CallbackHandler
+    return CallbackHandler(
+        public_key=settings.LANGFUSE_PUBLIC_KEY,
+        secret_key=settings.LANGFUSE_SECRET_KEY,
+        host=settings.LANGFUSE_HOST,
+        session_id=session_id or None,
+        user_id=user_id or None,
+        metadata={"framework": "oraculo_uema_v5"},
+        flush_at=1,          # ← flush imediato
+        flush_interval=0.5,  # ← máx 500ms de espera
+    )
 
-_langfuse_client = None
+def flush_langfuse() -> None:
+    lf = _get_langfuse()
+    if lf:
+        try:
+            lf.flush()
+        except Exception as e:
+            logger.warning("Langfuse flush falhou: %s", e)
 
 def langfuse() -> Any | None:
     """Accessor para o singleton do cliente Langfuse."""
