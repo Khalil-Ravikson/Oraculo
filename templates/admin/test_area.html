@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LLM Sandbox — Oráculo UEMA</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/test_area.css">
+</head>
+<body>
+
+    <!-- TELA DE LOGIN (Mantida idêntica à sua) -->
+    <div id="login-screen">
+        <div class="login-box">
+            <h1>ORÁCULO UEMA</h1>
+            <p>LLM Sandbox — Acesso restrito</p>
+            <input type="password" id="login-key" placeholder="ADMIN_API_KEY" autocomplete="off">
+            <button onclick="doLogin()">ENTRAR</button>
+            <p class="login-err" id="login-err"></p>
+        </div>
+    </div>
+
+    <!-- APP SANDBOX -->
+    <div id="app">
+        <aside id="sidebar">
+            <div class="sidebar-logo">
+                <div class="logo-txt">⬡ SANDBOX</div>
+                <div class="logo-sub">LLM Tools Testing v1.0</div>
+            </div>
+            <nav>
+                <div class="nav-item active">
+                    <span class="nav-icon">🧪</span> Área de Testes
+                </div>
+            </nav>
+            <div class="sidebar-foot">
+                <button class="btn-logout" onclick="doLogout()">⏏ Sair</button>
+            </div>
+        </aside>
+
+        <div id="content">
+            <div class="topbar">
+                <h2>Simulador de Comandos (Tools)</h2>
+            </div>
+            
+            <div class="page active">
+                <div class="cards">
+                    <div class="card">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>1. Selecione a Tool</label>
+                                <select id="tool-select">
+                                    <option value="cadastrar_guest">Cadastrar Usuário Guest</option>
+                                    <option value="enviar_email">Enviar E-mail</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label>2. Payload Gerado pela LLM (JSON)</label>
+                            <textarea id="tool-payload" rows="10"></textarea>
+                        </div>
+                        
+                        <div style="margin-top: 15px;">
+                            <button class="btn primary" onclick="executeTool()">▶ Executar Tool</button>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-top: 20px;">
+                        <div class="sect-title" style="margin-bottom: 10px;">Resultado da Execução (Métricas enviadas ao Grafana)</div>
+                        <pre id="response-output">Aguardando execução...</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST -->
+    <div id="toast"></div>
+
+    <script src="/static/js/test_area.js"></script>
+</body>
+</html>

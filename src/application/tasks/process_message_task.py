@@ -99,7 +99,7 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
         warning_task = asyncio.create_task(
             _aviso_latencia(gateway, chat_id, _WARNING_DELAY)
         )
-
+        result = await chain.invoke(...)
         # ── Verifica bloqueio admin ────────────────────────────────────────────
         if r_text.get("admin:maintenance_mode") == "1":
             if not identity.get("is_admin"):
@@ -168,14 +168,24 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
         raise task.retry(exc=exc, countdown=5 ** (task.request.retries + 1))
 
     finally:
+        # ── FORÇAR ENVIO PARA O LANGFUSE ──
+        try:
+            from langfuse import Langfuse
+            
+            # Inicializa VAZIO e manda dar o flush
+            langfuse_client = Langfuse()
+            langfuse_client.flush()
+            logger.info("📡 [LANGFUSE] Flush de métricas concluído para %s", phone[-6:])
+        except Exception as e:
+            logger.error("⚠️ [LANGFUSE] Erro no flush: %s", e)
+
+        # Liberação do Lock e Ack do Stream
         try:
             lock.release()
         except Exception:
             pass
-
     if success and stream_id:
         _xack_stream(stream_id)
-
 
 async def _aviso_latencia(gateway, chat_id: str, delay: float) -> None:
     await asyncio.sleep(delay)

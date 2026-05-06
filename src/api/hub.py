@@ -121,7 +121,7 @@ async def dashboard(request: Request):
 
     return templates.TemplateResponse(
         request=request,
-        name="hub/dashboard.html",
+        name="hub/index.html",
         context={
             "request":  request,
             "username": payload.sub,

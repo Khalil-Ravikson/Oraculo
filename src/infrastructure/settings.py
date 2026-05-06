@@ -56,9 +56,9 @@ class Settings(BaseSettings):
     # ── Sprint 1: Langfuse (Observabilidade LLM) ──────────────────
     # Gere as chaves em http://localhost:3000 → Settings → API Keys
     # Se vazias, o tracing é desativado silenciosamente (sem erro).
-    LANGFUSE_SECRET_KEY: str = ""
     LANGFUSE_PUBLIC_KEY: str = ""
-    LANGFUSE_HOST:       str = "http://langfuse:3000"
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "http://langfuse:3000"
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),

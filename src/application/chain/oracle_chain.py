@@ -36,6 +36,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import AsyncIterator
 from functools import lru_cache
+from langfuse.langchain import CallbackHandler
+from src.infrastructure.settings import settings
 logger = logging.getLogger(__name__)
 
 
@@ -135,7 +137,10 @@ class OracleChain:
         """
         t_total = time.monotonic()
         steps: list[StepResult] = []
-
+ 
+        
+        # Opcional: Adicione metadados para filtrar no dashboard do Langfuse
+##
         async def emit(step: StepResult):
             steps.append(step)
             if debug_queue:
@@ -487,7 +492,15 @@ class OracleChain:
             llm_bound = llm.bind_tools(tools) if tools else llm
             messages = [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
             
-            response = await llm_bound.ainvoke(messages)
+            
+            # 1. Importa o Cliente Principal e o Handler do LangChain
+            from langfuse import Langfuse
+            from langfuse.langchain import CallbackHandler
+            # 2. Inicializa ambos
+            langfuse_client = Langfuse()
+            langfuse_handler = CallbackHandler()
+            # 3. Invoca o modelo
+            response = await llm_bound.ainvoke(messages,config={"callbacks": [langfuse_handler]})
 
             # Desvio HITL: se LLM quer chamar tool
             if hasattr(response, "tool_calls") and response.tool_calls:

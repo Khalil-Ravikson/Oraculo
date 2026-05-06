@@ -220,10 +220,7 @@ async def run_full_eval(request: Request):
         ids    = body.get("ids", None)  # None = todos
 
         # Importa a task de eval ou roda direto
-        from src.application.tasks.tasks_notificacao import celery_app  # reusa o celery_app
-        logging.getLogger(__name__).info(
-            "🧪 Full eval solicitado | versao=%s | ids=%s", versao, ids
-        )
+
         return JSONResponse({"status": "enfileirado", "versao": versao, "ids": ids})
     except Exception as e:
         return JSONResponse({"status": "erro", "msg": str(e)}, status_code=500)
