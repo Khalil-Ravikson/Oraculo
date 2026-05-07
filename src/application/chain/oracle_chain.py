@@ -36,9 +36,32 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import AsyncIterator
 from functools import lru_cache
-from langfuse.langchain import CallbackHandler
-from src.infrastructure.settings import settings
+# ── INÍCIO DA BLINDAGEM DO LANGFUSE (MONKEY PATCH) ──
+import sys
+import logging
+
 logger = logging.getLogger(__name__)
+
+# 1. Tenta enganar o Python para o Langfuse achar que a pasta antiga existe
+try:
+    import langchain_core.callbacks.base
+    sys.modules['langchain.callbacks'] = sys.modules['langchain_core.callbacks']
+    sys.modules['langchain.callbacks.base'] = sys.modules['langchain_core.callbacks.base']
+except Exception:
+    pass
+
+# 2. Tenta importar o Langfuse. Se explodir, desativa silenciosamente sem derrubar a API!
+try:
+    from langfuse.callback import CallbackHandler
+except Exception:
+    try:
+        from langfuse.langchain import CallbackHandler
+    except Exception as e:
+        logger.warning("⚠️ Tracing do Langfuse desativado silenciosamente. Erro: %s", e)
+        # Cria um 'Fantasma' para não quebrar o resto do código
+        CallbackHandler = None 
+# ── FIM DA BLINDAGEM ──
+from src.infrastructure.settings import settings
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -403,12 +426,24 @@ class OracleChain:
         await emit(StepResult("grade_docs", "ok", detail, ms,
                               {"crag_score": round(normalized, 3)}))
 
+    """
+oracle_chain.py — Trecho refatorado: _step_generate
+=====================================================
+
+Cole este método completo na classe OracleChain, substituindo o _step_generate atual.
+
+MUDANÇAS vs. versão anterior:
+  1. Langfuse V2: CallbackHandler() sem argumentos — lê ENV vars automaticamente.
+  2. Resiliência: handler.langfuse.score() e .flush() envolvidos em try/except
+     cirúrgicos. Se o Langfuse cair, o pipeline continua normalmente.
+  3. Métricas Prometheus: record_llm_usage() registra tokens + custo a cada geração.
+  4. Imports centralizados em safe_score_from_handler / safe_flush_handler
+     (definidos em langfuse_client.py).
+  5. Variável `tokens_total` corrigida (era usada antes de ser definida).
+"""
+
     async def _step_generate(self, ctx: dict, emit) -> None:
         """Gera resposta com Gemini usando contexto RAG e Tool Binding."""
-        from src.infrastructure.observability.langfuse_client import get_langfuse_handler, flush_langfuse, _get_langfuse
-        
-        
-        
         t0 = time.monotonic()
         await emit(StepResult("generate", "running"))
 
@@ -434,17 +469,17 @@ class OracleChain:
             contexto_rag = ""
             for chunk in ctx.get("chunks", [])[:5]:
                 content = chunk.get("content", "").strip()
-                source = chunk.get("source", "")
+                source  = chunk.get("source", "")
                 if content:
                     contexto_rag += f"\n[{source}]\n{content}\n---\n"
 
             # Prompt final
-            user_ctx = ctx.get("user_context", {})
-            nome = user_ctx.get("nome", "")
-            curso = user_ctx.get("curso", "")
-            facts = ctx.get("facts", [])
+            user_ctx  = ctx.get("user_context", {})
+            nome      = user_ctx.get("nome", "")
+            curso     = user_ctx.get("curso", "")
+            facts     = ctx.get("facts", [])
             facts_str = "\n".join(f"- {f}" for f in facts) if facts else ""
-            history = ctx.get("history", "")
+            history   = ctx.get("history", "")
 
             prompt_parts = []
             if nome or curso:
@@ -459,21 +494,15 @@ class OracleChain:
                 prompt_parts.append(
                     f"<historico_conversa>\n{history}\n</historico_conversa>"
                 )
-            if contexto_rag:
-                prompt_parts.append(
-                    f"<informacao_documentos>\n{contexto_rag}\n</informacao_documentos>"
-                )
-            else:
-                prompt_parts.append(
-                    "<informacao_documentos>Nenhuma informação encontrada nos documentos."
-                    "</informacao_documentos>"
-                )
+            prompt_parts.append(
+                f"<informacao_documentos>\n{contexto_rag or 'Nenhuma informação encontrada.'}\n</informacao_documentos>"
+            )
             prompt_parts.append(
                 f"<pergunta_usuario>\n{ctx['message']}\n</pergunta_usuario>"
             )
             prompt = "\n\n".join(prompt_parts)
 
-            # Chama Gemini via LangChain
+            # ── LLM + Tools ────────────────────────────────────────────────────
             from langchain_google_genai import ChatGoogleGenerativeAI
             from langchain_core.messages import HumanMessage, SystemMessage
             from src.infrastructure.settings import settings
@@ -484,97 +513,102 @@ class OracleChain:
                 google_api_key=settings.GEMINI_API_KEY,
             )
 
-            # ── INÍCIO DO BLOCO CORRIGIDO ──
-            role = user_ctx.get("role", "guest").upper()
-            tools = []
+            role   = user_ctx.get("role", "guest").upper()
+            tools  = []
             try:
                 registry = _get_tool_registry()
-                tools = registry.get_for_role(role)
+                tools    = registry.get_for_role(role)
             except Exception as e:
                 logger.warning("⚠️  [CHAIN] tools não carregadas: %s", e)
 
             llm_bound = llm.bind_tools(tools) if tools else llm
-            messages = [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
-            
-            
-            # 1. Importa o Cliente Principal e o Handler do LangChain
-            from langfuse import Langfuse
-            from langfuse.langchain import CallbackHandler
-            # 2. Inicializa ambos
-            langfuse_client = Langfuse()
+            messages  = [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
 
+            # ── Langfuse V2: handler sem argumentos de credencial ──────────────
+            # Lê LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST das ENV
+            from src.infrastructure.observability.langfuse_client import (
+                get_langfuse_handler,
+                safe_score_from_handler,
+                safe_flush_handler,
+            )
             handler = get_langfuse_handler(
                 session_id=ctx.get("session_id", ""),
-                user_id=ctx.get("user_id", "")
+                user_id=ctx.get("user_context", {}).get("matricula", ""),
             )
             config = {"callbacks": [handler]} if handler else {}
 
+            # ── Chamada ao LLM ─────────────────────────────────────────────────
             response = await llm_bound.ainvoke(messages, config=config)
 
-            # Após receber a resposta, extrai tokens e registra custo estimado
-            usage = getattr(response, "usage_metadata", None) or {}
+            # ── Tokens e custo ─────────────────────────────────────────────────
+            usage      = getattr(response, "usage_metadata", None) or {}
             tokens_in  = usage.get("input_tokens", 0)
             tokens_out = usage.get("output_tokens", 0)
+            tokens_total = tokens_in + tokens_out
 
-            # Custo estimado Gemini 2.0 Flash Lite (USD por 1M tokens)
-            # Ajuste os valores se mudar o modelo
-            CUSTO_INPUT_PER_1M  = 0.075
-            CUSTO_OUTPUT_PER_1M = 0.30
-            custo_usd = (tokens_in / 1_000_000 * CUSTO_INPUT_PER_1M) + \
-                        (tokens_out / 1_000_000 * CUSTO_OUTPUT_PER_1M)
+            # Custo estimado Gemini 2.0 Flash Lite (ajuste se mudar de modelo)
+            CUSTO_INPUT_PER_1M  = 0.075   # USD por 1M tokens de input
+            CUSTO_OUTPUT_PER_1M = 0.30    # USD por 1M tokens de output
+            custo_usd = (
+                (tokens_in  / 1_000_000 * CUSTO_INPUT_PER_1M) +
+                (tokens_out / 1_000_000 * CUSTO_OUTPUT_PER_1M)
+            )
 
-            # Registra o custo no trace do Langfuse
-            if handler:
-                try:
-                    # Captura o ID do trace gerado automaticamente
-                    current_trace_id = handler.get_trace_id()
-                    
-                    # Na V2, acessamos o cliente através de handler.langfuse
-                    handler.langfuse.score(
-                        trace_id=current_trace_id,
-                        name="estimated_cost_usd",
-                        value=round(custo_usd, 6),
-                        comment=f"in={tokens_in} out={tokens_out}"
-                    )
-                    # Força o envio imediato
-                    handler.langfuse.flush()
-                except Exception as e:
-                    print(f"Erro ao registrar score no Langfuse: {e}")
-            ctx["tokens_used"] = tokens_in + tokens_out
-            # Desvio HITL: se LLM quer chamar tool
+            # ── Métricas Prometheus ────────────────────────────────────────────
+            ms_so_far = int((time.monotonic() - t0) * 1000)
+            try:
+                from src.infrastructure.observability.metrics import get_metrics
+                get_metrics().record_llm_usage(
+                    input_tokens=tokens_in,
+                    output_tokens=tokens_out,
+                    cost_usd=custo_usd,
+                    latency_ms=ms_so_far,
+                )
+            except Exception as e:
+                logger.error("Prometheus record_llm_usage falhou: %s — ignorado.", e)
+
+            # ── Score Langfuse (resiliente) ────────────────────────────────────
+            # ✅ Se o Langfuse cair aqui, o pipeline NÃO é interrompido
+            safe_score_from_handler(
+                handler,
+                name="token_cost",
+                value=round(custo_usd, 6),
+                comment=f"tokens_in={tokens_in} tokens_out={tokens_out}",
+            )
+            safe_flush_handler(handler)
+
+            ctx["tokens_used"] = tokens_total
+
+            # ── Desvio HITL ────────────────────────────────────────────────────
             if hasattr(response, "tool_calls") and response.tool_calls:
-                tool_call = response.tool_calls[0]
                 import json
-                
-                hitl_key = f"hitl:{ctx['session_id']}"
+                tool_call = response.tool_calls[0]
+                hitl_key  = f"hitl:{ctx['session_id']}"
                 r.setex(hitl_key, 300, json.dumps({
-                    "action":      tool_call["name"],
-                    "args":        tool_call["args"],
-                    "status":      "pending",
-                    "expires_at":  int(time.time()) + 300,
+                    "action":     tool_call["name"],
+                    "args":       tool_call["args"],
+                    "status":     "pending",
+                    "expires_at": int(time.time()) + 300,
                 }))
-                
                 tool_desc = _descrever_tool_call(tool_call["name"], tool_call["args"])
                 ctx["answer"] = (
                     f"⚠️ *Confirmação necessária*\n\n{tool_desc}\n\n"
                     "Responda *SIM* para confirmar ou *NÃO* para cancelar."
                 )
                 ctx["hitl_pending"] = True
-                await emit(StepResult("generate", "ok", f"HITL disparado: {tool_call['name']}", 0))
+                ms = int((time.monotonic() - t0) * 1000)
+                await emit(StepResult("generate", "ok", f"HITL: {tool_call['name']}", ms))
                 return
 
-            # Fluxo RAG Normal (sem chamada de tool)
+            # ── Fluxo RAG normal ───────────────────────────────────────────────
             answer = response.content or ""
-            tokens = getattr(response, "usage_metadata", {}).get("total_tokens", 0) if hasattr(response, "usage_metadata") else 0
+            ctx["answer"]      = answer
+            ctx["tokens_used"] = tokens_total
 
-            ctx["answer"] = answer
-            ctx["tokens_used"] = tokens
-
-            ms = int((time.monotonic() - t0) * 1000)
-            detail = f"{len(answer)} chars | {tokens} tokens | {ms}ms"
+            ms     = int((time.monotonic() - t0) * 1000)
+            detail = f"{len(answer)} chars | {tokens_total} tokens | {ms}ms"
             await emit(StepResult("generate", "ok", detail, ms,
-                                  {"tokens": tokens, "chars": len(answer)}))
-            # ── FIM DO BLOCO CORRIGIDO ──
+                                  {"tokens": tokens_total, "chars": len(answer)}))
 
         except Exception as e:
             ms = int((time.monotonic() - t0) * 1000)

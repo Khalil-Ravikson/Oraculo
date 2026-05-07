@@ -43,7 +43,8 @@ unstructured[docx,pptx]>=0.12.0
 llama-cloud>=1.0
 # ── Sprint 1: Observabilidade LLM & Métricas ─────────────────────
 # Sem Langfuse → tracing desativado silenciosamente (sem erro)
-Langfuse
+langfuse==2.53.9
+prometheus-fastapi-instrumentator
 prometheus-client>=0.20.0
 scikit-learn>=1.3.0
 

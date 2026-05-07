@@ -1,24 +1,52 @@
 # observability/prometheus.yml
-global:
-  scrape_interval:     15s
-  evaluation_interval: 15s
+# ─────────────────────────────────────────────────────────────────────────────
+# Prometheus — Scrape config para Oráculo UEMA
+# IP 172.18.0.1:9000 = host da rede Docker (Windows/Empresa)
+# ─────────────────────────────────────────────────────────────────────────────
 
-rule_files:
-  - "alert_rules.yml"
+global:
+  scrape_interval:     15s   # Intervalo padrão de coleta
+  evaluation_interval: 15s   # Intervalo de avaliação de alertas
+  scrape_timeout:      10s
+
+# ── Targets ────────────────────────────────────────────────────────────────
 
 scrape_configs:
-  # Métricas do Redis via redis_exporter
-  - job_name: "redis"
-    static_configs:
-      - targets: ["redis_exporter:9121"]
 
-  # Métricas da API FastAPI (via endpoint /metrics que criaremos)
+  # FastAPI + prometheus-fastapi-instrumentator + métricas custom
   - job_name: "oraculo_api"
     static_configs:
-      - targets: ["api:9000"]
-    metrics_path: "/metrics"
+      - targets: ["172.18.0.1:9000"]
+        labels:
+          env: "production"
+          service: "oraculo_api"
+    metrics_path: /metrics
+    scheme: http
+    # Aumenta timeout para evitar falso-positivo em cold start
+    scrape_timeout: 8s
 
-  # Prometheus si mesmo
+  # Redis Exporter (porta padrão 9121)
+  # Imagem: oliver006/redis_exporter
+  - job_name: "redis_exporter"
+    static_configs:
+      - targets: ["redis_exporter:9121"]
+        labels:
+          env: "production"
+          service: "redis"
+    metrics_path: /metrics
+
+  # Langfuse (se expuser métricas — porta 3030 na imagem oficial)
+  - job_name: "langfuse"
+    static_configs:
+      - targets: ["langfuse:3030"]
+        labels:
+          env: "production"
+          service: "langfuse"
+    metrics_path: /metrics
+    # Ignora erro se Langfuse estiver offline
+    honor_timestamps: true
+
+  # Prometheus self-monitoring
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]

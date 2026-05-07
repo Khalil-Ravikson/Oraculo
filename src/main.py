@@ -21,6 +21,8 @@ from fastapi.responses import Response as FastAPIResponse
 # ── Logging PRIMEIRO — antes de qualquer import src.* ─────────────────────────
 from src.infrastructure.logging_config import setup_logging
 from src.infrastructure.observability.metrics import PrometheusMetrics
+from prometheus_fastapi_instrumentator import Instrumentator
+
 
 logger = logging.getLogger(__name__)
 metrics_service = PrometheusMetrics()
@@ -38,12 +40,13 @@ def create_app() -> FastAPI:
         docs_url    = "/api/docs" if settings.DEV_MODE else None,
         redoc_url   = None,
     )
-
+    instrumentator = Instrumentator().instrument(app) # SÓ instrument, SEM o .expose
     _montar_static(app)
     _registrar_routers(app)
 
     @app.on_event("startup")
     async def on_startup():
+        instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
         await _startup(settings)
 
     @app.on_event("shutdown")
