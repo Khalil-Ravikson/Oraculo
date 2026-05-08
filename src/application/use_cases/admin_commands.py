@@ -285,3 +285,14 @@ class AdminCommandsUseCase:
             r.expire("audit:log", 86400 * 90)
         except Exception as e:
             logger.debug("Audit log falhou: %s", e)
+            
+            
+    # Padrão de uso — em admin_commands.py ou num step futuro:
+    #hitl_data = {
+       # "action": "cadastro_pendente",
+       # "args": {"nome": nome, "telefone": tel, "curso": curso},
+       # "description": f"Cadastrar {nome} ({tel}) no curso {curso}",
+      #  "status": "pending",
+      #  "expires_at": int(time.time()) + 300,
+   # }
+   # r.setex(f"hitl:{session_id}", 300, json.dumps(hitl_data))
