@@ -147,13 +147,16 @@ def _registrar_routers(app: FastAPI) -> None:
     from src.api.routers.admin.eval_api        import router as eval_api_router
     
     # 3. Ferramentas (Tools)
-    from src.api.routers.tools.chunkviz_api    import router as chunkviz_router
+    from src.api.routers.tools.chunkviz_tools    import router as chunkviz_router
 
     # Registrando no FastAPI com os prefixos e tags
     app.include_router(users_router, prefix="/api/admin/users", tags=["Admin: Usuários"])
+
+    
+    # O hub_router agora carrega todas as rotas web, inclusive as do ChunkViz (/hub/chunkviz/...)
     app.include_router(hub_router)
+    
     app.include_router(admin_api_router)
-    app.include_router(chunkviz_router, prefix="/tools", tags=["Tools: Chunkviz"])   
     app.include_router(eval_dash_router, prefix="/eval", tags=["Admin: Eval GUI"])
     app.include_router(eval_api_router, prefix="/eval/api", tags=["Admin: Eval API"])
 

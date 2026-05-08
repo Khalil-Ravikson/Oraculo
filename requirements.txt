@@ -54,3 +54,8 @@ scikit-learn>=1.3.0
 
 rapidocr-onnxruntime
 onnxruntime
+
+
+
+google-api-python-client>=2.100.0
+google-auth>=2.23.0

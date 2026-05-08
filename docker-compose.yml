@@ -22,6 +22,7 @@ x-app-env: &app-env
     LANGFUSE_HOST: "http://langfuse:3000"
     LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY}"
     LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY}"
+    LLAMA_CLOUD_API_KEY: "${LLAMA_CLOUD_API_KEY}"
 
 x-restart: &restart
   restart: unless-stopped

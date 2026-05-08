@@ -1,0 +1,90 @@
+
+
+--- Página 19 ---
+
+19 
+ 
+ 
+12.2 As notas padronizadas calculadas, por área de conhecimento, para as questões objetivas de múltipla escolha e 
+para a produção textual serão obtidas por meio das seguintes fórmulas: 
+ 
+ 
+Sendo: 
+Np = nota padronizada para cada candidato(a); 
+Xi = número de acertos obtidos pelo candidato(a) nas questões objetivas de múltipla escolha, em cada área de 
+conhecimento, e a nota final da produção textual; 
+ 
+= média aritmética de acertos dos(as) candidatos(as) presentes nas questões objetivas de múltipla escolha, por área 
+de conhecimento. Representa, ainda, a média aritmética das notas dos candidatos presentes, no âmbito de cada curso, 
+na produção textual; 
+Dp = desvio padrão das notas brutas dos(as) candidatos(as) presentes nas questões objetivas de múltipla escolha, no 
+âmbito de cada área de conhecimento e, para a produção textual, no âmbito de cada curso; 
+N = número de candidatos(as) presentes nas questões objetivas de múltipla escolha ou o número de candidatos(as) 
+presentes na produção textual, no âmbito de cada curso. 
+12.2.1 No cálculo das notas padronizadas, serão consideradas duas casas decimais sem arredondamento estatístico. 
+12.3  Será automaticamente eliminado do PAES 2026, o(a) candidato(a) que 
+a) faltar à prova; 
+b) obtiver acerto inferior a 15 (quinze) questões objetivas de múltipla escolha; 
+c) estiver fora do quádruplo das vagas ofertadas por Curso, turno e Campus, considerando-se a ordem decrescente 
+da nota de desempenho nas questões objetivas de múltipla escolha; 
+d) obtiver nota final inferior a 2 (dois) na produção textual; 
+e) usar comprovadamente de fraude ou concorrer para esse fim; 
+f) atentar contra a ordem ou desacatar a quem quer que esteja investido da autoridade para supervisionar, coordenar, 
+fiscalizar ou orientar a aplicação da prova. 
+12.4 Em vista da natureza do PAES 2026, não será permitida a realização de segunda chamada. 
+12.5 A DPSV/SUCONS/UEMA divulgará no site <https://sigconcursos.uema.br/> a relação nominal de candidatos(as) 
+incluídos, no quádruplo do número de vagas, por Curso, turno e Campus, que terão corrigida a produção textual, em 
+obediência ao que dispõe o subitem 11.5 deste Edital. 
+12.5.1 A relação nominal de candidatos(as) incluídos no quádruplo do número de vagas obedecerá à ordem 
+decrescente da nota de desempenho nas questões objetivas de múltipla escolha. 
+ 
+13 DA APROVAÇÃO E DA CLASSIFICAÇÃO FINAL 
+ 
+13.1 O preenchimento das vagas por Campus, Curso e turno, para a UEMA e a UEMASUL, em decorrência de ajuste 
+consolidado por meio do Acordo de Cooperação Técnica n.º 01/2023 entre as Instituições de Ensino Superior, será por 
+meio de processo classificatório, obedecendo à ordem decrescente da média final obtida, com aproximação de duas 
+casas decimais e sem arredondamento estatístico, conforme o item 12 deste Edital. 
+ 
+13.2 A DPSV/SUCONS/UEMA, com base na média final obtida pelo(a) candidato(a), divulgará o resultado do PAES 
+2026, publicando somente a relação nominal de classificados, por campus, Curso e turno, até o limite das vagas, 
+devendo constar a ordem, o número de inscrição, o nome, o número de documento de identificação e a média final 
+padronizada obtida pelo candidato.
+
+--- Página 59 ---
+
+59 
+ 
+ 
+ 
+Engenharia Mecânica Bacharelado 
+O Curso de Engenharia Mecânica é o ramo da engenharia responsável pela elaboração de projetos, 
+implantação, operação, manutenção de instalações mecânicas diversas (oficinas, indústrias, fabricação de 
+máquinas e produtos mecânicos, fábrica em geral). O profissional desta área elabora e implanta sistema de 
+produtos, de transmissão e de utilização de calor, sistema de refrigeração de ar condicionado, cria 
+ferramentas específicas, controla a qualidade, realiza auditoria, fiscaliza projetos industriais, cuida da 
+manutenção de máquinas e equipamentos. Este curso tem como objetivo buscar maneiras de aproveitar os 
+recursos naturais sem, no entanto, destruir o equilíbrio ecológico da natureza, o que implica num controle de 
+agentes poluentes nos processos industriais. 
+ 
+ 
+ 
+Formação de Oficiais Bombeiro Militar - Bacharelado em Segurança Pública do Trabalho - CBMMA 
+O CFO-CBMMA é um curso destinado a formar bombeiros militares ao posto inicial de Aspirante a Oficial 
+Bombeiro da Carreira Militar até alcançar o posto de Capitão, capacitando-os a desempenhar atribuições de 
+comando, chefia e liderança sobre integrantes da tropa de bombeiros, nos serviços operacionais afetos à 
+gerência de pessoal e de atividades-meio no âmbito administrativo e em ações tipicamente militares. 
+ 
+ 
+Engenharia de Produção Bacharelado 
+O Curso de Engenharia de Produção objetiva formar profissionais capacitados a atuar na gestão de sistemas 
+de produção que, numa definição genérica, são sistemas destinados a gerar bens e serviços para o mercado 
+consumidor. Para tanto, o curso basicamente oferece ao egresso uma série de ferramentas de gestão, de 
+otimização, de racionalização dos processos produtivos efetuados nas instituições e empresas em geral. 
+Diferentemente do curso dos ramos clássicos de Engenharia, este curso não focaliza nenhuma forma de 
+processo produtivo em especial (mecânico, químico, elétrico etc.), mas preocupa-se com a aplicação de 
+ferramentas que permitam aumentar a eficiência desses processos, naquilo que lhes seja genericamente 
+comum. Assim, frequentemente, o engenheiro de Produção irá ter, como referência de abordagem, a 
+verificação de certos parâmetros relativos à execução dos processos, tais como custos, tempo, qualidade, 
+gastos energéticos, entre outros. Fundamentalmente, tratará de organizar quaisquer recursos produtivos, de 
+qualquer gênero, da forma mais eficiente, consoante aos objetivos específicos do sistema de produção em 
+que intervém.

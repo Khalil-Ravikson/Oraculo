@@ -3,10 +3,12 @@ const CV = (() => {
 const S = {
   source:'file', text:'', fileId:null, fileName:'',
   pageCount:0, curPage:0, pages:[], fullText:'',
+  selectedPages: new Set(), // FEATURE 1: Guarda páginas selecionadas
   parser:'auto', strategy:'recursive', size:400,
   overlap:60, docType:'geral',
   chunks:[], view:'text',
   simTimer:null, taskId:null,
+  ingestMode: 'all' // Pode ser 'all', 'page', 'selected'
 };
 
 const COLORS = [
@@ -25,8 +27,10 @@ const COLORS = [
 const PARSER_HINTS = {
   auto:         'Detecta automaticamente pelo formato do arquivo',
   pymupdf:      '⚡ Rápido — ideal para PDFs com texto nativo',
+  llamaparse:   '☁️ Nuvem — Tabelas e IA (Requer internet e API Key)',
   marker:       '🧠 ML — para PDFs com tabelas ou layout complexo (mais lento)',
   docling:      '📊 IBM Docling — layout-aware, ótimo para DOCX e editais',
+  csv:          '📋 CSV Semântico — transforma linhas em frases',
   txt:          '📝 Texto puro — sem processamento especial',
 };
 
@@ -53,6 +57,45 @@ function _savePrefs() {
     size:S.size, overlap:S.overlap, strategy:S.strategy,
     docType:S.docType, parser:S.parser,
   }));
+}
+
+/* ─── FEATURE 3: WARNINGS ───────────────────────────── */
+function showWarning(msg) {
+  const w = $('cv-parser-warning');
+  if (!w) return;
+  $('cv-parser-warning-msg').textContent = `⚠️ ${msg}`;
+  w.style.display = 'flex';
+}
+
+function _checkParserFallback(responseInfo) {
+  if (responseInfo.parser_used && responseInfo.parser_used !== S.parser) {
+    let msg = `O parser '${S.parser}' falhou ou não estava disponível. `;
+    if (S.parser === 'llamaparse') msg += "Verifique sua API Key. ";
+    msg += `O sistema usou '${responseInfo.parser_used}' como fallback automático.`;
+    showWarning(msg);
+  } else {
+    $('cv-parser-warning').style.display = 'none';
+  }
+}
+
+/* ─── FEATURE 2: RESET DOCUMENT ─────────────────────── */
+function resetDocument() {
+  S.text = ''; S.fileId = null; S.fileName = '';
+  S.pageCount = 0; S.pages = []; S.fullText = '';
+  S.selectedPages.clear();
+  S.ingestMode = 'all';
+  
+  $('cv-dz').style.display = '';
+  $('cv-fileinfo').style.display = 'none';
+  $('cv-statsbar').style.display = 'none';
+  $('cv-vizarea').children[0].style.display = ''; // Mostra empty state
+  $('cv-textview').style.display = 'none';
+  $('cv-cardsview').style.display = 'none';
+  $('cv-parser-warning').style.display = 'none';
+  
+  _updateSrcStats();
+  badge('info', 'Documento removido');
+  $('cv-fi').value = ''; // Reseta o input file
 }
 
 /* ─── DRAG & DROP ───────────────────────────────────── */
@@ -84,6 +127,10 @@ async function _upload(file) {
     S.pages     = d.pages;
     S.curPage   = 0;
     S.fullText  = '';
+    S.selectedPages.clear(); // Limpa seleção anterior
+
+    // Verifica fallback do backend
+    _checkParserFallback(d);
 
     $('cv-dz').style.display = 'none';
     $('cv-fileinfo').style.display = '';
@@ -99,18 +146,71 @@ async function _upload(file) {
     }
 
     S.text = d.first_text;
+    S.ingestMode = 'page';
+    _updateIngestButton();
     _updateSrcStats();
     badge('ok', `✅ ${d.name}`);
     _schedSim();
   } catch(e) { badge('err', `❌ ${e.message}`); }
 }
-
+/* ─── FEATURE 1: MULTIPLE PAGE SELECTION ────────────── */
 function _buildStrip(pages) {
   const strip = $('cv-pgstrip');
-  strip.innerHTML = pages.slice(0, 60).map((p, i) =>
+  // Alteração aqui: Removemos o limite de 60 páginas!
+  strip.innerHTML = pages.map((p, i) =>
     `<div class="cv-pgthumb${i===0?' active':''}" onclick="CV.gotoPage(${i})"
-          title="${esc(p.preview)}…">${i+1}</div>`
+         title="${esc(p.preview)}…">
+      <input type="checkbox" class="cv-pgthumb-check" title="Selecionar página para ingestão"
+             onchange="CV.togglePageSelect(event, ${i})">
+      ${i+1}
+    </div>`
   ).join('');
+}
+function togglePageSelect(event, idx) {
+  event.stopPropagation(); // Evita navegar para a página ao clicar no checkbox
+  if (event.target.checked) {
+    S.selectedPages.add(idx);
+  } else {
+    S.selectedPages.delete(idx);
+  }
+}
+
+async function loadSelectedPages() {
+  if (S.selectedPages.size === 0) {
+    alert("Selecione pelo menos uma página nos checkboxes das miniaturas.");
+    return;
+  }
+  
+  badge('busy', `⏳ Carregando ${S.selectedPages.size} páginas selecionadas…`);
+  try {
+    const fd = new FormData();
+    fd.append('file_id', S.fileId); 
+    // Envia a lista de páginas. Como FormData não suporta array direto de forma simples no Python rápido,
+    // enviamos como CSV. (Nota: você precisará ajustar o backend para ler se quiser extrair no Python, 
+    // mas aqui vamos concatenar no JS puxando da memória se já temos).
+    
+    // Para ser eficiente e não mexer na API, vamos buscar apenas a página -1 (TUDO) 
+    // e o JS recorta o que precisa se não tivermos na RAM, ou buscamos 1 por 1.
+    // Como a API atual só suporta page=X ou page=-1, vamos puxar o texto local S.pages
+    
+    let combinedText = "";
+    const sortedIdx = Array.from(S.selectedPages).sort((a,b)=>a-b);
+    
+    for (let idx of sortedIdx) {
+      // Se não temos o texto na memória completa, buscamos da API
+      const fdPage = new FormData();
+      fdPage.append('file_id', S.fileId); fdPage.append('page', idx);
+      const d = await _post('/hub/chunkviz/page', fdPage, true);
+      combinedText += `\n\n--- Página ${idx+1} ---\n\n` + d.text;
+    }
+    
+    S.text = combinedText;
+    S.ingestMode = 'selected';
+    _updateIngestButton();
+    _updateSrcStats();
+    badge('ok', `✅ ${S.selectedPages.size} páginas prontas para chunk`);
+    _schedSim();
+  } catch(e) { badge('err', `❌ ${e.message}`); }
 }
 
 async function gotoPage(idx) {
@@ -125,6 +225,8 @@ async function gotoPage(idx) {
     fd.append('file_id', S.fileId); fd.append('page', idx);
     const d = await _post('/hub/chunkviz/page', fd, true);
     S.text = d.text;
+    S.ingestMode = 'page';
+    _updateIngestButton();
     _updateSrcStats();
     badge('ok', `✅ Pág. ${idx+1}/${S.pageCount}`);
     _schedSim();
@@ -139,6 +241,8 @@ async function loadFullDoc() {
     fd.append('file_id', S.fileId); fd.append('page', -1);
     const d = await _post('/hub/chunkviz/page', fd, true);
     S.text = d.text;
+    S.ingestMode = 'all';
+    _updateIngestButton();
     _updateSrcStats();
     badge('ok', `✅ Doc completo — ${S.text.length.toLocaleString()} chars`);
     _schedSim();
@@ -147,6 +251,22 @@ async function loadFullDoc() {
 
 function prevPage() { gotoPage(S.curPage - 1); }
 function nextPage() { gotoPage(S.curPage + 1); }
+
+function _updateIngestButton() {
+  const btn = $('cv-bingest');
+  if (!btn) return;
+  if (S.source !== 'file') {
+    btn.innerHTML = '💾 Ingerir ao Redis';
+    return;
+  }
+  if (S.ingestMode === 'all') {
+    btn.innerHTML = '💾 Ingerir DOC INTEIRO';
+  } else if (S.ingestMode === 'selected') {
+    btn.innerHTML = `💾 Ingerir ${S.selectedPages.size} PÁGS`;
+  } else {
+    btn.innerHTML = `💾 Ingerir SÓ PÁG ${S.curPage+1}`;
+  }
+}
 
 /* ─── PARSER ────────────────────────────────────────── */
 function parserChanged() {
@@ -159,6 +279,8 @@ function parserChanged() {
 /* ─── TEXT & URL ────────────────────────────────────── */
 function textChanged() {
   S.text = $('cv-textarea').value;
+  S.ingestMode = 'all'; // Text is always "all"
+  _updateIngestButton();
   _updateSrcStats();
   _schedSim();
 }
@@ -183,6 +305,8 @@ async function fetchUrl() {
     const d = await _post('/hub/chunkviz/extract-url', fd, true);
     S.fileId = d.file_id; S.fileName = url;
     S.text = d.text;
+    S.ingestMode = 'all';
+    _updateIngestButton();
     _updateSrcStats();
     $v('cv-urlmeta', `✅ ${d.title || url} · ${d.total_chars.toLocaleString()} chars`);
     badge('ok', '✅ Scraping OK');
@@ -205,6 +329,7 @@ function setSource(src) {
     const p = $(`cv-panel-${s}`);
     if (p) p.style.display = s===src ? '' : 'none';
   });
+  _updateIngestButton();
 }
 
 /* ─── SIMULATE ──────────────────────────────────────── */
@@ -232,7 +357,7 @@ async function simulate() {
     $v('sv-min',   d.min_size);
     $v('sv-max',   d.max_size);
     $v('sv-ovlp',  d.overlap_regions);
-    $('cv-bingest').style.display = S.fileId ? '' : 'none';
+    $('cv-bingest').style.display = (S.fileId || S.source === 'text') ? '' : 'none';
     $('cv-empty').style.display = 'none';
     renderView();
     badge('ok', `✅ ${d.total} chunks`);
@@ -326,20 +451,47 @@ function _renderCards() {
 
 /* ─── INGEST ────────────────────────────────────────── */
 async function ingest() {
-  if (!S.fileId) { alert('Carregue um arquivo antes de ingerir.'); return; }
-  const label = (S.fileName||'DOC').replace(/\.[^/.]+$/,'').toUpperCase().replace(/[-_]/g,' ');
+  if (!S.fileId && S.source !== 'text') { alert('Carregue um arquivo antes de ingerir.'); return; }
+  
+  // Como agora o JS pode ter fatiado apenas uma página ou "selecionadas",
+  // o modo mais seguro é mandar o TEXTO final gerado pelo JS para um novo endpoint
+  // se for parcial, OU usar o endpoint normal se for arquivo inteiro.
+  
+  const label = S.source === 'text' ? 'TEXTO_DIRETO' : (S.fileName||'DOC').replace(/\.[^/.]+$/,'').toUpperCase().replace(/[-_]/g,' ');
   const btn = $('cv-bingest');
   btn.disabled = true;
   $('cv-ingprog').style.display = '';
   $v('cv-proglbl', 'Iniciando ingestão…');
   $('cv-progfill').style.width = '8%';
   badge('busy', '💾 Ingerindo…');
+  
   try {
-    const d = await _post('/hub/chunkviz/ingest', {
-      file_id:S.fileId, size:S.size, overlap:S.overlap,
-      strategy:S.strategy, doc_type:S.docType,
-      label:label, source:S.fileName||S.fileId, parser:S.parser,
-    });
+    let d;
+    // Se o usuário selecionou apenas algumas páginas, o melhor é mandar o S.text gerado como se fosse txt
+    if (S.ingestMode !== 'all' || S.source === 'text') {
+       // Precisaríamos de um endpoint que ingere texto direto, 
+       // mas para manter compatível com sua API, vamos salvar o texto como um novo arquivo temporário (.txt)
+       // e mandar o ingest com esse ID.
+       const fdTxt = new FormData();
+       const blob = new Blob([S.text], { type: 'text/plain' });
+       fdTxt.append('file', new File([blob], "selecao_parcial.txt", {type: "text/plain"}));
+       fdTxt.append('parser', 'txt');
+       const uploadRes = await _post('/hub/chunkviz/upload', fdTxt, true);
+       
+       d = await _post('/hub/chunkviz/ingest', {
+        file_id: uploadRes.file_id, size:S.size, overlap:S.overlap,
+        strategy:S.strategy, doc_type:S.docType,
+        label: label + " (PARCIAL)", source: "Seleção Parcial", parser: 'txt',
+      });
+    } else {
+       // Documento inteiro, fluxo normal
+       d = await _post('/hub/chunkviz/ingest', {
+        file_id:S.fileId, size:S.size, overlap:S.overlap,
+        strategy:S.strategy, doc_type:S.docType,
+        label:label, source:S.fileName||S.fileId, parser:S.parser,
+      });
+    }
+
     $v('cv-proglbl', `Task ${d.task_id.slice(0,8)}… executando`);
     $('cv-progfill').style.width = '25%';
     _pollTask(d.task_id, btn);
@@ -405,6 +557,7 @@ return {
   sizeChanged, overlapChanged, settingChanged,
   simulate, setView, hlChunk, ingest,
   prevPage, nextPage, gotoPage, loadFullDoc,
+  togglePageSelect, loadSelectedPages, resetDocument // Expostas novas
 };
 })();
 

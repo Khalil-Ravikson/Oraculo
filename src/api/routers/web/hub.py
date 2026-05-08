@@ -451,3 +451,364 @@ async def config_page(request: Request):
         request=request, name="hub/config.html",
         context={"request": request, "username": payload.sub},
     )
+# ─────────────────────────────────────────────────────────────────────────────
+# Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+from src.api.routers.admin.eval_api import EVAL_DATASET,_evaluate_single, _aggregate_results,_persist_eval_result,asdict,AsyncIterator
+
+@router.get("/dataset")
+async def get_dataset():
+    """Retorna o dataset de avaliação."""
+    return JSONResponse({"dataset": EVAL_DATASET, "total": len(EVAL_DATASET)})
+
+
+@router.post("/single")
+async def eval_single(request: Request):
+    """Avalia uma única pergunta. Rápido para o botão 'Testar'."""
+    try:
+        body = await request.json()
+        question = body.get("question", "").strip()
+        if not question:
+            return JSONResponse({"error": "question obrigatório"}, status_code=400)
+
+        # Cria item sintético
+        item = {
+            "id":       "custom",
+            "category": "CUSTOM",
+            "question": question,
+            "keywords": question.split()[:5],
+            "expected_source": None,
+        }
+        result = await _evaluate_single(item, session_id="eval_single")
+        return JSONResponse(asdict(result))
+
+    except Exception as e:
+        logger.exception("❌ [EVAL] /single falhou: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# Fila global de progresso para SSE
+_eval_progress_queue: asyncio.Queue = asyncio.Queue(maxsize=500)
+_eval_running = False
+
+
+@router.post("/run")
+async def eval_run(request: Request):
+    """
+    Inicia avaliação completa em background.
+    Progresso disponível via GET /eval/stream (SSE).
+    """
+    global _eval_running
+    if _eval_running:
+        return JSONResponse({"error": "Avaliação já em andamento"}, status_code=409)
+
+    try:
+        body = await request.json()
+        ids = body.get("ids", None)   # None = todos
+    except Exception:
+        ids = None
+
+    dataset = EVAL_DATASET
+    if ids:
+        dataset = [d for d in EVAL_DATASET if d["id"] in ids]
+
+    # Executa em background task
+    asyncio.create_task(_run_eval_background(dataset))
+
+    return JSONResponse({
+        "ok":    True,
+        "total": len(dataset),
+        "msg":   "Avaliação iniciada. Acompanhe em /eval/stream"
+    })
+
+
+async def _run_eval_background(dataset: list[dict]) -> None:
+    global _eval_running
+    _eval_running = True
+    results = []
+
+    await _eval_progress_queue.put(json.dumps({
+        "type": "start", "total": len(dataset)
+    }))
+
+    for i, item in enumerate(dataset):
+        await _eval_progress_queue.put(json.dumps({
+            "type":     "progress",
+            "current":  i + 1,
+            "total":    len(dataset),
+            "question": item["question"][:60],
+        }))
+
+        result = await _evaluate_single(item)
+        results.append(result)
+
+        await _eval_progress_queue.put(json.dumps({
+            "type":       "result",
+            "id":         result.id,
+            "question":   result.question[:60],
+            "hit_rate":   result.hit_rate,
+            "mrr":        result.mrr,
+            "crag":       result.crag_score,
+            "faithfulness": result.faithfulness,
+            "relevancy":  result.answer_relevancy,
+            "latency_ms": result.latency_ms,
+            "error":      result.error,
+        }))
+
+        # Pequena pausa entre perguntas para não saturar a API
+        await asyncio.sleep(0.5)
+
+    # Calcula e salva agregado
+    run_result = _aggregate_results(results)
+    _persist_eval_result(run_result)
+
+    await _eval_progress_queue.put(json.dumps({
+        "type":       "done",
+        "run_id":     run_result.run_id,
+        "avg_hit":    run_result.avg_hit_rate,
+        "avg_mrr":    run_result.avg_mrr,
+        "avg_crag":   run_result.avg_crag,
+        "avg_faith":  run_result.avg_faithfulness,
+        "avg_relev":  run_result.avg_relevancy,
+        "avg_lat_ms": run_result.avg_latency_ms,
+    }))
+
+    _eval_running = False
+
+
+@router.get("/stream")
+async def eval_stream(request: Request):
+    """SSE: progresso da avaliação em tempo real."""
+    async def generator() -> AsyncIterator[str]:
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                msg = await asyncio.wait_for(_eval_progress_queue.get(), timeout=15.0)
+                yield f"data: {msg}\n\n"
+            except asyncio.TimeoutError:
+                yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/results")
+async def eval_results():
+    """Retorna os últimos resultados de avaliação."""
+    try:
+        from src.infrastructure.redis_client import get_redis_text
+        r = get_redis_text()
+        raw = r.lrange("eval:results", 0, 4)
+        results = [json.loads(item) for item in raw]
+        return JSONResponse({"results": results})
+    except Exception as e:
+        return JSONResponse({"results": [], "error": str(e)})
+
+
+# ADICIONAR — endpoint de eventos do calendário (usado pelo frontend)
+@router.get("/eventos")
+async def eval_eventos():
+    """Retorna eventos dos próximos 30 dias para o widget de calendário."""
+    try:
+        from src.rag.calendar_parser import buscar_eventos_proximos
+        eventos = buscar_eventos_proximos(dias_frente=30)
+        return JSONResponse({
+            "eventos": [
+                {
+                    "nome": e.nome,
+                    "data_inicio": e.data_inicio.strftime("%d/%m/%Y"),
+                    "data_fim": e.data_fim.strftime("%d/%m/%Y") if e.data_fim else None,
+                    "dias_restantes": e.dias_restantes,
+                    "categoria": e.categoria,
+                    "emoji": e.emoji,
+                }
+                for e in eventos
+            ]
+        })
+    except Exception as e:
+        logger.exception("❌ [EVAL] /eventos: %s", e)
+        return JSONResponse({"eventos": [], "error": str(e)})
+
+
+# ADICIONAR — renomear /run para /run-full (o frontend chama /eval/run-full)
+@router.post("/run-full")
+async def eval_run_full(request: Request):
+    """Alias de /run para compatibilidade com o frontend."""
+    return await eval_run(request)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Endpoints Integrados do ChunkViz (Controller)
+# ─────────────────────────────────────────────────────────────────────────────
+from src.api.routers.tools.chunkviz_tools import (
+    save_temp_file, load_temp_meta, extract_document_pages, simulate_chunks_logic,TEMP_DIR
+)
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from typing import Optional
+import os
+import hashlib
+
+
+
+@router.post("/chunkviz/upload")
+async def cv_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    parser: str = Form("auto"),
+):
+    _verificar_cookie(request) # Lança exception se não logado
+    
+    try:
+        content = await file.read()
+        meta = save_temp_file(file.filename, content, parser)
+        pages, full_text = extract_document_pages(meta["path"], meta["ext"], parser)
+        
+        return {
+            "file_id":    meta["file_id"],
+            "name":       file.filename,
+            "ext":        meta["ext"],
+            "size_kb":    meta["size_kb"],
+            "page_count": len(pages),
+            "pages": [{"index": i, "preview": p[:80], "length": len(p)} for i, p in enumerate(pages)],
+            "first_text": pages[0] if pages else full_text[:8000],
+            "total_chars": len(full_text),
+        }
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.exception("Upload fail")
+        raise HTTPException(500, f"Erro: {str(e)[:200]}")
+
+@router.post("/chunkviz/page")
+async def cv_get_page(
+    request: Request,
+    file_id: str = Form(...),
+    page: int = Form(0),
+):
+    _verificar_cookie(request)
+    try:
+        meta = load_temp_meta(file_id)
+        pages, full_text = extract_document_pages(meta["path"], meta["ext"], meta["parser"])
+        
+        if page == -1:
+            return {"page": -1, "text": full_text, "total_pages": len(pages)}
+        if page < 0 or page >= len(pages):
+            raise HTTPException(400, f"Página {page} inexistente.")
+            
+        return {"page": page, "text": pages[page], "total_pages": len(pages)}
+    except FileNotFoundError:
+        raise HTTPException(404, "Arquivo não encontrado")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+class SimReq(BaseModel):
+    text:     str
+    size:     int  = 400
+    overlap:  int  = 60
+    strategy: str  = "recursive"
+    doc_type: str  = "geral"
+    file_id:  Optional[str] = None
+
+@router.post("/chunkviz/simulate")
+async def cv_simulate(request: Request, body: SimReq):
+    _verificar_cookie(request)
+    if not body.text.strip():
+        raise HTTPException(400, "Texto vazio")
+        
+    try:
+        result = simulate_chunks_logic(body.text, body.size, body.overlap, body.strategy)
+        return result
+    except Exception as e:
+        logger.exception("simulate error")
+        raise HTTPException(500, f"Erro no chunking: {str(e)[:200]}")
+
+class IngestReq(BaseModel):
+    file_id:  str
+    size:     int  = 400
+    overlap:  int  = 60
+    strategy: str  = "recursive"
+    doc_type: str  = "geral"
+    label:    str  = ""
+    source:   str  = ""
+    parser:   str  = "auto"
+
+@router.post("/chunkviz/ingest")
+async def cv_ingest(request: Request, body: IngestReq):
+    _verificar_cookie(request)
+    try:
+        meta   = load_temp_meta(body.file_id)
+        source = body.source or meta.get("name", body.file_id)
+        label  = body.label or os.path.splitext(source)[0].upper().replace("-"," ").replace("_"," ")
+
+        from src.application.tasks.ingestion_tasks import processar_documento
+        result = processar_documento.apply_async(
+            args=[meta["path"]],
+            kwargs={
+                "strategy_params": {
+                    "size":     body.size,     "overlap":  body.overlap,
+                    "strategy": body.strategy, "doc_type": body.doc_type,
+                    "label":    label,         "parser":   body.parser or meta.get("parser","auto"),
+                },
+                "chat_id": "",
+            },
+            queue="admin",
+        )
+        return {"ok": True, "task_id": result.id, "source": source}
+    except Exception as e:
+        raise HTTPException(500, f"Erro ao enfileirar: {str(e)[:200]}")
+
+@router.get("/chunkviz/task/{task_id}")
+async def cv_task_status(request: Request, task_id: str):
+    _verificar_cookie(request)
+    try:
+        from src.infrastructure.celery_app import celery_app
+        r = celery_app.AsyncResult(task_id)
+        if r.state == "SUCCESS": return {"state":"SUCCESS","result": r.result}
+        if r.state == "FAILURE": return {"state":"FAILURE","error":  str(r.info)}
+        return {"state": r.state}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    
+# Coloque isso junto com os outros @router.post("/chunkviz/...") no seu hub.py
+@router.post("/chunkviz/extract-url")
+async def cv_extract_url(
+    request: Request,
+    url: str = Form(...),
+):
+    _verificar_cookie(request)
+    try:
+        from src.infrastructure.scraping.implementations.generic_scraper import GenericHTTPScraper
+        from src.infrastructure.scraping.base_scraper import ScrapeRequest
+
+        result = await GenericHTTPScraper().scrape(ScrapeRequest(url=url, doc_type="web"))
+        if not result.ok or not result.document:
+            raise HTTPException(500, f"Scraping falhou: {result.error}")
+
+        doc = result.document
+        file_id   = hashlib.md5(url.encode()).hexdigest()[:16]
+        file_path = os.path.join(TEMP_DIR, f"{file_id}.txt")
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(doc.content)
+
+        meta = {
+            "file_id": file_id, "name": url, "ext": ".txt",
+            "size_kb": len(doc.content)//1024, "path": file_path, "parser": "txt",
+        }
+        # Chama a função lá do tools pra salvar o JSON
+        save_temp_file(file_id, str(meta).encode(), "txt") # Só pra constar a criação
+
+        return {
+            "file_id":    file_id,
+            "title":      doc.title,
+            "text":       doc.content[:10000],
+            "total_chars": len(doc.content),
+            "word_count": doc.word_count,
+        }
+    except Exception as e:
+        logger.exception("Scraping fail")
+        raise HTTPException(500, f"Erro no scraping: {str(e)[:200]}")
