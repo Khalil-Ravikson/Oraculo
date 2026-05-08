@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/hub/chunkviz", tags=["ChunkViz"])
+router = APIRouter(tags=["ChunkViz"])
 
 TEMP_DIR = "/tmp/oraculo_cv"
 ALLOWED  = {".pdf", ".docx", ".txt", ".md", ".csv", ".html", ".htm"}
@@ -34,7 +34,7 @@ PARSER_HINTS = {
 
 
 def _auth(request: Request):
-    from src.api.hub import _verificar_cookie
+    from src.api.routers.web.hub import _verificar_cookie
     p = _verificar_cookie(request)
     if not p:
         raise HTTPException(401, "Não autorizado")

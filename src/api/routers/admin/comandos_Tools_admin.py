@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, EmailStr
 
 # Importando a métrica que criamos anteriormente para o Prometheus/Grafana
-from src.api.metrics_admin import TOOL_CALL_COUNT
+from src.api.routers.admin.metrics_admin import TOOL_CALL_COUNT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/llm-tools", tags=["LLM Sandbox"])

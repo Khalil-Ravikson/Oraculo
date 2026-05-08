@@ -1,51 +1,48 @@
 """
-src/main.py — v5 (LangChain Runnables, sem LangGraph)
-=======================================================
-
-MUDANÇAS vs v4:
-  - Removido: compilar_grafo(), LangGraph, OraculoRouterService complexo
-  - Adicionado: OracleChain (pipeline linear simples)
-  - Adicionado: setup_logging() com stdout sem buffer (resolve logs mudos no Docker)
-  - Simplificado: startup em <1s vs ~5s anterior
+src/main.py — v5.1 (Versão Final Consolidada)
+=============================================
+Arquitetura: Clean Architecture (Interface Adapters)
+Funcionalidade: Orquestração da API, Observabilidade e Ciclo de Vida
 """
 from __future__ import annotations
 
 import logging
 import os
 import traceback
-
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import Response as FastAPIResponse
-# ── Logging PRIMEIRO — antes de qualquer import src.* ─────────────────────────
-from src.infrastructure.logging_config import setup_logging
-from src.infrastructure.observability.metrics import PrometheusMetrics
-from prometheus_fastapi_instrumentator import Instrumentator
 
+# ── Logging PRIMEIRO ──────────────────────────────────────────────────────────
+from src.infrastructure.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
-metrics_service = PrometheusMetrics()
 
 def create_app() -> FastAPI:
     from src.infrastructure.settings import settings
 
-    # Configura logging imediatamente
+    # 1. Configuração imediata de logs (stdout sem buffer para Docker)
     setup_logging(level=settings.LOG_LEVEL)
 
     app = FastAPI(
         title       = "Oráculo UEMA",
         description = "Assistente Académico Inteligente da UEMA",
-        version     = "5.0.0",
+        version     = "5.1.0",
         docs_url    = "/api/docs" if settings.DEV_MODE else None,
         redoc_url   = None,
     )
-    instrumentator = Instrumentator().instrument(app) # SÓ instrument, SEM o .expose
+
+    # 2. Prometheus Instrumentator (Métricas de RPM e Latência)
+    from prometheus_fastapi_instrumentator import Instrumentator
+    instrumentator = Instrumentator().instrument(app)
+
+    # 3. Montagem de ficheiros estáticos e registo de rotas
     _montar_static(app)
     _registrar_routers(app)
 
     @app.on_event("startup")
     async def on_startup():
+        # Expõe /metrics (une métricas do FastAPI + métricas customizadas de Tokens/Custo)
         instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
         await _startup(settings)
 
@@ -53,109 +50,112 @@ def create_app() -> FastAPI:
     async def on_shutdown():
         _shutdown()
 
+    # ── Rotas de Sistema ──────────────────────────────────────────────────────
+
     @app.get("/", include_in_schema=False)
     async def root():
         return RedirectResponse("/hub/")
 
     @app.get("/health", tags=["Sistema"])
     async def health():
+        """Verificação de saúde de todos os serviços críticos."""
         from src.infrastructure.redis_client import redis_ok
         from src.application.chain.oracle_chain import get_oracle_chain
-        chain_ok = True
+        
+        chain_status = True
         try:
             get_oracle_chain()
         except Exception:
-            chain_ok = False
+            chain_status = False
+
         return {
             "status":    "online",
             "sistema":   "Oráculo UEMA",
-            "versao":    "5.0.0",
-            "redis_ok":  redis_ok(),
-            "chain_ok":  chain_ok,
+            "versao":    "5.1.0",
+            "redis":     "OK" if redis_ok() else "ERRO",
+            "chain":     "OK" if chain_status else "ERRO",
             "framework": "LangChain Runnables",
         }
-    # 👇👇👇 ADICIONE ESTA NOVA ROTA AQUI 👇👇👇
-    @app.get("/metrics", tags=["Observabilidade"], include_in_schema=False)
-    async def prometheus_metrics():
-        body, ct = metrics_service.generate_latest_output()
-        return FastAPIResponse(content=body, media_type=ct)
-    # 👆👆👆 -------------------------------- 👆👆👆
-
 
     return app
 
-async def _startup(settings) -> None:
-    logger.info("🚀 Oráculo UEMA v5 iniciando (LangChain Runnables)...")
+# ── Ciclo de Vida (Startup / Shutdown) ────────────────────────────────────────
 
-    # 1. Inicializa índices Redis (async)
+async def _startup(settings) -> None:
+    logger.info("🚀 A iniciar Oráculo UEMA (v5.1)...")
+
+    # 1. Redis: Inicialização de Índices (Busca Híbrida e Vetorial)
     try:
         from src.infrastructure.redis_client import inicializar_indices
         await inicializar_indices()
-        logger.info("✅ Índices Redis OK")
+        logger.info("✅ Índices Redis inicializados (SVS-VAMANA)")
     except Exception as exc:
-        logger.error("❌ Redis indices falhou: %s\n%s", exc, traceback.format_exc())
-        raise RuntimeError(f"Redis indisponível: {exc}") from exc
+        logger.error("❌ Falha crítica no Redis: %s", exc)
+        # Em produção, isto deve impedir o arranque
+        if not settings.DEV_MODE:
+            raise RuntimeError("Redis obrigatório para RAG não disponível.")
 
-    # 2. Pré-aquece o modelo de embeddings (lazy singleton)
+    # 2. IA: Pré-aquecimento de Embeddings e Chain
     try:
         from src.rag.embeddings import get_embeddings
-        emb = get_embeddings()
-        # Teste rápido para validar que o modelo funciona
-        _ = emb.embed_query("teste")
-        logger.info("✅ Embeddings OK")
-    except Exception as exc:
-        logger.warning("⚠️  Embeddings falhou no pré-aquecimento: %s", exc)
-
-    # 3. Inicializa a chain (singleton)
-    try:
         from src.application.chain.oracle_chain import get_oracle_chain
+        
+        # Singleton de Embeddings (Google Gemini)
+        _ = get_embeddings().embed_query("teste de aquecimento")
+        logger.info("✅ Modelo de Embeddings carregado")
+        
+        # Singleton da Chain (Pipeline RAG)
         get_oracle_chain()
-        logger.info("✅ OracleChain (LangChain) pronta")
+        logger.info("✅ OracleChain pronta para inferência")
     except Exception as exc:
-        logger.error("❌ Chain falhou: %s", exc)
-        raise
+        logger.warning("⚠️  Falha ao pré-aquecer componentes de IA: %s", exc)
 
-    # 4. WhatsApp gateway (não-fatal em dev)
+    # 3. Gateway WhatsApp (Evolution API)
     try:
         from src.services.evolution_service import EvolutionService
         await EvolutionService().inicializar()
-        logger.info("✅ Evolution API inicializada")
+        logger.info("✅ Gateway WhatsApp (Evolution) ativo")
     except Exception as exc:
-        logger.warning("⚠️  Evolution API indisponível (modo dev?): %s", exc)
+        logger.warning("⚠️  Evolution API offline (Modo Web apenas): %s", exc)
 
-    logger.info("✅ Oráculo UEMA v5 pronto! Framework: LangChain Runnables")
+    logger.info("✅ Oráculo pronto para receber mensagens!")
 
 
 def _shutdown() -> None:
-    logger.info("🛑 Oráculo UEMA encerrando...")
+    logger.info("🛑 A encerrar Oráculo UEMA...")
 
 
 def _montar_static(app: FastAPI) -> None:
-    static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-    os.makedirs(static_dir, exist_ok=True)
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-
-
+    """Configura o diretório de ficheiros estáticos (CSS, JS, Imagens)."""
+    static_path = os.path.join(os.path.dirname(__file__), "..", "static")
+    os.makedirs(static_path, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=static_path), name="static")
 
 
 def _registrar_routers(app: FastAPI) -> None:
-    from src.api.hub         import router as hub_router
-    from src.api.admin_api   import router as admin_api_router
-    from src.api.rag_admin   import router as rag_admin_router
-    from src.api             import monitor
-    from src.api.chunkviz_api import router as chunkviz_router
-    from src.api.eval_api    import router as eval_router
-    from src.api.admin_users_api import router as users_router
-    from src.api.eval_dashboard import router as eval_dash_router
-    app.include_router(users_router, prefix="/api/admin/users", tags=["Usuários"])
+    """
+    IMPORTAÇÕES CORRIGIDAS: 
+    Mantendo os nomes originais dos arquivos, mas apontando para as novas pastas.
+    """
+    # 1. Interface Web (Frontend)
+    from src.api.routers.web.hub import router as hub_router
+    
+    # 2. Administração (Admin) - Caminhos completos das novas pastas
+    from src.api.routers.admin.admin_users_api import router as users_router
+    from src.api.routers.admin.admin_api       import router as admin_api_router
+    from src.api.routers.admin.eval_dashboard  import router as eval_dash_router
+    from src.api.routers.admin.eval_api        import router as eval_api_router
+    
+    # 3. Ferramentas (Tools)
+    from src.api.routers.tools.chunkviz_api    import router as chunkviz_router
+
+    # Registrando no FastAPI com os prefixos e tags
+    app.include_router(users_router, prefix="/api/admin/users", tags=["Admin: Usuários"])
     app.include_router(hub_router)
     app.include_router(admin_api_router)
-    app.include_router(rag_admin_router)
-    app.include_router(monitor.router, prefix="/monitor")
-    app.include_router(chunkviz_router)
-    
-    app.include_router(eval_dash_router, prefix="/eval")   # HTML + SSE
-    app.include_router(eval_router, prefix="/eval/api")    # dataset runner
+    app.include_router(chunkviz_router, prefix="/tools", tags=["Tools: Chunkviz"])   
+    app.include_router(eval_dash_router, prefix="/eval", tags=["Admin: Eval GUI"])
+    app.include_router(eval_api_router, prefix="/eval/api", tags=["Admin: Eval API"])
 
+# ── Instanciação da Aplicação ─────────────────────────────────────────────────
 app = create_app()

@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 
 from src.infrastructure.redis_client import get_redis_text
 from src.infrastructure.settings import settings
-from src.api.hub import _verificar_cookie # Import necessário para SSE# Import necessário para SSE
+from src.api.routers.web.hub import _verificar_cookie # Import necessário para SSE
 from src.application.use_cases.get_live_metrics import GetLiveMetricsUseCase
 
 logger    = logging.getLogger(__name__)
