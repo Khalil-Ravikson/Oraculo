@@ -797,7 +797,16 @@ def _get_tool_registry():
     from src.infrastructure.services.email_service import LogEmailService
     from src.rag.embeddings import get_embeddings
     from src.domain.tools.tool_registry import ToolRegistry
+    from src.infrastructure.services.domain_service.gmail_service import get_gmail_service
+    gmail_svc = None
+    try:
+        gmail_svc = get_gmail_service()
+    except Exception as e:
+        logger.warning("Gmail service indisponível: %s", e)
 
+    from src.domain.tools.gmail_tool import (
+        build_gmail_search_tool, build_gmail_trigger_tool
+    )
     rag = HybridRAGSearchService(get_embeddings())
     return ToolRegistry(
         calendario_svc=CalendarioService(rag),
@@ -807,4 +816,5 @@ def _get_tool_registry():
         glpi_svc=MockGLPIService(),
         email_svc=LogEmailService(),
         scraping_svc=None,
+        gmail_svc=gmail_svc,
     )

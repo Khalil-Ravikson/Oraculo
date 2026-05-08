@@ -37,6 +37,7 @@ class ToolRegistry:
         glpi_svc: Any,
         email_svc: Any,
         scraping_svc: Any,
+        gmail_svc: Any = None,
     ):
         self._calendario = calendario_svc
         self._edital = edital_svc
@@ -46,6 +47,7 @@ class ToolRegistry:
         self._email = email_svc
         self._scraping = scraping_svc
         self._tools: dict[str, StructuredTool] = {}
+        self._gmail = gmail_svc
         self._build_all()
 
     def _build_all(self) -> None:
@@ -58,6 +60,8 @@ class ToolRegistry:
             "consultar_fila_chamados": self._build_fila(),
             "enviar_email": self._build_email(),
             "scraping_web": self._build_scraping(),
+            "gmail_search": self.build_gmail_search_tool(self._gmail),
+            "gmail_trigger": self.build_gmail_trigger_tool(self._gmail)
         }
 
     def get_all(self) -> list[StructuredTool]:
@@ -73,6 +77,7 @@ class ToolRegistry:
             "STUDENT": ["consultar_calendario", "consultar_edital", "consultar_contatos", "consultar_wiki_ctic",
                         "abrir_chamado_glpi", "consultar_fila_chamados", "enviar_email"],
             "ADMIN":   list(self._tools.keys()),
+            
         }
         allowed = _ROLE_TOOLS.get(role.upper(), _ROLE_TOOLS["GUEST"])
         return [self._tools[k] for k in allowed if k in self._tools]

@@ -177,16 +177,11 @@ class EvalRunResult:
 # ─────────────────────────────────────────────────────────────────────────────
 # Core: avalia uma única pergunta
 # ─────────────────────────────────────────────────────────────────────────────
-
+# SUBSTITUIR _evaluate_single — remover acesso incorreto a result.steps
 async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalResult:
-    """
-    Avalia uma pergunta do dataset com todas as métricas.
-    Segue o padrão do cookbook: retrieval metrics + generation metrics.
-    """
     t0 = time.monotonic()
     question = item["question"]
     keywords = item.get("keywords", [])
-    expected_source = item.get("expected_source")
 
     try:
         from src.application.chain.oracle_chain import get_oracle_chain
@@ -197,19 +192,11 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
             user_context={"nome": "Eval Bot", "role": "estudante"},
         )
 
-        # ── Retrieval Metrics ────────────────────────────────────────────────
-
-        # Hit Rate: algum keyword da ground truth aparece nos chunks?
-        chunks = result.steps   # pegamos dos steps o detalhe
-        # Melhor: busca nos dados do step "retrieve"
-        from src.infrastructure.redis_client import get_redis_text
-        # Reconstruímos a busca para ter os chunks completos
+        # Usa busca separada para ter os chunks com conteúdo completo
         retrieved_texts = await _get_retrieved_chunks(question, result.route)
 
         hit_rate = _calc_hit_rate(retrieved_texts, keywords)
-        mrr      = _calc_mrr(retrieved_texts, keywords, expected_source)
-
-        # ── Generation Metrics ────────────────────────────────────────────────
+        mrr      = _calc_mrr(retrieved_texts, keywords, item.get("expected_source"))
 
         faithfulness, relevancy = await _eval_generation(
             question=question,
@@ -217,11 +204,12 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
             context="\n".join(retrieved_texts[:3]),
         )
 
-        latency = int((time.monotonic() - t0) * 1000)
+        # Tenta extrair source do primeiro step de retrieve
         top_source = ""
-        if retrieved_texts:
-            # Obtém source do top chunk
-            top_source = await _get_top_source(question, result.route)
+        for step in result.steps:
+            if step.name == "retrieve" and step.data:
+                top_source = step.data.get("top_source", "")
+                break
 
         return SingleEvalResult(
             id=item["id"],
@@ -234,30 +222,21 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
             mrr=round(mrr, 3),
             faithfulness=round(faithfulness, 2),
             answer_relevancy=round(relevancy, 2),
-            latency_ms=latency,
+            latency_ms=int((time.monotonic() - t0) * 1000),
             chunks_count=result.chunks_count,
             top_chunk_source=top_source,
         )
 
     except Exception as e:
-        logger.exception("❌ [EVAL] Falha ao avaliar '%s': %s", question[:60], e)
+        logger.exception("❌ [EVAL] '%s': %s", question[:60], e)
         return SingleEvalResult(
-            id=item.get("id", "?"),
-            category=item.get("category", "?"),
-            question=question,
-            answer="",
-            route_detected="ERROR",
-            crag_score=0.0,
-            hit_rate=0.0,
-            mrr=0.0,
-            faithfulness=0.0,
-            answer_relevancy=0.0,
+            id=item.get("id", "?"), category=item.get("category", "?"),
+            question=question, answer="", route_detected="ERROR",
+            crag_score=0.0, hit_rate=0.0, mrr=0.0,
+            faithfulness=0.0, answer_relevancy=0.0,
             latency_ms=int((time.monotonic() - t0) * 1000),
-            chunks_count=0,
-            top_chunk_source="",
-            error=str(e)[:120],
+            chunks_count=0, top_chunk_source="", error=str(e)[:120],
         )
-
 
 async def _get_retrieved_chunks(question: str, route: str) -> list[str]:
     """Obtém textos dos chunks recuperados para calcular métricas de retrieval."""
@@ -562,6 +541,39 @@ async def eval_results():
         return JSONResponse({"results": [], "error": str(e)})
 
 
+# ADICIONAR — endpoint de eventos do calendário (usado pelo frontend)
+@router.get("/eventos")
+async def eval_eventos():
+    """Retorna eventos dos próximos 30 dias para o widget de calendário."""
+    try:
+        from src.rag.calendar_parser import buscar_eventos_proximos
+        eventos = buscar_eventos_proximos(dias_frente=30)
+        return JSONResponse({
+            "eventos": [
+                {
+                    "nome": e.nome,
+                    "data_inicio": e.data_inicio.strftime("%d/%m/%Y"),
+                    "data_fim": e.data_fim.strftime("%d/%m/%Y") if e.data_fim else None,
+                    "dias_restantes": e.dias_restantes,
+                    "categoria": e.categoria,
+                    "emoji": e.emoji,
+                }
+                for e in eventos
+            ]
+        })
+    except Exception as e:
+        logger.exception("❌ [EVAL] /eventos: %s", e)
+        return JSONResponse({"eventos": [], "error": str(e)})
+
+
+# ADICIONAR — renomear /run para /run-full (o frontend chama /eval/run-full)
+@router.post("/run-full")
+async def eval_run_full(request: Request):
+    """Alias de /run para compatibilidade com o frontend."""
+    return await eval_run(request)
+
+
+
 def _persist_eval_result(result: EvalRunResult) -> None:
     """Persiste resultado no Redis."""
     try:
@@ -572,3 +584,4 @@ def _persist_eval_result(result: EvalRunResult) -> None:
         r.expire("eval:results", 86400 * 30)
     except Exception as e:
         logger.warning("⚠️  [EVAL] persist falhou: %s", e)
+        
