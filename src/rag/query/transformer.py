@@ -31,6 +31,7 @@ from .strategies import (
     KeywordEnrichStrategy,
     MultiQueryStrategy,
     PassthroughStrategy,
+    ProperNounQueryStrategy,
     RAGFusionStrategy,
     StepBackStrategy,
 )
@@ -174,6 +175,7 @@ class QueryTransformer:
                 PassthroughStrategy(),
             ],
             "CONTATOS": [
+                ProperNounQueryStrategy(),
                 KeywordEnrichStrategy(),
                 RAGFusionStrategy(llm_provider, n_variantes=3),
                 PassthroughStrategy(),
@@ -184,10 +186,13 @@ class QueryTransformer:
                 PassthroughStrategy(),
             ],
             "GERAL": [
+                ProperNounQueryStrategy(),
                 StepBackStrategy(),
                 KeywordEnrichStrategy(),
                 PassthroughStrategy(),
             ],
+            
+
         }
 
         strategies = _builders.get(route_upper, _builders["GERAL"])

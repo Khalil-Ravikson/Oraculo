@@ -1,0 +1,31 @@
+
+# ADICIONAR — endpoint de eventos do calendário (usado pelo frontend)
+@router.get("/eventos")
+async def eval_eventos():
+    """Retorna eventos dos próximos 30 dias para o widget de calendário."""
+    try:
+        from src.rag.calendar_parser import buscar_eventos_proximos
+        eventos = buscar_eventos_proximos(dias_frente=30)
+        return JSONResponse({
+            "eventos": [
+                {
+                    "nome": e.nome,
+                    "data_inicio": e.data_inicio.strftime("%d/%m/%Y"),
+                    "data_fim": e.data_fim.strftime("%d/%m/%Y") if e.data_fim else None,
+                    "dias_restantes": e.dias_restantes,
+                    "categoria": e.categoria,
+                    "emoji": e.emoji,
+                }
+                for e in eventos
+            ]
+        })
+    except Exception as e:
+        logger.exception("❌ [EVAL] /eventos: %s", e)
+        return JSONResponse({"eventos": [], "error": str(e)})
+
+
+# ADICIONAR — renomear /run para /run-full (o frontend chama /eval/run-full)
+@router.post("/run-full")
+async def eval_run_full(request: Request):
+    """Alias de /run para compatibilidade com o frontend."""
+    return await eval_run(request)

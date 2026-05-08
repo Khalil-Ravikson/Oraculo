@@ -1,25 +1,9 @@
 """
-api/eval_api.py — Avaliação RAG Interativa (baseado no athina-ai/rag-cookbooks)
+api/eval_api.py — Avaliação RAG Interativa (Cérebro Matemático)
 ================================================================================
 
-MÉTRICAS IMPLEMENTADAS (sem dependências externas pagas):
-  1. Hit Rate        → o chunk correto foi recuperado? (presença de keyword)
-  2. MRR             → Mean Reciprocal Rank — quão cedo aparece o chunk correto?
-  3. CRAG Score      → qualidade do retrieval (rrf_score do top chunk)
-  4. Faithfulness    → a resposta usa APENAS o contexto? (LLM como juiz)
-  5. Answer Relevancy → a resposta responde a pergunta? (LLM como juiz)
-
-ENDPOINTS:
-  GET  /eval/          → página HTML (servida pelo hub)
-  GET  /eval/dataset   → dataset de teste embutido (UEMA específico)
-  POST /eval/run       → executa avaliação em um conjunto de perguntas
-  GET  /eval/results   → últimos resultados armazenados no Redis
-  POST /eval/single    → avalia UMA pergunta (para o botão "Testar" do UI)
-  GET  /eval/stream    → SSE para acompanhar progresso em tempo real
-
-COOKBOOK REFERÊNCIA:
-  github.com/athina-ai/rag-cookbooks
-  Implementamos: Naive RAG eval + CRAG + Retrieval metrics
+Este arquivo contém apenas a LÓGICA de avaliação.
+Os endpoints web foram movidos para o hub.py (Controller).
 """
 from __future__ import annotations
 
@@ -31,11 +15,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, StreamingResponse
-
 logger = logging.getLogger(__name__)
-router = APIRouter()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Dataset de teste embutido — perguntas UEMA com ground truth
@@ -114,24 +94,22 @@ EVAL_DATASET = [
     },
 ]
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Tipos de resultado
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class SingleEvalResult:
-    """Resultado da avaliação de uma pergunta."""
     id:               str
     category:         str
     question:         str
     answer:           str
     route_detected:   str
     crag_score:       float
-    hit_rate:         float    # 0 ou 1 — foi encontrado keyword no contexto?
-    mrr:              float    # 1/rank do primeiro chunk relevante
-    faithfulness:     float    # 0.0-1.0 (LLM como juiz)
-    answer_relevancy: float    # 0.0-1.0 (LLM como juiz)
+    hit_rate:         float
+    mrr:              float
+    faithfulness:     float
+    answer_relevancy: float
     latency_ms:       int
     chunks_count:     int
     top_chunk_source: str
@@ -139,7 +117,6 @@ class SingleEvalResult:
 
     @property
     def aggregate_score(self) -> float:
-        """Score agregado simples: média ponderada das métricas."""
         if self.error:
             return 0.0
         return (
@@ -149,10 +126,8 @@ class SingleEvalResult:
             self.answer_relevancy * 0.25
         )
 
-
 @dataclass
 class EvalRunResult:
-    """Resultado de uma rodada completa de avaliação."""
     run_id:          str
     timestamp:       str
     total_questions: int
@@ -175,9 +150,9 @@ class EvalRunResult:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Core: avalia uma única pergunta
+# Core: Lógica de Avaliação
 # ─────────────────────────────────────────────────────────────────────────────
-# SUBSTITUIR _evaluate_single — remover acesso incorreto a result.steps
+
 async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalResult:
     t0 = time.monotonic()
     question = item["question"]
@@ -192,7 +167,6 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
             user_context={"nome": "Eval Bot", "role": "estudante"},
         )
 
-        # Usa busca separada para ter os chunks com conteúdo completo
         retrieved_texts = await _get_retrieved_chunks(question, result.route)
 
         hit_rate = _calc_hit_rate(retrieved_texts, keywords)
@@ -204,7 +178,6 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
             context="\n".join(retrieved_texts[:3]),
         )
 
-        # Tenta extrair source do primeiro step de retrieve
         top_source = ""
         for step in result.steps:
             if step.name == "retrieve" and step.data:
@@ -239,7 +212,6 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
         )
 
 async def _get_retrieved_chunks(question: str, route: str) -> list[str]:
-    """Obtém textos dos chunks recuperados para calcular métricas de retrieval."""
     try:
         from src.rag.embeddings import get_embeddings
         from src.application.chain.oracle_chain import _normalize
@@ -265,24 +237,18 @@ async def _get_retrieved_chunks(question: str, route: str) -> list[str]:
     except Exception:
         return []
 
-
 async def _get_top_source(question: str, route: str) -> str:
     chunks = await _get_retrieved_chunks(question, route)
-    return ""  # simplificado
-
+    return ""  
 
 def _calc_hit_rate(texts: list[str], keywords: list[str]) -> float:
-    """Hit Rate: pelo menos 1 keyword aparece nos textos recuperados?"""
     if not keywords or not texts:
         return 0.0
     combined = " ".join(texts).lower()
     hits = sum(1 for kw in keywords if kw.lower() in combined)
     return min(1.0, hits / len(keywords))
 
-
-def _calc_mrr(texts: list[str], keywords: list[str],
-              expected_source: str | None) -> float:
-    """MRR: 1/posição do primeiro chunk relevante."""
+def _calc_mrr(texts: list[str], keywords: list[str], expected_source: str | None) -> float:
     if not texts:
         return 0.0
     for rank, text in enumerate(texts, start=1):
@@ -291,14 +257,9 @@ def _calc_mrr(texts: list[str], keywords: list[str],
             return 1.0 / rank
     return 0.0
 
-
 async def _eval_generation(question: str, answer: str, context: str) -> tuple[float, float]:
-    """
-    Avalia faithfulness e answer relevancy usando Gemini como juiz.
-    Retorna (faithfulness, answer_relevancy) entre 0.0 e 1.0.
-    """
     if not answer or not context:
-        return 0.5, 0.5   # sem contexto para julgar
+        return 0.5, 0.5   
 
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -334,7 +295,6 @@ Responda APENAS com um número de 0.0 a 1.0 onde:
 0.5 = parcialmente relevante
 0.0 = não responde a pergunta"""
 
-        # Executa ambas em paralelo
         faith_resp, relev_resp = await asyncio.gather(
             llm.ainvoke([HumanMessage(content=prompt_faithfulness)]),
             llm.ainvoke([HumanMessage(content=prompt_relevancy)]),
@@ -355,9 +315,7 @@ Responda APENAS com um número de 0.0 a 1.0 onde:
         logger.warning("⚠️  [EVAL] LLM judge falhou: %s", e)
         return 0.5, 0.5
 
-
 def _aggregate_results(results: list[SingleEvalResult]) -> EvalRunResult:
-    """Calcula médias de todas as métricas."""
     import uuid
     n = len([r for r in results if not r.error])
     if n == 0:
@@ -383,17 +341,12 @@ def _aggregate_results(results: list[SingleEvalResult]) -> EvalRunResult:
         results=results,
     )
 
-
-
-
 def _persist_eval_result(result: EvalRunResult) -> None:
-    """Persiste resultado no Redis."""
     try:
         from src.infrastructure.redis_client import get_redis_text
         r = get_redis_text()
         r.lpush("eval:results", json.dumps(result.to_dict(), ensure_ascii=False))
-        r.ltrim("eval:results", 0, 9)  # guarda últimos 10
+        r.ltrim("eval:results", 0, 9)  
         r.expire("eval:results", 86400 * 30)
     except Exception as e:
         logger.warning("⚠️  [EVAL] persist falhou: %s", e)
-        

@@ -139,3 +139,4 @@ async def execute_tool(
         ).inc()
         
         raise HTTPException(status_code=422, detail=f"Erro de validação ou execução: {str(e)}")
+    

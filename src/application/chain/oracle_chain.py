@@ -285,6 +285,25 @@ class OracleChain:
                 r.delete(key)
                 ms = int((time.monotonic() - t0) * 1000)
                 await emit(StepResult("hitl", "ok", f"Executou: {action}", ms))
+                if action == "cadastro_pendente":
+                    from src.application.use_cases.user_use_case import UserUseCase
+                    from src.infrastructure.repositories.pessoa_repository import PessoaRepository
+                    from src.infrastructure.database.session import AsyncSessionLocal
+                    
+                    async with AsyncSessionLocal() as db:
+                        uc = UserUseCase(PessoaRepository(db))
+                        result = await uc.criar(args)
+                    
+                    ctx["answer"] = (
+                        f"✅ Cadastro confirmado!\n"
+                        f"• Nome: {args.get('nome')}\n"
+                        f"• Telefone: {args.get('telefone')}\n"
+                        f"• Curso: {args.get('curso', 'não informado')}"
+                        if result.ok
+                        else f"❌ Erro no cadastro: {result.error}"
+                    )
+                    r.delete(key)
+                    return
 
             elif cancelled:
                 ctx["answer"] = "❌ Operação cancelada. Posso ajudar com outra coisa?"
@@ -359,7 +378,20 @@ class OracleChain:
     async def _step_retrieve(self, ctx: dict, emit) -> None:
         """Busca híbrida Redis (BM25 + Vector)."""
         t0 = time.monotonic()
-        await emit(StepResult("retrieve", "running"))
+        await emit(StepResult("retrieve", "ok", detail, ms, {
+            "chunks": len(chunks),
+            "top_score": chunks[0].get("rrf_score", 0) if chunks else 0,
+            "top_source": chunks[0].get("source", "") if chunks else "",
+            # Adicionar:
+            "chunks_preview": [
+                {
+                    "source":    c.get("source", ""),
+                    "rrf_score": c.get("rrf_score", 0),
+                    "content":   c.get("content", "")[:150],
+                }
+                for c in chunks[:5]
+            ],
+        }))
 
         query = ctx["query_final"]
         route = ctx["route"]

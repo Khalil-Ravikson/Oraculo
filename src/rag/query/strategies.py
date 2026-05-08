@@ -451,3 +451,58 @@ Contexto do aluno: {fatos}
 Pergunta: {pergunta}
 
 Reformulações:"""
+
+
+class ProperNounQueryStrategy(AbstractQueryStrategy):
+    """
+    Detecta nomes próprios e gera variante de busca exata.
+    Resolve o problema do "Dr. Fulano Silva" — sem LLM, 0 tokens.
+    
+    Estratégia:
+      - Se detecta nome próprio (Caps consecutivos), cria variante entre aspas
+      - Prioriza busca full-text sobre semântica para essa variante
+    """
+
+    _RE_NOME = re.compile(
+        r'\b([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+(?:\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+){1,4})\b'
+    )
+    _TITULOS = re.compile(
+        r'\b(Dr\.?|Dra\.?|Prof\.?|Profa\.?|Sr\.?|Sra\.?)\s+', re.I
+    )
+
+    @property
+    def name(self) -> str:
+        return "proper_noun"
+
+    def should_apply(self, query: RawQuery) -> bool:
+        return bool(self._RE_NOME.search(query.text))
+
+    def transform(self, query: RawQuery) -> TransformedQuery:
+        nomes = self._RE_NOME.findall(query.text)
+        # Filtra stopwords falso-positivos
+        nomes = [n for n in nomes if len(n.split()) >= 2]
+
+        if not nomes:
+            return TransformedQuery(
+                original=query.text, primary=query.text,
+                strategy_used="proper_noun_no_match",
+            )
+
+        # Variante com busca exata (aspas) para o nome mais longo
+        nome_principal = max(nomes, key=len)
+        # Remove título se presente
+        nome_limpo = self._TITULOS.sub("", nome_principal).strip()
+
+        # Query principal mantém o original
+        # Variant usa aspas para forçar exact match no BM25
+        variante_exata = f'"{nome_limpo}"'
+        variante_sem_titulo = query.text.replace(nome_principal, nome_limpo)
+
+        return TransformedQuery(
+            original=query.text,
+            primary=query.text,
+            variants=[variante_exata, variante_sem_titulo],
+            keywords=[nome_limpo],
+            strategy_used="proper_noun",
+            was_transformed=True,
+        )
