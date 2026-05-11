@@ -137,28 +137,24 @@ def _registrar_routers(app: FastAPI) -> None:
     IMPORTAÇÕES CORRIGIDAS: 
     Mantendo os nomes originais dos arquivos, mas apontando para as novas pastas.
     """
-    # 1. Interface Web (Frontend)
+    # 1. Interface Web (Frontend) e Rotas Centralizadas (ChunkViz + Eval)
     from src.api.routers.web.hub import router as hub_router
     
-    # 2. Administração (Admin) - Caminhos completos das novas pastas
+    # 2. Administração (Admin REST)
     from src.api.routers.admin.admin_users_api import router as users_router
     from src.api.routers.admin.admin_api       import router as admin_api_router
-    from src.api.routers.admin.eval_dashboard  import router as eval_dash_router
-    from src.api.routers.admin.eval_api        import router as eval_api_router
     
-    # 3. Ferramentas (Tools)
-    from src.api.routers.tools.chunkviz_tools    import router as chunkviz_router
+    # NOTA ARQUITETURAL: 
+    # O eval_api.py e o chunkviz_tools.py são apenas "Cérebros" (Lógica de Negócio).
+    # Eles não possuem mais 'router'. Todas as rotas deles estão no hub_router.
 
     # Registrando no FastAPI com os prefixos e tags
     app.include_router(users_router, prefix="/api/admin/users", tags=["Admin: Usuários"])
-
-    
-    # O hub_router agora carrega todas as rotas web, inclusive as do ChunkViz (/hub/chunkviz/...)
-    app.include_router(hub_router)
     
     app.include_router(admin_api_router)
-    app.include_router(eval_dash_router, prefix="/eval", tags=["Admin: Eval GUI"])
-    app.include_router(eval_api_router, prefix="/eval/api", tags=["Admin: Eval API"])
+    
+    # O hub_router agora carrega todas as rotas web (/, /hub, /hub/chunkviz/..., /eval/...)
+    app.include_router(hub_router)
 
 # ── Instanciação da Aplicação ─────────────────────────────────────────────────
 app = create_app()

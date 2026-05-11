@@ -453,45 +453,55 @@ class OracleChain:
                             "needs_clarification": needs_clarification}))
 
     """
-oracle_chain.py — Trecho refatorado: _step_generate
-=====================================================
+    oracle_chain.py — Trecho refatorado: _step_generate
+    =====================================================
 
-Cole este método completo na classe OracleChain, substituindo o _step_generate atual.
+    Cole este método completo na classe OracleChain, substituindo o _step_generate atual.
 
-MUDANÇAS vs. versão anterior:
-  1. Langfuse V2: CallbackHandler() sem argumentos — lê ENV vars automaticamente.
-  2. Resiliência: handler.langfuse.score() e .flush() envolvidos em try/except
-     cirúrgicos. Se o Langfuse cair, o pipeline continua normalmente.
-  3. Métricas Prometheus: record_llm_usage() registra tokens + custo a cada geração.
-  4. Imports centralizados em safe_score_from_handler / safe_flush_handler
-     (definidos em langfuse_client.py).
-  5. Variável `tokens_total` corrigida (era usada antes de ser definida).
-"""
+    MUDANÇAS vs. versão anterior:
+    1. Langfuse V2: CallbackHandler() sem argumentos — lê ENV vars automaticamente.
+    2. Resiliência: handler.langfuse.score() e .flush() envolvidos em try/except
+        cirúrgicos. Se o Langfuse cair, o pipeline continua normalmente.
+    3. Métricas Prometheus: record_llm_usage() registra tokens + custo a cada geração.
+    4. Imports centralizados em safe_score_from_handler / safe_flush_handler
+        (definidos em langfuse_client.py).
+    5. Variável `tokens_total` corrigida (era usada antes de ser definida).
+    """
 
     async def _step_generate(self, ctx: dict, emit) -> None:
         """Gera resposta com Gemini usando contexto RAG e Tool Binding."""
         t0 = time.monotonic()
-        # HITL de desambiguação — não chama LLM
+        
+        # 1. HITL de desambiguação — intercepta antes da LLM e não usa try aqui
         if ctx.get("needs_clarification"):
-            sources_preview = list({c.get("source","") for c in ctx.get("chunks",[])[:5]})
+            chunks_atuais = ctx.get("chunks", [])
+            sources_preview = list({c.get("source", "Informação Geral") for c in chunks_atuais[:5]})
+            fontes_str = ", ".join(sources_preview[:3]) if sources_preview else "Múltiplas áreas"
+            
             ctx["answer"] = (
                 "🔍 Encontrei informações em múltiplas fontes e preciso da sua ajuda para ser mais preciso.\n\n"
                 f"Você está buscando sobre qual área ou campus?\n"
-                f"Fontes encontradas: {', '.join(sources_preview[:3])}\n\n"
+                f"Fontes encontradas: {fontes_str}\n\n"
                 "_Responda com mais detalhes (ex: 'CTIC', 'Campus Bacabal', 'PROG graduação')_"
             )
 
             # Salva contexto para a próxima mensagem enriquecer a query
-        from src.infrastructure.redis_client import get_redis_text
-        import json
-        r = get_redis_text()
-        r.setex(
-            f"clarify:{ctx['session_id']}", 120,
-            json.dumps({"original_query": ctx["message"], "sources": sources_preview})
-        )
-        await emit(StepResult("generate", "skip", "HITL desambiguação ativado", 0))
-        return
+            try:
+                from src.infrastructure.redis_client import get_redis_text
+                import json
+                r = get_redis_text()
+                r.setex(
+                    f"clarify:{ctx['session_id']}", 
+                    120,
+                    json.dumps({"original_query": ctx["message"], "sources": sources_preview})
+                )
+            except Exception as e:
+                logger.error("Erro ao salvar estado clarify: %s", e)
+                
+            await emit(StepResult("generate", "skip", "HITL desambiguação ativado", 0))
+            return
 
+        # 2. Fluxo Normal de Geração RAG — envolto num try seguro
         try:
             from src.infrastructure.redis_client import get_redis_text
             r = get_redis_text()
@@ -570,11 +580,8 @@ MUDANÇAS vs. versão anterior:
             messages  = [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
 
             # ── Langfuse V2: handler sem argumentos de credencial ──────────────
-            # Lê LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST das ENV
             from src.infrastructure.observability.langfuse_client import (
-                get_langfuse_handler,
-                safe_score_from_handler,
-                safe_flush_handler,
+                get_langfuse_handler, safe_score_from_handler, safe_flush_handler,
             )
             handler = get_langfuse_handler(
                 session_id=ctx.get("session_id", ""),
@@ -591,9 +598,8 @@ MUDANÇAS vs. versão anterior:
             tokens_out = usage.get("output_tokens", 0)
             tokens_total = tokens_in + tokens_out
 
-            # Custo estimado Gemini 2.0 Flash Lite (ajuste se mudar de modelo)
-            CUSTO_INPUT_PER_1M  = 0.075   # USD por 1M tokens de input
-            CUSTO_OUTPUT_PER_1M = 0.30    # USD por 1M tokens de output
+            CUSTO_INPUT_PER_1M  = 0.075   
+            CUSTO_OUTPUT_PER_1M = 0.30    
             custo_usd = (
                 (tokens_in  / 1_000_000 * CUSTO_INPUT_PER_1M) +
                 (tokens_out / 1_000_000 * CUSTO_OUTPUT_PER_1M)
@@ -604,27 +610,22 @@ MUDANÇAS vs. versão anterior:
             try:
                 from src.infrastructure.observability.metrics import get_metrics
                 get_metrics().record_llm_usage(
-                    input_tokens=tokens_in,
-                    output_tokens=tokens_out,
-                    cost_usd=custo_usd,
-                    latency_ms=ms_so_far,
+                    input_tokens=tokens_in, output_tokens=tokens_out,
+                    cost_usd=custo_usd, latency_ms=ms_so_far,
                 )
             except Exception as e:
                 logger.error("Prometheus record_llm_usage falhou: %s — ignorado.", e)
 
             # ── Score Langfuse (resiliente) ────────────────────────────────────
-            # ✅ Se o Langfuse cair aqui, o pipeline NÃO é interrompido
             safe_score_from_handler(
-                handler,
-                name="token_cost",
-                value=round(custo_usd, 6),
+                handler, name="token_cost", value=round(custo_usd, 6),
                 comment=f"tokens_in={tokens_in} tokens_out={tokens_out}",
             )
             safe_flush_handler(handler)
 
             ctx["tokens_used"] = tokens_total
 
-            # ── Desvio HITL ────────────────────────────────────────────────────
+            # ── Desvio HITL das Tools (Crud) ───────────────────────────────────
             if hasattr(response, "tool_calls") and response.tool_calls:
                 import json
                 tool_call = response.tool_calls[0]
@@ -648,7 +649,6 @@ MUDANÇAS vs. versão anterior:
             # ── Fluxo RAG normal ───────────────────────────────────────────────
             answer = response.content or ""
             ctx["answer"]      = answer
-            ctx["tokens_used"] = tokens_total
 
             ms     = int((time.monotonic() - t0) * 1000)
             detail = f"{len(answer)} chars | {tokens_total} tokens | {ms}ms"
@@ -657,11 +657,9 @@ MUDANÇAS vs. versão anterior:
 
         except Exception as e:
             ms = int((time.monotonic() - t0) * 1000)
-            logger.exception("❌ [CHAIN] generate falhou: %s", e)
-            ctx["answer"] = (
-                "Tive dificuldades ao gerar a resposta. "
-                "Tente reformular sua pergunta. 🙏"
-            )
+            import traceback
+            logger.error("❌ [CHAIN] generate falhou: %s\n%s", e, traceback.format_exc())
+            ctx["answer"] = "Tive dificuldades ao gerar a resposta. Tente reformular sua pergunta. 🙏"
             await emit(StepResult("generate", "error", str(e)[:100], ms))
     async def _step_save_memory(self, ctx: dict, emit) -> None:
         """Persiste turno no Redis (working memory)."""

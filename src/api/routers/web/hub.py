@@ -27,15 +27,17 @@ from __future__ import annotations
 import logging
 import json
 import asyncio
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Request,HTTPException 
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any
 
 
 from src.api.middleware.auth_middleware import TokenPayload
 from src.application.use_cases.admin_auth import get_admin_auth
 from src.infrastructure.settings import settings
-from pydantic import BaseModel
+
 logger    = logging.getLogger(__name__)
 router    = APIRouter(prefix="/hub", tags=["Portal Admin"])
 templates = Jinja2Templates(directory="templates")
@@ -736,39 +738,49 @@ class IngestReq(BaseModel):
     label:    str  = ""
     source:   str  = ""
     parser:   str  = "auto"
+    # AQUI está a mágica: pega as tags enviadas pelo JavaScript do ChunkViz
+    metadata_override: Dict[str, Any] = Field(default_factory=dict)
 
 @router.post("/chunkviz/ingest")
 async def cv_ingest(request: Request, body: IngestReq):
     _verificar_cookie(request)
     try:
+        from src.api.routers.tools.chunkviz_tools import load_temp_meta
         meta   = load_temp_meta(body.file_id)
         source = body.source or meta.get("name", body.file_id)
         label  = body.label or os.path.splitext(source)[0].upper().replace("-"," ").replace("_"," ")
 
         from src.application.tasks.ingestion_tasks import processar_documento
+        
+        # Junta o doc_type básico com a nova Taxonomia (Eixo, Setor, Ano)
+        final_metadata = {"doc_type": body.doc_type}
+        if body.metadata_override:
+            final_metadata.update(body.metadata_override)
+
+        # Usamos os valores dinâmicos do 'body', que vieram do slider do HTML!
         result = processar_documento.apply_async(
             args=[meta["path"]],
             kwargs={
                 "strategy_params": {
-                                    "doc_type": "edital",
-                                    "size": 500,
-                                    "overlap": 80,
-                                    "strategy": "markdown",
-                                    "label": "EDITAL PAES 2026",
-                                    # --- TAXONOMIA (vinda do formulário HTML) ---
-                                    "eixo":     form.get("eixo", "Ensino"),
-                                    "setor":    form.get("setor", "PROG"),
-                                    "tipo_doc": form.get("tipo_doc", "Edital"),
-                                    "ano":      form.get("ano", "2026"),
-                                    "campus":   form.get("campus", "Todos"),
-                                    },
+                    "size":     body.size,     
+                    "overlap":  body.overlap,
+                    "strategy": body.strategy, 
+                    "doc_type": body.doc_type,
+                    "label":    label,         
+                    "parser":   body.parser or meta.get("parser","auto"),
+                    # Repassamos as tags organizadas para o Celery
+                    "metadata_override": final_metadata 
+                },
                 "chat_id": "",
             },
             queue="admin",
         )
-        processar_documento.delay(file_path=caminho_tmp, strategy_params=strategy_params, chat_id="")
+        # Retorna sucesso (e a linha solta do 'delay' foi apagada!)
         return {"ok": True, "task_id": result.id, "source": source}
+    
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Erro crítico no cv_ingest")
         raise HTTPException(500, f"Erro ao enfileirar: {str(e)[:200]}")
 
 @router.get("/chunkviz/task/{task_id}")

@@ -197,15 +197,49 @@
       </div>
 
       <div class="cv-ctrl">
-        <label class="cv-lbl">Tipo de Doc</label>
-        <select id="cv-doctype" class="cv-sel" onchange="CV.settingChanged()">
-          <option value="geral">Geral</option>
-          <option value="calendario">Calendário</option>
-          <option value="edital">Edital</option>
-          <option value="contatos">Contatos</option>
-          <option value="wiki_ctic">Wiki CTIC</option>
-        </select>
-      </div>
+  <label class="cv-lbl">Eixo</label>
+  <select id="cv-eixo" class="cv-sel" onchange="CV.settingChanged()">
+    <option value="Institucional">Institucional</option>
+    <option value="Ensino">Ensino</option>
+    <option value="Pesquisa">Pesquisa</option>
+    <option value="Extensao">Extensão</option>
+    <option value="Sistemas">Sistemas</option>
+    <option value="Servicos">Serviços</option>
+  </select>
+</div>
+
+<div class="cv-ctrl">
+  <label class="cv-lbl">Setor</label>
+  <select id="cv-setor" class="cv-sel" onchange="CV.settingChanged()">
+    <option value="Geral">Geral</option>
+    <option value="PROG">PROG</option>
+    <option value="PROEXAE">PROEXAE</option>
+    <option value="PPG">PPG</option>
+    <option value="CTIC">CTIC</option>
+    <option value="Reitoria">Reitoria</option>
+  </select>
+</div>
+
+    <div class="cv-ctrl">
+      <label class="cv-lbl">Campus</label>
+      <select id="cv-campus" class="cv-sel" onchange="CV.settingChanged()">
+        <option value="Todos">Todos</option>
+        <option value="Sao_Luis">São Luís</option>
+        <option value="Bacabal">Bacabal</option>
+        <option value="Imperatriz">Imperatriz</option>
+        <option value="Balsas">Balsas</option>
+        <option value="Caxias">Caxias</option>
+      </select>
+    </div>
+
+    <div class="cv-ctrl">
+      <label class="cv-lbl">Ano</label>
+      <select id="cv-ano" class="cv-sel" onchange="CV.settingChanged()">
+        <option value="2026">2026</option>
+        <option value="2025">2025</option>
+        <option value="2024">2024</option>
+      </select>
+    </div>
 
       <div class="cv-ctrl cv-ctrl-slider">
         <label class="cv-lbl">

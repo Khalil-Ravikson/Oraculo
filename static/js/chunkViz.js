@@ -8,7 +8,8 @@ const S = {
   overlap:60, docType:'geral',
   chunks:[], view:'text',
   simTimer:null, taskId:null,
-  ingestMode: 'all' // Pode ser 'all', 'page', 'selected'
+  ingestMode: 'all',// Pode ser 'all', 'page', 'selected'
+  eixo:'Institucional', setor:'Geral', campus:'Todos', ano:'2026', 
 };
 
 const COLORS = [
@@ -48,6 +49,10 @@ function _loadPrefs() {
     if (p.strategy) { S.strategy = p.strategy; $('cv-strategy').value = p.strategy; }
     if (p.docType)  { S.docType  = p.docType;  $('cv-doctype').value  = p.docType;  }
     if (p.parser)   { S.parser   = p.parser;   $('cv-parser').value   = p.parser;
+    if (p.eixo)   { S.eixo   = p.eixo;   $('cv-eixo').value   = p.eixo;   }
+    if (p.setor)  { S.setor  = p.setor;  $('cv-setor').value  = p.setor;  }
+    if (p.campus) { S.campus = p.campus; $('cv-campus').value = p.campus; }
+    if (p.ano)    { S.ano    = p.ano;    $('cv-ano').value    = p.ano;    }
                       $v('cv-parserhint', PARSER_HINTS[p.parser] || ''); }
   } catch(_) {}
 }
@@ -55,7 +60,7 @@ function _loadPrefs() {
 function _savePrefs() {
   localStorage.setItem('cv_prefs', JSON.stringify({
     size:S.size, overlap:S.overlap, strategy:S.strategy,
-    docType:S.docType, parser:S.parser,
+    docType:S.docType, parser:S.parser,eixo:S.eixo, setor:S.setor, campus:S.campus, ano:S.ano,
   }));
 }
 
@@ -320,7 +325,16 @@ async function fetchUrl() {
 /* ─── SETTINGS ──────────────────────────────────────── */
 function sizeChanged(v)    { S.size    = +v; $v('cv-sizeval',  v); _savePrefs(); _schedSim(); }
 function overlapChanged(v) { S.overlap = +v; $v('cv-ovlapval', v); _savePrefs(); _schedSim(); }
-function settingChanged()  { S.strategy=$('cv-strategy').value; S.docType=$('cv-doctype').value; _savePrefs(); _schedSim(); }
+function settingChanged()  {
+  S.strategy = $('cv-strategy').value;
+  S.docType  = $('cv-doctype').value;
+  S.eixo     = $('cv-eixo').value;
+  S.setor    = $('cv-setor').value;
+  S.campus   = $('cv-campus').value;
+  S.ano      = $('cv-ano').value;
+  _savePrefs();
+  _schedSim();
+}
 
 function setSource(src) {
   S.source = src;
@@ -481,7 +495,7 @@ async function ingest() {
        d = await _post('/hub/chunkviz/ingest', {
         file_id: uploadRes.file_id, size:S.size, overlap:S.overlap,
         strategy:S.strategy, doc_type:S.docType,
-        label: label + " (PARCIAL)", source: "Seleção Parcial", parser: 'txt',
+        label: label + " (PARCIAL)", source: "Seleção Parcial", parser: 'txt',eixo:S.eixo, setor:S.setor, campus:S.campus, ano:S.ano,
       });
     } else {
        // Documento inteiro, fluxo normal
