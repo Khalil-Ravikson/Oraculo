@@ -376,23 +376,8 @@ class OracleChain:
                               f"'{ctx['query_final'][:60]}'", ms))
 
     async def _step_retrieve(self, ctx: dict, emit) -> None:
-        """Busca híbrida Redis (BM25 + Vector)."""
         t0 = time.monotonic()
-        await emit(StepResult("retrieve", "ok", detail, ms, {
-            "chunks": len(chunks),
-            "top_score": chunks[0].get("rrf_score", 0) if chunks else 0,
-            "top_source": chunks[0].get("source", "") if chunks else "",
-            # Adicionar:
-            "chunks_preview": [
-                {
-                    "source":    c.get("source", ""),
-                    "rrf_score": c.get("rrf_score", 0),
-                    "content":   c.get("content", "")[:150],
-                }
-                for c in chunks[:5]
-            ],
-        }))
-
+        await emit(StepResult("retrieve", "running"))
         query = ctx["query_final"]
         route = ctx["route"]
 
@@ -400,30 +385,29 @@ class OracleChain:
             emb = self._get_embeddings()
             vetor = await asyncio.to_thread(emb.embed_query, _normalize(query))
 
-            # Mapeamento rota → source_filter
-            source_map = {
-                "CALENDARIO": None,
-                "EDITAL":     None,
-                "CONTATOS":   None,
-            }
+            source_map = {"CALENDARIO": None, "EDITAL": None, "CONTATOS": None}
             source_filter = source_map.get(route)
 
             from src.infrastructure.redis_client import busca_hibrida
-            chunks = await asyncio.to_thread(
+            chunks_raw = await asyncio.to_thread(
                 busca_hibrida,
                 query_text=_normalize(query),
                 query_embedding=vetor,
                 source_filter=source_filter,
-                k_vector=6,
-                k_text=8,
+                k_vector=10,   # busca mais para re-ranker filtrar
+                k_text=12,
             )
+
+            # Re-ranking local
+            from src.application.chain.reranker import rerank
+            chunks = await rerank(query, chunks_raw, top_k=5)
+            
 
             ctx["chunks"] = chunks
             ms = int((time.monotonic() - t0) * 1000)
-            detail = f"{len(chunks)} chunks | source={source_filter or 'all'}"
-            await emit(StepResult("retrieve", "ok", detail, ms,
-                                  {"chunks": len(chunks),
-                                   "top_score": chunks[0].get("rrf_score", 0) if chunks else 0}))
+            top_score = chunks[0].get("rerank_score", 0) if chunks else 0
+            await emit(StepResult("retrieve", "ok",
+                                f"{len(chunks)} chunks | top_rerank={top_score:.3f}", ms))
 
         except Exception as e:
             ms = int((time.monotonic() - t0) * 1000)
@@ -432,31 +416,41 @@ class OracleChain:
             await emit(StepResult("retrieve", "error", str(e)[:80], ms))
 
     async def _step_grade_docs(self, ctx: dict, emit) -> None:
-        """
-        CRAG: avalia qualidade dos chunks recuperados.
-        Score baseado no rrf_score do top chunk — sem LLM extra.
-        """
         t0 = time.monotonic()
         chunks = ctx.get("chunks", [])
 
         if not chunks:
             ctx["crag_score"] = 0.0
-            await emit(StepResult("grade_docs", "ok", "sem chunks", 0,
-                                  {"crag_score": 0.0}))
+            ctx["needs_clarification"] = False
+            await emit(StepResult("grade_docs", "ok", "sem chunks", 0))
             return
 
-        # Média ponderada dos top-3 chunks
-        scores = [c.get("rrf_score", 0.0) for c in chunks[:3]]
-        avg = sum(scores) / len(scores) if scores else 0.0
-        # Normaliza: rrf_score típico fica entre 0.01 e 0.06
-        # Mapeia para 0-1: score 0.04+ = bom retrieval
-        normalized = min(1.0, avg / 0.04)
+        top_score = chunks[0].get("rerank_score", 0.0)
+        avg_score = sum(c.get("rerank_score", 0.0) for c in chunks[:3]) / min(3, len(chunks))
 
-        ctx["crag_score"] = normalized
+        # Normaliza: cross-encoder retorna logits (~-10 a +10), >0 = relevante
+        crag_score = min(1.0, max(0.0, (avg_score + 5) / 10))
+        ctx["crag_score"] = crag_score
+
+        # Detecta ambiguidade: múltiplos chunks de fontes distintas com scores próximos
+        sources = list({c.get("source", "") for c in chunks[:5]})
+        scores_top = [c.get("rerank_score", 0.0) for c in chunks[:3]]
+        score_spread = max(scores_top) - min(scores_top) if len(scores_top) > 1 else 10
+
+        AMBIGUITY_THRESHOLD = 0.5   # spread pequeno = chunks igualmente relevantes de fontes diferentes
+        LOW_QUALITY = top_score < 0.0  # cross-encoder score negativo = irrelevante
+
+        needs_clarification = (
+            len(sources) >= 3 and score_spread < AMBIGUITY_THRESHOLD
+        ) or LOW_QUALITY
+
+        ctx["needs_clarification"] = needs_clarification
+
         ms = int((time.monotonic() - t0) * 1000)
-        detail = f"score={normalized:.3f} | top_rrf={scores[0]:.4f}"
+        detail = f"crag={crag_score:.3f} | top={top_score:.3f} | clarify={needs_clarification}"
         await emit(StepResult("grade_docs", "ok", detail, ms,
-                              {"crag_score": round(normalized, 3)}))
+                            {"crag_score": round(crag_score, 3),
+                            "needs_clarification": needs_clarification}))
 
     """
 oracle_chain.py — Trecho refatorado: _step_generate
@@ -477,7 +471,26 @@ MUDANÇAS vs. versão anterior:
     async def _step_generate(self, ctx: dict, emit) -> None:
         """Gera resposta com Gemini usando contexto RAG e Tool Binding."""
         t0 = time.monotonic()
-        await emit(StepResult("generate", "running"))
+        # HITL de desambiguação — não chama LLM
+        if ctx.get("needs_clarification"):
+            sources_preview = list({c.get("source","") for c in ctx.get("chunks",[])[:5]})
+            ctx["answer"] = (
+                "🔍 Encontrei informações em múltiplas fontes e preciso da sua ajuda para ser mais preciso.\n\n"
+                f"Você está buscando sobre qual área ou campus?\n"
+                f"Fontes encontradas: {', '.join(sources_preview[:3])}\n\n"
+                "_Responda com mais detalhes (ex: 'CTIC', 'Campus Bacabal', 'PROG graduação')_"
+            )
+
+            # Salva contexto para a próxima mensagem enriquecer a query
+        from src.infrastructure.redis_client import get_redis_text
+        import json
+        r = get_redis_text()
+        r.setex(
+            f"clarify:{ctx['session_id']}", 120,
+            json.dumps({"original_query": ctx["message"], "sources": sources_preview})
+        )
+        await emit(StepResult("generate", "skip", "HITL desambiguação ativado", 0))
+        return
 
         try:
             from src.infrastructure.redis_client import get_redis_text

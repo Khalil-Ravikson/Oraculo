@@ -750,14 +750,23 @@ async def cv_ingest(request: Request, body: IngestReq):
             args=[meta["path"]],
             kwargs={
                 "strategy_params": {
-                    "size":     body.size,     "overlap":  body.overlap,
-                    "strategy": body.strategy, "doc_type": body.doc_type,
-                    "label":    label,         "parser":   body.parser or meta.get("parser","auto"),
-                },
+                                    "doc_type": "edital",
+                                    "size": 500,
+                                    "overlap": 80,
+                                    "strategy": "markdown",
+                                    "label": "EDITAL PAES 2026",
+                                    # --- TAXONOMIA (vinda do formulário HTML) ---
+                                    "eixo":     form.get("eixo", "Ensino"),
+                                    "setor":    form.get("setor", "PROG"),
+                                    "tipo_doc": form.get("tipo_doc", "Edital"),
+                                    "ano":      form.get("ano", "2026"),
+                                    "campus":   form.get("campus", "Todos"),
+                                    },
                 "chat_id": "",
             },
             queue="admin",
         )
+        processar_documento.delay(file_path=caminho_tmp, strategy_params=strategy_params, chat_id="")
         return {"ok": True, "task_id": result.id, "source": source}
     except Exception as e:
         raise HTTPException(500, f"Erro ao enfileirar: {str(e)[:200]}")

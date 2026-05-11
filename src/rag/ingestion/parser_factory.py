@@ -139,17 +139,40 @@ class ParserFactory:
 
     @staticmethod
     def get(parser_name: str) -> "IDocumentParser":
-        """Retorna o parser pelo nome. Lança ValueError se não existir."""
+        """
+        Retorna o parser EXATAMENTE como solicitado.
+        Fallback explícito APENAS se o parser falhar, nunca silencioso.
+        """
         builder = _REGISTRY.get(parser_name.lower())
         if builder is None:
             available = ", ".join(_REGISTRY.keys())
             raise ValueError(f"Parser '{parser_name}' não encontrado. Disponíveis: {available}")
+
         try:
             return builder()
         except ImportError as e:
+            # Parser não instalado — fallback explícito com log de aviso
+            fallback_map = {
+                "llamaparse":   "docling",
+                "docling":      "pymupdf",
+                "marker":       "pymupdf",
+                "unstructured": "txt",
+            }
+            fallback = fallback_map.get(parser_name.lower())
+            if fallback:
+                logger.warning(
+                    "⚠️  Parser '%s' indisponível (%s). "
+                    "Fazendo fallback explícito para '%s'. "
+                    "Instale com: pip install %s",
+                    parser_name, e, fallback,
+                    _INSTALL_HINTS.get(parser_name, parser_name),
+                )
+                fallback_builder = _REGISTRY.get(fallback)
+                if fallback_builder:
+                    return fallback_builder()
             raise ImportError(
-                f"Parser '{parser_name}' requer dependências não instaladas: {e}\n"
-                f"Instale com: pip install {_INSTALL_HINTS.get(parser_name, parser_name)}"
+                f"Parser '{parser_name}' requer dependências não instaladas e "
+                f"não há fallback disponível: {e}"
             ) from e
 
     @staticmethod

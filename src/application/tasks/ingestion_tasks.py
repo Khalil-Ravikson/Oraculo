@@ -106,7 +106,15 @@ def processar_documento(
                 doc_type    = strategy_params.get("doc_type", "geral"),
                 embedding   = emb,
                 chunk_index = i,
-                metadata    = chunk.get("metadata", {}),
+                metadata    = {
+                    **chunk.get("metadata", {}),
+                    "eixo":     strategy_params.get("eixo", "Institucional"),
+                    "setor":    strategy_params.get("setor", "Geral"),
+                    "tipo_doc": strategy_params.get("tipo_doc", "Geral"),
+                    "ano":      strategy_params.get("ano", "2026"),
+                    "campus":   strategy_params.get("campus", "Todos"),
+                    "label":    strategy_params.get("label", source.upper()),
+                },
             )
 
         ms = int((time.monotonic() - t0) * 1000)

@@ -67,10 +67,15 @@ def _schema_chunks() -> IndexSchema:
             {"name": "source",      "type": "tag"},
             {"name": "doc_type",    "type": "tag"},
             {"name": "chunk_index", "type": "numeric"},
-            {"name": "semester",    "type": "tag"},      # NOVO: filtra por 2026.1/2026.2
-            {"name": "event_type",  "type": "tag"},      # NOVO: matricula/prova/feriado
+            # --- TAXONOMIA UEMA ---
+            {"name": "eixo",        "type": "tag"},   # Institucional|Ensino|Pesquisa|Extensao|Sistemas|Servicos
+            {"name": "setor",       "type": "tag"},   # PROG|PROEXAE|PPG|CTIC|Reitoria|Geral
+            {"name": "tipo_doc",    "type": "tag"},   # Edital|Calendario|Resolucao|Manual|Contatos|Noticia
+            {"name": "ano",         "type": "tag"},   # 2024|2025|2026
+            {"name": "campus",      "type": "tag"},   # Sao_Luis|Bacabal|Imperatriz|Balsas|Caxias|Todos
+            # ----------------------
             {"name": "label",       "type": "text"},
-            {"name": "indexed_at",  "type": "numeric"},  # NOVO: ordenar por frescor
+            {"name": "indexed_at",  "type": "numeric"},
             {
                 "name": "embedding", "type": "vector",
                 "attrs": {
@@ -212,20 +217,23 @@ def salvar_chunk(chunk_id, content, source, doc_type, embedding,
                  chunk_index=0, metadata=None):
     r = get_redis()
     key = f"{PREFIX_CHUNKS}{source}:{chunk_id}"
+    meta = metadata or {}
     doc = {
         "content":     content,
         "source":      source,
         "doc_type":    doc_type,
         "chunk_index": chunk_index,
         "embedding":   embedding,
-        # NOVO: campos para filtros semânticos precisos
-        "semester":    (metadata or {}).get("semester", ""),
-        "event_type":  (metadata or {}).get("event_type", ""),
-        "label":       (metadata or {}).get("label", ""),
+        # Taxonomia — usa "Geral"/"Todos" como default seguro
+        "eixo":        meta.get("eixo", "Institucional"),
+        "setor":       meta.get("setor", "Geral"),
+        "tipo_doc":    meta.get("tipo_doc", doc_type.capitalize()),
+        "ano":         meta.get("ano", "2026"),
+        "campus":      meta.get("campus", "Todos"),
+        "label":       meta.get("label", ""),
         "indexed_at":  int(__import__("time").time()),
     }
     r.json().set(key, "$", doc)
-
 
 def deletar_chunks_por_source(source: str) -> int:
     """Remove todos os chunks de um source (SÍNCRONO). Retorna total deletado."""
