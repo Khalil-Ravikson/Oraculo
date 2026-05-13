@@ -195,3 +195,40 @@ services:
       - ./src:/app/src
     networks:
       - oraculo_net
+  # ── EVOLUTION API v2.3.7 (Build Local do GitHub) ──
+  evolution_api:
+    build:
+      context: https://github.com/EvolutionAPI/evolution-api.git#2.3.7
+      dockerfile: Dockerfile
+    container_name: oraculo_evolution
+    <<: [*restart, *logging]
+    ports:
+      - "8081:8080" # O Dashboard e o Swagger ficam aqui no navegador Windows
+    networks:
+      - oraculo_net
+    environment:
+      # O SERVER_URL é como a API se vê no navegador
+      - SERVER_URL=http://localhost:8081
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
+      - TZ=America/Sao_Paulo
+
+      # Banco de Dados (Postgres do Oráculo)
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      # Usamos o IP cego ou o nome do serviço para garantir conexão interna
+      - DATABASE_CONNECTION_URI=postgresql://user:${POSTGRES_PASSWORD}@172.18.0.40:5432/oraculo?schema=evolution
+      - DATABASE_CONNECTION_CLIENT_NAME=evolution_api
+      - DATABASE_SAVE_DATA_INSTANCE=true
+
+      # Cache (Redis do Oráculo)
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://172.18.0.50:6379/1
+      - CACHE_REDIS_PREFIX_KEY=evolution
+      
+      # Webhook Global (Onde o teu bot escuta)
+      - WEBHOOK_GLOBAL_URL=http://api:9000/webhook/evolution
+      - WEBHOOK_GLOBAL_ENABLED=true
+      - WEBHOOK_EVENTS_MESSAGES_UPSERT=true
+    depends_on:
+      - postgres
+      - redis

@@ -180,13 +180,13 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
     if success and stream_id:
         _xack_stream(stream_id)
 
-async def _aviso_latencia(gateway, chat_id: str, delay: float) -> None:
-    await asyncio.sleep(delay)
+# Em process_message_task.py — _aviso_latencia()
+async def _aviso_latencia(gateway, chat_id: str, number: str, delay: float) -> None:
+    await asyncio.sleep(1.0)
+    await gateway.enviar_digitando(number, duration_ms=3000)  # simula "digitando"
+    await asyncio.sleep(delay - 1.0)
     if chat_id:
-        try:
-            await gateway.enviar_mensagem(chat_id, _WARNING_MSG)
-        except Exception:
-            pass
+        await gateway.enviar_mensagem(chat_id, _WARNING_MSG)
 
 
 def _xack_stream(stream_id: str) -> None:
@@ -242,3 +242,117 @@ def recover_pending_messages() -> int:
     except Exception as e:
         logger.error("❌ [TASK] Stream recovery falhou: %s", e)
         return 0
+    
+    
+@celery_app.task(name="processar_mensagem_whatsapp", bind=True, max_retries=2)
+def processar_mensagem_whatsapp(
+    self,
+    remote_jid: str, sender_jid: str, text: str,
+    push_name: str, is_group: bool, mentioned_bot: bool,
+    msg_key_id: str = "", has_media: bool = False, media_type: str = "",
+) -> None:
+    asyncio.run(_handle_message(
+        remote_jid=remote_jid, sender_jid=sender_jid, text=text,
+        push_name=push_name, is_group=is_group, mentioned_bot=mentioned_bot,
+        msg_key_id=msg_key_id, has_media=has_media, media_type=media_type,
+    ))
+
+
+async def _handle_message(**kwargs) -> None:
+    from src.infrastructure.redis_client import get_redis_text
+    from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
+    from src.application.routing.message_router import MessageRouter, DispatchTarget
+    from src.application.routing.command_registry import CommandContext, dispatch_admin, dispatch_public
+    from src.application.routing.registration_funnel import RegistrationFunnel
+
+    r          = get_redis_text()
+    gateway    = EvolutionAdapter()
+    router     = MessageRouter()
+    funnel     = RegistrationFunnel()
+
+    sender     = kwargs["sender_jid"]
+    remote_jid = kwargs["remote_jid"]
+    text       = kwargs["text"]
+    chat_id    = remote_jid  # Evolution usa remoteJid para envio
+
+    # ── Contexto do usuário ───────────────────────────────────────────────────
+    user_data      = await _get_user_data(sender)
+    is_admin       = _is_admin(sender, r)
+    is_registered  = user_data is not None
+    in_reg_mode    = r.get(f"register:mode:{sender}") == "1"
+    allowed_group  = r.get("admin:allowed_group") or ""
+
+    decision = router.route(
+        text=text, sender_jid=sender, is_group=kwargs["is_group"],
+        is_admin=is_admin, is_registered=is_registered,
+        in_register_mode=in_reg_mode,
+        allowed_group_jid=allowed_group, remote_jid=remote_jid,
+    )
+
+    if decision.target == DispatchTarget.IGNORE:
+        return
+
+    ctx = CommandContext(
+        sender_jid=sender, chat_id=chat_id, text=decision.text, redis_text=r,
+    )
+
+    # ── Funil de cadastro ─────────────────────────────────────────────────────
+    if decision.target == DispatchTarget.REGISTER_MODE:
+        reply = await funnel.process(sender, text, push_name=kwargs["push_name"], redis=r)
+        if reply:
+            await gateway.enviar_mensagem(chat_id, reply)
+        return
+
+    # ── Admin Command ─────────────────────────────────────────────────────────
+    if decision.target == DispatchTarget.ADMIN_COMMAND:
+        reply = await dispatch_admin(decision.command, ctx)
+        await gateway.enviar_mensagem(chat_id, reply)
+        return
+
+    # ── Public Command ────────────────────────────────────────────────────────
+    if decision.target == DispatchTarget.PUBLIC_COMMAND:
+        reply = await dispatch_public(decision.command, ctx)
+        await gateway.enviar_mensagem(chat_id, reply)
+        return
+
+    # ── LLM (OracleChain) ─────────────────────────────────────────────────────
+    if decision.target == DispatchTarget.LLM:
+        user_context = {
+            "nome":    user_data.get("nome", ""),
+            "curso":   user_data.get("curso", ""),
+            "role":    user_data.get("role", "student"),
+        }
+        from src.application.chain.oracle_chain import get_oracle_chain
+        chain  = get_oracle_chain()
+        result = await chain.invoke(
+            message=decision.text,
+            session_id=sender,
+            user_context=user_context,
+        )
+        # Append feedback prompt
+        answer = result.answer
+        if answer and not result.error:
+            answer += "\n\n_Avalie: !1 (péssimo) a !5 (perfeito)_"
+
+        await gateway.enviar_mensagem(chat_id, answer)
+        _salvar_metrica(sender, result)
+
+async def _get_user_data(phone: str) -> dict | None:
+    try:
+        from src.infrastructure.database.session import AsyncSessionLocal
+        from sqlalchemy import text
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(
+                text("SELECT nome, curso, role FROM pessoas WHERE telefone=:p AND status='ativo'"),
+                {"p": phone},
+            )
+            row = r.fetchone()
+            return dict(row._mapping) if row else None
+    except Exception:
+        return None
+
+
+def _is_admin(phone: str, redis_client) -> bool:
+    from src.infrastructure.settings import settings
+    admin_numbers = [n.strip() for n in settings.ADMIN_NUMBERS.split(",") if n.strip()]
+    return phone in admin_numbers
