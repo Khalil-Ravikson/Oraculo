@@ -315,7 +315,7 @@ async def _handle_message(**kwargs) -> None:
         reply = await dispatch_public(decision.command, ctx)
         await gateway.enviar_mensagem(chat_id, reply)
         return
-
+    
     # ── LLM (OracleChain) ─────────────────────────────────────────────────────
     # ── LLM (OracleChain) ─────────────────────────────────────────────────────
     if decision.target == DispatchTarget.LLM:
@@ -324,30 +324,32 @@ async def _handle_message(**kwargs) -> None:
             "curso": user_data.get("curso", "") if user_data else "",
             "role":  user_data.get("role", "student") if user_data else "guest",
         }
-        
-        # 👇 CORREÇÃO: Usar a variável 'sender' e o gateway que já foi criado no topo da função!
-        try:
-            await gateway.enviar_digitando(number=sender, duration_ms=4000)
-        except Exception as e:
-            logger.warning("Erro no enviando_digitando: %s", e)
 
+        # ── Humanização: simula "digitando..." no grupo ───────────────────────
+        try:
+            await gateway.enviar_digitando(
+                number=remote_jid,   # grupo: usar remote_jid diretamente
+                duration_ms=4000,
+            )
+        except Exception as e:
+            logger.warning("⚠️  enviar_digitando falhou: %s", e)
+
+        # ── OracleChain ───────────────────────────────────────────────────────
         from src.application.chain.oracle_chain import get_oracle_chain
         chain  = get_oracle_chain()
-        
         result = await chain.invoke(
             message=decision.text,
             session_id=sender,
             user_context=user_context,
         )
-        
+
         answer = result.answer or ""
-        # Verifica se deu erro antes de pedir avaliação
-        if answer and not getattr(result, "error", False):
+        if answer and not result.error:
             answer += "\n\n_Avalie: !1 (péssimo) a !5 (perfeito)_"
 
         if answer:
             await gateway.enviar_mensagem(chat_id, answer)
-        
+
         _salvar_metrica(sender, result)
         return
 

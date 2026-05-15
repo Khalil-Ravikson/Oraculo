@@ -144,6 +144,9 @@ def _registrar_routers(app: FastAPI) -> None:
     from src.api.routers.admin.admin_users_api import router as users_router
     from src.api.routers.admin.admin_api       import router as admin_api_router
     
+    # 👇 1. ADICIONE APENAS ESTA LINHA AQUI 👇
+    from src.application.webhook.webhook_controller import router as webhook_router
+
     # NOTA ARQUITETURAL: 
     # O eval_api.py e o chunkviz_tools.py são apenas "Cérebros" (Lógica de Negócio).
     # Eles não possuem mais 'router'. Todas as rotas deles estão no hub_router.
@@ -155,6 +158,9 @@ def _registrar_routers(app: FastAPI) -> None:
     
     # O hub_router agora carrega todas as rotas web (/, /hub, /hub/chunkviz/..., /eval/...)
     app.include_router(hub_router)
+
+    # 👇 2. E ADICIONE APENAS ESTA LINHA AQUI 👇
+    app.include_router(webhook_router)
 
 # ── Instanciação da Aplicação ─────────────────────────────────────────────────
 app = create_app()

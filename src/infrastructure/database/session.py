@@ -1,6 +1,6 @@
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-
+from sqlalchemy.pool import NullPool  
 # Mudamos de 'config' para 'settings'
 from src.infrastructure.settings import settings
 
@@ -11,7 +11,9 @@ DATABASE_URL = getattr(settings, "database_url", getattr(settings, "DATABASE_URL
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,  
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    poolclass=NullPool,  # 👈 ESTA É A MÁGICA QUE IMPEDE O CELERY DE CRASHAR
+    
 )
 
 AsyncSessionLocal = async_sessionmaker(

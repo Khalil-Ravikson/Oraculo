@@ -1,14 +1,19 @@
 from fastapi import APIRouter, Request, Response
-from src.application.tasks.process_message_task import processar_mensagem_whatsapp
 from src.infrastructure.webhook.dto import IncomingMessage
-import logging, re
+from src.application.tasks.process_message_task import processar_mensagem_whatsapp
+from src.infrastructure.settings import settings
+import logging
+import re
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/webhook", tags=["webhook"])
+router = APIRouter(prefix="/webhook", tags=["Webhook"])
 
+# Trava de segurança: Prioridade para o JID fixo, fallback para .env
+_HARDCODED_GROUP = "120363409704662108@g.us"
+ALLOWED_GROUP = getattr(settings, "ALLOWED_GROUP_ID", _HARDCODED_GROUP) or _HARDCODED_GROUP
 
 def _parse_evolution_payload(payload: dict) -> IncomingMessage | None:
-    """Normaliza payload Evolution API v2.3 para DTO interno."""
+    """Normaliza o payload da Evolution API v2.3 para o teu DTO."""
     try:
         if payload.get("event") != "messages.upsert":
             return None
@@ -19,7 +24,7 @@ def _parse_evolution_payload(payload: dict) -> IncomingMessage | None:
         if key.get("fromMe", True):
             return None
 
-        msg       = data.get("message", {})
+        msg  = data.get("message", {})
         text = (
             msg.get("conversation")
             or msg.get("extendedTextMessage", {}).get("text")
@@ -29,20 +34,12 @@ def _parse_evolution_payload(payload: dict) -> IncomingMessage | None:
             or ""
         ).strip()
 
-        remote_jid = key.get("participant", "")
-        
+        remote_jid = key.get("remoteJid", "")
         is_group   = remote_jid.endswith("@g.us")
-
-        # Em grupos, o sender está em participant
         sender_jid = key.get("participant", remote_jid) if is_group else remote_jid
-
-        # Detecta menção ao bot (@oraculo ou @bot)
         mentioned  = bool(re.search(r"@oraculo\b", text, re.I))
-
-        has_media = data.get("messageType") not in (
-                                                    "conversation", "extendedTextMessage", "reactionMessage", ""
-                                                )
-        media_type = data.get("messageType", "")
+        msg_type   = data.get("messageType", "")
+        has_media  = msg_type not in ("conversation", "extendedTextMessage", "reactionMessage", "")
 
         return IncomingMessage(
             remote_jid    = remote_jid,
@@ -53,12 +50,11 @@ def _parse_evolution_payload(payload: dict) -> IncomingMessage | None:
             mentioned_bot = mentioned,
             msg_key_id    = key.get("id", ""),
             has_media     = has_media,
-            media_type    = media_type,
+            media_type    = msg_type,
         )
     except Exception as e:
-        logger.debug("parse_evolution_payload falhou: %s", e)
+        logger.debug("Erro ao processar DTO: %s", e)
         return None
-
 
 @router.post("/evolution")
 async def webhook_evolution(request: Request) -> Response:
@@ -67,10 +63,25 @@ async def webhook_evolution(request: Request) -> Response:
     except Exception:
         return Response(status_code=200)
 
+    # 1. Converte para DTO
     msg = _parse_evolution_payload(payload)
-    if msg is None or not msg.text and not msg.has_media:
+    if msg is None or (not msg.text and not msg.has_media):
         return Response(status_code=200)
 
+    # 2. 🛡️ TRAVA DE SEGURANÇA (Apenas o grupo da UEMA)
+    if msg.remote_jid != ALLOWED_GROUP:
+        logger.debug("🚫 Ignorado: JID %s fora do grupo permitido.", msg.remote_jid)
+        return Response(status_code=200)
+
+    # 3. Marca como lida imediatamente
+    try:
+        from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
+        gateway = EvolutionAdapter()
+        await gateway.marcar_lida(remote_jid=msg.remote_jid, msg_id=msg.msg_key_id)
+    except Exception as e:
+        logger.warning("⚠️  Falha ao marcar como lida: %s", e)
+
+    # 4. Despacha para o Celery
     processar_mensagem_whatsapp.delay(
         remote_jid    = msg.remote_jid,
         sender_jid    = msg.sender_jid,
@@ -83,13 +94,4 @@ async def webhook_evolution(request: Request) -> Response:
         media_type    = msg.media_type,
     )
     
-# 👇 A CORREÇÃO ENTRA AQUI 👇
-    try:
-        from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
-        gateway = EvolutionAdapter()
-        await gateway.marcar_lida(remote_jid=msg.remote_jid, msg_id=msg.msg_key_id)
-    except Exception as e:
-        logger.warning("Falha ao marcar como lida: %s", e)
-    
     return Response(status_code=200)
-  

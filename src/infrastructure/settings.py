@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     ADMIN_NUMBERS:             str = ""
     ADMIN_CONFIRMATION_TOKEN:  str = ""
     STUDENT_NUMBERS:           str = ""
-
+    ALLOWED_GROUP_ID: str = "120363409704662108@g.us"
     # ── Embedding ─────────────────────────────────────────────────
     EMBEDDING_PROVIDER: str = "google"
 
