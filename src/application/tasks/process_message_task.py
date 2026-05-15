@@ -126,6 +126,7 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
         chain = get_oracle_chain()
 
         t0 = time.monotonic()
+        
         result = await chain.invoke(
             message=message,
             session_id=phone,
@@ -316,26 +317,39 @@ async def _handle_message(**kwargs) -> None:
         return
 
     # ── LLM (OracleChain) ─────────────────────────────────────────────────────
+    # ── LLM (OracleChain) ─────────────────────────────────────────────────────
     if decision.target == DispatchTarget.LLM:
         user_context = {
-            "nome":    user_data.get("nome", ""),
-            "curso":   user_data.get("curso", ""),
-            "role":    user_data.get("role", "student"),
+            "nome":  user_data.get("nome", "") if user_data else "",
+            "curso": user_data.get("curso", "") if user_data else "",
+            "role":  user_data.get("role", "student") if user_data else "guest",
         }
+        
+        # 👇 CORREÇÃO: Usar a variável 'sender' e o gateway que já foi criado no topo da função!
+        try:
+            await gateway.enviar_digitando(number=sender, duration_ms=4000)
+        except Exception as e:
+            logger.warning("Erro no enviando_digitando: %s", e)
+
         from src.application.chain.oracle_chain import get_oracle_chain
         chain  = get_oracle_chain()
+        
         result = await chain.invoke(
             message=decision.text,
             session_id=sender,
             user_context=user_context,
         )
-        # Append feedback prompt
-        answer = result.answer
-        if answer and not result.error:
+        
+        answer = result.answer or ""
+        # Verifica se deu erro antes de pedir avaliação
+        if answer and not getattr(result, "error", False):
             answer += "\n\n_Avalie: !1 (péssimo) a !5 (perfeito)_"
 
-        await gateway.enviar_mensagem(chat_id, answer)
+        if answer:
+            await gateway.enviar_mensagem(chat_id, answer)
+        
         _salvar_metrica(sender, result)
+        return
 
 async def _get_user_data(phone: str) -> dict | None:
     try:

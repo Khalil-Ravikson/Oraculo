@@ -30,6 +30,7 @@ def _parse_evolution_payload(payload: dict) -> IncomingMessage | None:
         ).strip()
 
         remote_jid = key.get("participant", "")
+        
         is_group   = remote_jid.endswith("@g.us")
 
         # Em grupos, o sender está em participant
@@ -81,4 +82,14 @@ async def webhook_evolution(request: Request) -> Response:
         has_media     = msg.has_media,
         media_type    = msg.media_type,
     )
+    
+# 👇 A CORREÇÃO ENTRA AQUI 👇
+    try:
+        from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
+        gateway = EvolutionAdapter()
+        await gateway.marcar_lida(remote_jid=msg.remote_jid, msg_id=msg.msg_key_id)
+    except Exception as e:
+        logger.warning("Falha ao marcar como lida: %s", e)
+    
     return Response(status_code=200)
+  

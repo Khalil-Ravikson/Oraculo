@@ -56,9 +56,24 @@ class RegistrationFunnel:
                         f"register:name:{sender}"):
                 redis.delete(key)
 
-            return _CADASTRO_OK.format(nome=nome.split()[0])
-
-        return ""
+            # 👇 CORREÇÃO: Iniciar o gateway aqui para mandar os botões
+            try:
+                from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
+                gateway = EvolutionAdapter()
+                await gateway.enviar_botoes(
+                    number=sender, # A variável correta é sender!
+                    title="Cadastro Concluído!",
+                    description=f"Bem-vindo(a), {nome.split()[0]}! O seu cadastro no curso de {curso} foi salvo. Os dados estão corretos?",
+                    buttons=[
+                        {"type": "reply", "displayText": "✅ Sim, corretos", "id": "btn_ok"},
+                        {"type": "reply", "displayText": "❌ Refazer", "id": "btn_refazer"},
+                    ]
+                )
+                return "" # Retornamos vazio porque a mensagem já foi enviada pelos botões acima
+            except Exception as e:
+                logger.error("Erro ao enviar botões: %s", e)
+                # Fallback: Se o botão falhar, manda texto normal
+                return _CADASTRO_OK.format(nome=nome.split()[0])
 
     @staticmethod
     async def _salvar_usuario(telefone: str, nome: str, curso: str) -> None:
