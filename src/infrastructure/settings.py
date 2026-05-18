@@ -52,7 +52,11 @@ class Settings(BaseSettings):
     ALLOWED_GROUP_ID: str = "120363409704662108@g.us"
     # ── Embedding ─────────────────────────────────────────────────
     EMBEDDING_PROVIDER: str = "google"
-
+    ENV: str = "production"
+    
+    @property
+    def is_dev(self) -> bool:
+        return self.ENV.lower() == "dev"
     # ── Sprint 1: Langfuse (Observabilidade LLM) ──────────────────
     # Gere as chaves em http://localhost:3000 → Settings → API Keys
     # Se vazias, o tracing é desativado silenciosamente (sem erro).

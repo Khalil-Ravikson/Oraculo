@@ -168,7 +168,23 @@ class OracleChain:
             steps.append(step)
             if debug_queue:
                 await debug_queue.put(step)
-
+        # ── Verifica contexto de desambiguação pendente ───────────────────────────
+        from src.infrastructure.redis_client import get_redis_text
+        import json as _json
+        _r = get_redis_text()
+        _clarify_raw = _r.get(f"clarify:{session_id}")
+        if _clarify_raw:
+            try:
+                _clarify = _json.loads(_clarify_raw)
+                # Unifica query: contexto anterior + resposta atual
+                ctx["original_query"]   = _clarify.get("original_query", message)
+                ctx["query_final"]      = f"{_clarify.get('original_query', '')} {message}".strip()
+                ctx["skip_route"]       = True   # vai direto ao retrieve
+                ctx["prev_sources"]     = _clarify.get("sources", [])
+                _r.delete(f"clarify:{session_id}")
+                logger.info("🔍 [CHAIN] Clarify resolvido: '%s' + '%s'", _clarify.get('original_query',''), message)
+            except Exception:
+                pass
         # Estado acumulado que flui por todo o pipeline
         ctx: dict = {
             "message":       message,
@@ -193,11 +209,13 @@ class OracleChain:
             await self._step_check_hitl(ctx, emit)
 
             if ctx.get("hitl_response"):
-                # HITL processou — retorna direto sem RAG
                 return self._make_result(ctx, steps, t_total)
 
-            await self._step_route(ctx, emit)
-            await self._step_transform_query(ctx, emit)
+            # Se vier de uma desambiguação, pula route+transform
+            if not ctx.get("skip_route"):
+                await self._step_route(ctx, emit)
+                await self._step_transform_query(ctx, emit)
+
             await self._step_retrieve(ctx, emit)
             await self._step_grade_docs(ctx, emit)
             await self._step_generate(ctx, emit)
@@ -644,7 +662,7 @@ class OracleChain:
                 ctx["hitl_pending"] = True
                 ms = int((time.monotonic() - t0) * 1000)
                 await emit(StepResult("generate", "ok", f"HITL: {tool_call['name']}", ms))
-                return
+                return  # ← ESTE RETURN ESTAVA FALTANDO
 
             # ── Fluxo RAG normal ───────────────────────────────────────────────
             answer = response.content or ""
@@ -800,11 +818,32 @@ def _e_query_tecnica(message: str) -> bool:
 
 
 def _system_prompt_default() -> str:
-    return """Você é o Oráculo, assistente virtual oficial da UEMA.
-Responda em até 3 parágrafos curtos. Use *negrito* para datas e prazos importantes.
-Use APENAS as informações em <informacao_documentos>. Se não souber, diga claramente.
-Nunca invente datas ou valores. Mantenha tom acadêmico mas acolhedor."""
+    return """Você é o *Oráculo*, assistente oficial da UEMA (Universidade Estadual do Maranhão).
+Seu único canal é o WhatsApp. Seja direto, claro e use formatação compatível.
 
+━━━ PROTOCOLO DE RACIOCÍNIO (ReWOO) ━━━
+Antes de formular cada resposta, execute mentalmente (nunca exiba ao usuário):
+
+[PLAN-1] O que o aluno está pedindo exatamente?
+[PLAN-2] Qual trecho em <informacao_documentos> responde isso diretamente?
+[PLAN-3] A informação está presente? Sim → use. Não → acione MSG_SEM_INFO.
+
+━━━ REGRAS DE GROUNDING (INVIOLÁVEIS) ━━━
+1. Responda ÚNICA E EXCLUSIVAMENTE com base em <informacao_documentos>.
+2. Se a informação não constar nos documentos: responda exatamente:
+   "Não encontrei essa informação nos meus registros atuais. Consulte diretamente o setor responsável ou o site uema.br."
+3. NUNCA invente datas, números de vagas, e-mails ou prazos.
+4. NUNCA misture informações de fontes diferentes sem deixar claro.
+
+━━━ FORMATAÇÃO WHATSAPP ━━━
+- Use *negrito* para datas, prazos e nomes de setores.
+- Use listas com "•" para múltiplos itens.
+- Máximo 3 parágrafos. Seja conciso.
+- Nunca use markdown de código (`), tabelas ou HTML.
+- Assine como: _Oráculo UEMA_ ao final quando relevante.
+
+━━━ TOM ━━━
+Acadêmico, acolhedor, direto. Nunca robótico. Trate o aluno pelo primeiro nome se disponível."""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Singleton

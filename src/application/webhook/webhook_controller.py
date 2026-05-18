@@ -68,8 +68,8 @@ async def webhook_evolution(request: Request) -> Response:
     if msg is None or (not msg.text and not msg.has_media):
         return Response(status_code=200)
 
-    # 2. 🛡️ TRAVA DE SEGURANÇA (Apenas o grupo da UEMA)
-    if msg.remote_jid != ALLOWED_GROUP:
+    # TRAVA: pula em dev
+    if not settings.is_dev and msg.remote_jid != ALLOWED_GROUP:
         logger.debug("🚫 Ignorado: JID %s fora do grupo permitido.", msg.remote_jid)
         return Response(status_code=200)
 
