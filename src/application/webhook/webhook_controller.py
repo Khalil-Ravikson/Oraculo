@@ -8,12 +8,10 @@ import re
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["Webhook"])
 
-# Trava de segurança: Prioridade para o JID fixo, fallback para .env
-_HARDCODED_GROUP = "120363409704662108@g.us"
-ALLOWED_GROUP = getattr(settings, "ALLOWED_GROUP_ID", _HARDCODED_GROUP) or _HARDCODED_GROUP
+ALLOWED_GROUP = settings.ALLOWED_GROUP_ID
 
 def _parse_evolution_payload(payload: dict) -> IncomingMessage | None:
-    """Normaliza o payload da Evolution API v2.3 para o teu DTO."""
+    """Normaliza o payload da Evolution API v2.3 e extrai o texto do grupo."""
     try:
         if payload.get("event") != "messages.upsert":
             return None
@@ -21,25 +19,32 @@ def _parse_evolution_payload(payload: dict) -> IncomingMessage | None:
         data = payload.get("data", {})
         key  = data.get("key", {})
 
-        if key.get("fromMe", True):
+        # Trava anti-looping: Ignora se a mensagem veio do próprio número do bot
+        if key.get("fromMe", False) is True:
             return None
 
-        msg  = data.get("message", {})
+        msg = data.get("message", {})
+        
+        # Desenbrulha mensagens efêmeras comuns em canais/grupos
+        if "ephemeralMessage" in msg:
+            msg = msg.get("ephemeralMessage", {}).get("message", {})
+
         text = (
             msg.get("conversation")
             or msg.get("extendedTextMessage", {}).get("text")
             or msg.get("imageMessage", {}).get("caption")
-            or msg.get("videoMessage", {}).get("caption")
-            or msg.get("documentMessage", {}).get("caption")
             or ""
         ).strip()
 
         remote_jid = key.get("remoteJid", "")
         is_group   = remote_jid.endswith("@g.us")
         sender_jid = key.get("participant", remote_jid) if is_group else remote_jid
-        mentioned  = bool(re.search(r"@oraculo\b", text, re.I))
+        
+        # O bot responderá a qualquer texto enviado dentro do grupo homologado
+        mentioned = True 
+        
         msg_type   = data.get("messageType", "")
-        has_media  = msg_type not in ("conversation", "extendedTextMessage", "reactionMessage", "")
+        has_media  = msg_type not in ("conversation", "extendedTextMessage", "")
 
         return IncomingMessage(
             remote_jid    = remote_jid,
@@ -53,7 +58,7 @@ def _parse_evolution_payload(payload: dict) -> IncomingMessage | None:
             media_type    = msg_type,
         )
     except Exception as e:
-        logger.debug("Erro ao processar DTO: %s", e)
+        logger.error("❌ Erro ao converter DTO do webhook: %s", e)
         return None
 
 @router.post("/evolution")
@@ -63,25 +68,18 @@ async def webhook_evolution(request: Request) -> Response:
     except Exception:
         return Response(status_code=200)
 
-    # 1. Converte para DTO
     msg = _parse_evolution_payload(payload)
     if msg is None or (not msg.text and not msg.has_media):
         return Response(status_code=200)
 
-    # TRAVA: pula em dev
-    if not settings.is_dev and msg.remote_jid != ALLOWED_GROUP:
-        logger.debug("🚫 Ignorado: JID %s fora do grupo permitido.", msg.remote_jid)
+    # 🚫 FILTRO RÍGIDO: Se não for o grupo exclusivo do .env, descarta e ignora o resto
+    if msg.remote_jid != ALLOWED_GROUP:
         return Response(status_code=200)
 
-    # 3. Marca como lida imediatamente
-    try:
-        from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
-        gateway = EvolutionAdapter()
-        await gateway.marcar_lida(remote_jid=msg.remote_jid, msg_id=msg.msg_key_id)
-    except Exception as e:
-        logger.warning("⚠️  Falha ao marcar como lida: %s", e)
+    # Log visível no terminal do Docker indicando que o seu grupo passou
+    logger.info("🎯 [OraculoUEMA] Mensagem aceita no grupo homologado: %s", msg.text)
 
-    # 4. Despacha para o Celery
+    # Executa a chamada em background no Celery
     processar_mensagem_whatsapp.delay(
         remote_jid    = msg.remote_jid,
         sender_jid    = msg.sender_jid,

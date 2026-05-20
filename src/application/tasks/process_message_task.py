@@ -265,6 +265,7 @@ async def _handle_message(**kwargs) -> None:
     from src.application.routing.message_router import MessageRouter, DispatchTarget
     from src.application.routing.command_registry import CommandContext, dispatch_admin, dispatch_public
     from src.application.routing.registration_funnel import RegistrationFunnel
+    from src.infrastructure.settings import settings  # 🔥 Importado para ler o .env real
 
     r          = get_redis_text()
     gateway    = EvolutionAdapter()
@@ -276,12 +277,21 @@ async def _handle_message(**kwargs) -> None:
     text       = kwargs["text"]
     chat_id    = remote_jid  # Evolution usa remoteJid para envio
 
+    # 🛑 FILTRO DE ENTRADA: Se não for o grupo exclusivo do .env, ignora na hora
+    # Isso limpa e salva a fila do seu Celery dos grupos de promoção
+    if remote_jid != settings.ALLOWED_GROUP_ID:
+        return
+
+    logger.info("🧠 [CELERY WORKER] Processando mensagem do grupo homologado: %s", text)
+
     # ── Contexto do usuário ───────────────────────────────────────────────────
     user_data      = await _get_user_data(sender)
     is_admin       = _is_admin(sender, r)
     is_registered  = user_data is not None
     in_reg_mode    = r.get(f"register:mode:{sender}") == "1"
-    allowed_group  = r.get("admin:allowed_group") or ""
+    
+    # 🔥 CORREÇÃO: Puxa o grupo permitido direto do Settings configurado no .env
+    allowed_group  = settings.ALLOWED_GROUP_ID
 
     decision = router.route(
         text=text, sender_jid=sender, is_group=kwargs["is_group"],
@@ -290,8 +300,9 @@ async def _handle_message(**kwargs) -> None:
         allowed_group_jid=allowed_group, remote_jid=remote_jid,
     )
 
+    # Força o target para LLM se estiver no grupo homologado para garantir o disparo
     if decision.target == DispatchTarget.IGNORE:
-        return
+        decision.target = DispatchTarget.LLM
 
     ctx = CommandContext(
         sender_jid=sender, chat_id=chat_id, text=decision.text, redis_text=r,
@@ -317,11 +328,11 @@ async def _handle_message(**kwargs) -> None:
         return
     
     # ── LLM (OracleChain) ─────────────────────────────────────────────────────
-    # ── LLM (OracleChain) ─────────────────────────────────────────────────────
     if decision.target == DispatchTarget.LLM:
+        # 🔥 FALLBACK: Se o usuário não estiver no banco, pegamos o pushName do WhatsApp para não quebrar
         user_context = {
-            "nome":  user_data.get("nome", "") if user_data else "",
-            "curso": user_data.get("curso", "") if user_data else "",
+            "nome":  user_data.get("nome", "") if user_data else kwargs.get("push_name", "Estudante"),
+            "curso": user_data.get("curso", "") if user_data else "UEMA",
             "role":  user_data.get("role", "student") if user_data else "guest",
         }
 
@@ -338,7 +349,7 @@ async def _handle_message(**kwargs) -> None:
         from src.application.chain.oracle_chain import get_oracle_chain
         chain  = get_oracle_chain()
         result = await chain.invoke(
-            message=decision.text,
+            message=text,  # Envia o texto limpo ou o original recebido
             session_id=sender,
             user_context=user_context,
         )
@@ -348,9 +359,14 @@ async def _handle_message(**kwargs) -> None:
             answer += "\n\n_Avalie: !1 (péssimo) a !5 (perfeito)_"
 
         if answer:
+            # Envia diretamente para o chat_id do grupo homologado
             await gateway.enviar_mensagem(chat_id, answer)
+            logger.info("✅ [CELERY WORKER] Resposta da IA enviada com sucesso para o grupo!")
 
-        _salvar_metrica(sender, result)
+        try:
+            _salvar_metrica(sender, result)
+        except Exception:
+            pass
         return
 
 async def _get_user_data(phone: str) -> dict | None:
