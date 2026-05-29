@@ -25,9 +25,9 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
-# Metadata da migration
-revision = "0002_observability_tables"
-down_revision = None   # ajuste para o revision anterior real
+# METADADOS DA LINHA DO TEMPO
+revision = "001_observability_tables"
+down_revision = None
 branch_labels = None
 depends_on = None
 

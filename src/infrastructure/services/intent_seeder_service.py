@@ -77,7 +77,7 @@ class IntentSeederService:
         redis_client: Any,
         embedding_model: Any,
     ) -> SeedResult:
-        from src.infrastructure.database.intent_models import IntentRouter
+        from src.infrastructure.database.models import IntentRouter
 
         result = SeedResult()
 

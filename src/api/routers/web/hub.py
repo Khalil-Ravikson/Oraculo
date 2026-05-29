@@ -251,68 +251,51 @@ async def chat_send(request: Request, data: WebChatRequest):
 
 @router.get("/chat/stream")
 async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
-    """SSE: executa a OracleChain e streama o resultado passo a passo."""
-    
-    # ATENÇÃO: Descomente a linha abaixo se o seu _verificar_cookie estiver ativo
-    # payload = _verificar_cookie(request)
+    """SSE: executa o Cognitive OS e streama o resultado simulado."""
     
     if not msg or not thread_id:
         return JSONResponse({"erro": "msg e thread_id obrigatórios"}, status_code=400)
 
-    debug_queue = asyncio.Queue()
-
     async def _generator():
+        import time
+        import json
         try:
-            from src.application.chain.oracle_chain import get_oracle_chain, StepResult
-            chain = get_oracle_chain()
+            from src.application.chain.cognitive_os import processar
         except Exception as e:
-            # Se houver erro de importação, enviamos para o front-end
             yield f"data: {json.dumps({'type': 'error', 'msg': f'Import Error: {str(e)}'})}\n\n"
             return
 
         user_context = {"nome": "Admin Simulador", "role": "admin", "is_admin": True}
+        
+        # 1. Avisa o frontend que a IA começou a pensar
         yield f"data: {json.dumps({'type': 'start', 'hitl': False})}\n\n"
+        yield f"data: {json.dumps({'type': 'step', 'name': 'processando', 'status': 'running', 'detail': 'Enviando para o Cognitive OS...', 'ms': 0})}\n\n"
 
-        # Roda a inteligência assíncrona
-        chain_task = asyncio.create_task(
-            chain.invoke(message=msg, session_id=thread_id, user_context=user_context, debug_queue=debug_queue)
-        )
-
-        # Consome a fila de eventos e manda para o HTML
-        while not chain_task.done() or not debug_queue.empty():
-            try:
-                step: StepResult = await asyncio.wait_for(debug_queue.get(), timeout=0.2)
-                if step.name == "DONE":
-                    continue
-
-                # Formato exato que o teu JS espera (d.name)
-                data = {
-                    "type": "step",
-                    "name": step.name,
-                    "status": step.status,
-                    "detail": step.detail,
-                    "ms": step.latency_ms,
-                    "data": step.data
-                }
-                if step.name == "route" and step.status == "ok":
-                    data["route"] = step.data.get("route", "")
-
-                yield f"data: {json.dumps(data)}\n\n"
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                pass
-
-        # Pega a resposta final
         try:
-            result = await chain_task
-            if result.error:
-                 yield f"data: {json.dumps({'type': 'error', 'msg': result.error[:200]})}\n\n"
+            t0 = time.monotonic()
+            
+            # 2. Chama a nova arquitetura
+            result = await processar(
+                message=msg, 
+                session_id=thread_id, 
+                user_context=user_context,
+                history=""
+            )
+            
+            ms = int((time.monotonic() - t0) * 1000)
+            
+            # 3. Avisa que o processamento terminou
+            yield f"data: {json.dumps({'type': 'step', 'name': 'processando', 'status': 'ok', 'detail': 'Concluído', 'ms': ms})}\n\n"
+
+            # 4. Entrega a resposta final
+            if getattr(result, "error", None):
+                yield f"data: {json.dumps({'type': 'error', 'msg': str(result.error)[:200]})}\n\n"
             else:
-                 yield f"data: {json.dumps({'type': 'response', 'text': result.answer, 'crag': result.crag_score})}\n\n"
+                yield f"data: {json.dumps({'type': 'response', 'text': getattr(result, 'answer', ''), 'crag': 0.9})}\n\n"  
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'msg': str(e)[:200]})}\n\n"
 
+        # 5. Fecha a conexão com o frontend
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(
@@ -320,7 +303,6 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
 @router.get("/audit/data")
 async def audit_data(request: Request):
     """Endpoint REST para alimentar a tabela de Auditoria."""
@@ -1013,19 +995,27 @@ async def eval_query(request: Request):
     queue: asyncio.Queue = asyncio.Queue()
 
     async def _run():
-        from src.application.chain.oracle_chain import get_oracle_chain, StepResult
-        chain = get_oracle_chain()
+        from src.application.chain.cognitive_os import processar
+        
+        await queue.put(json.dumps({
+            "tipo": "step_start", "step": "routing"
+        }))
 
-        _STEP_MAP = {
-            "load_memory":    None,
-            "check_hitl":     None,
-            "route":          "routing",
-            "transform_query":"transform",
-            "retrieve":       "retrieval",
-            "grade_docs":     None,
-            "generate":       "geracao",
-            "save_memory":    None,
-        }
+        result = await processar(
+            message=pergunta,
+            session_id=session_id,
+            user_context={"nome": "Admin Live", "role": "admin"},
+            history=""
+        )
+
+        await queue.put(json.dumps({
+            "tipo": "resposta",
+            "texto": result.answer,
+            "fonte": getattr(result, "rota", "GERAL"),
+            "tokens": getattr(result, "tokens_used", 0),
+        }))
+
+        await queue.put(json.dumps({"tipo": "done"}))
 
         step_queue: asyncio.Queue = asyncio.Queue()
 

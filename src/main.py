@@ -60,21 +60,13 @@ def create_app() -> FastAPI:
     async def health():
         """Verificação de saúde de todos os serviços críticos."""
         from src.infrastructure.redis_client import redis_ok
-        from src.application.chain.oracle_chain import get_oracle_chain
         
-        chain_status = True
-        try:
-            get_oracle_chain()
-        except Exception:
-            chain_status = False
-
         return {
             "status":    "online",
             "sistema":   "Oráculo UEMA",
             "versao":    "5.1.0",
             "redis":     "OK" if redis_ok() else "ERRO",
-            "chain":     "OK" if chain_status else "ERRO",
-            "framework": "LangChain Runnables",
+            "framework": "Cognitive OS (Celery + Redis Streams)",
         }
 
     return app
@@ -89,24 +81,28 @@ async def _startup(settings) -> None:
         from src.infrastructure.redis_client import inicializar_indices
         await inicializar_indices()
         logger.info("✅ Índices Redis inicializados (SVS-VAMANA)")
+        
+        # 👇 ADICIONE ESTA IMPORTAÇÃO E CHAMADA AQUI 👇
+        from src.infrastructure.services.intent_seeder_service import IntentSeederService
+        seeder = IntentSeederService()
+        await seeder.seed()
+        logger.info("🌱 [INTENT SEEDER] Configurações e vetores carregados no Redis com sucesso!")
+        
     except Exception as exc:
-        logger.error("❌ Falha crítica no Redis: %s", exc)
-        # Em produção, isto deve impedir o arranque
+        logger.error("❌ Falha crítica no Redis/Seeder: %s", exc)
         if not settings.DEV_MODE:
-            raise RuntimeError("Redis obrigatório para RAG não disponível.")
+            raise RuntimeError("Redis e Seeder são obrigatórios para o funcionamento.")
 
     # 2. IA: Pré-aquecimento de Embeddings e Chain
     try:
         from src.rag.embeddings import get_embeddings
-        from src.application.chain.oracle_chain import get_oracle_chain
         
         # Singleton de Embeddings (Google Gemini)
         _ = get_embeddings().embed_query("teste de aquecimento")
         logger.info("✅ Modelo de Embeddings carregado")
         
-        # Singleton da Chain (Pipeline RAG)
-        get_oracle_chain()
-        logger.info("✅ OracleChain pronta para inferência")
+        # A OracleChain não existe mais! O Cognitive OS é invocado sob demanda via Celery.
+        logger.info("✅ Arquitetura Multi-Agente (Cognitive OS) pronta")
     except Exception as exc:
         logger.warning("⚠️  Falha ao pré-aquecer componentes de IA: %s", exc)
 

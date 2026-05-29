@@ -206,58 +206,50 @@ async def _despachar_workers(plan) -> None:
             # HITL — salva no Redis e retorna mensagem de confirmação
             _iniciar_crud_hitl(plan, args)
 
-
 async def _aguardar_resposta_final(plan_id: str, timeout: float) -> str | None:
     """
-    Faz polling no Redis Stream oraculo:stream:final_responses
-    aguardando a resposta do plano específico.
+    Faz polling no Redis Stream, mas verifica primeiro se a resposta já está lá (Catch-up).
     """
     from src.infrastructure.redis_client import get_redis_text
     r = get_redis_text()
 
     deadline = time.monotonic() + timeout
-    # Busca do início do stream (só as mensagens novas deste plan)
-    last_id = "$"  # só mensagens novas a partir daqui
 
-    # Fallback: verifica também a chave direta (synthesis salva lá)
-    direct_key = f"{RESULTS_CACHE_PREFIX}{plan_id}:s2"  # step final convencional
-
-    while time.monotonic() < deadline:
-        # Verifica chave direta primeiro (mais rápido que ler o stream)
-        raw = r.get(direct_key)
+    # 1. CATCH-UP: Verifica se o worker (ou greeting) já escreveu a resposta
+    # Vamos verificar tanto s1 (saudações/simples) quanto s2 (síntese)
+    for step in ["s1", "s2"]:
+        key = f"{RESULTS_CACHE_PREFIX}{plan_id}:{step}"
+        raw = r.get(key)
         if raw:
             try:
                 data = json.loads(raw if isinstance(raw, str) else raw.decode())
-                answer = data.get("answer", "")
-                if answer:
-                    return answer
+                if data.get("answer"):
+                    return data["answer"]
             except Exception:
                 pass
 
-        # Polling no Stream
+    # 2. POLLING: Se não achou de primeira, escuta o stream
+    last_id = "0"  # Começa do zero para pegar o que acabou de ser escrito
+    while time.monotonic() < deadline:
         try:
-            results = r.xread(
-                {STREAM_FINAL_RESPONSES: last_id},
-                count=10,
-                block=int(POLL_INTERVAL_S * 1000),
-            )
+            # block=200ms evita travar a thread
+            results = r.xread({STREAM_FINAL_RESPONSES: last_id}, count=10, block=200)
             if results:
                 for _stream_key, messages in results:
                     for msg_id, fields in messages:
-                        # Normaliza bytes
-                        f = {
-                            (k.decode() if isinstance(k, bytes) else k):
-                            (v.decode() if isinstance(v, bytes) else v)
-                            for k, v in fields.items()
-                        }
+                        f = {k.decode() if isinstance(k, bytes) else k:
+                             v.decode() if isinstance(v, bytes) else v
+                             for k, v in fields.items()}
+                        
                         if f.get("plan_id") == plan_id and f.get("status") == "ok":
                             return f.get("answer", "")
-                        last_id = msg_id  # avança cursor
+                        last_id = msg_id
+            await asyncio.sleep(POLL_INTERVAL_S)
         except Exception as e:
-            logger.debug("Stream poll falhou (ignorado): %s", e)
+            logger.debug("Stream poll falhou: %s", e)
             await asyncio.sleep(POLL_INTERVAL_S)
 
-    return None  # timeout
+    return None
 
 
 def _buscar_resposta_cached(decision) -> str | None:

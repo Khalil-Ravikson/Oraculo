@@ -143,7 +143,7 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
     try:
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         response = await client.aio.models.generate_content(
-            model="gemini-2.0-flash-lite",   # modelo mais barato
+            model="gemini-3-flash-preview",   # modelo mais barato
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_ROUTER,

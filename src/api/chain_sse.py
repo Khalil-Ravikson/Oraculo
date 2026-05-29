@@ -1,14 +1,19 @@
 """
 SSE endpoint para streaming de steps da OracleChain ao frontend.
+Adaptado para o novo formato do Cognitive OS (Multi-Agente).
 GET /api/chain/stream?session_id=xxx&message=yyy
 """
 from __future__ import annotations
+
 import asyncio
 import json
 import logging
-from fastapi import APIRouter, Depends, Query
+import time
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
-from src.application.chain.oracle_chain import StepResult, get_oracle_chain
+
+# 🔥 Importamos o novo orquestrador do sistema
+from src.application.chain.cognitive_os import processar
 
 logger = logging.getLogger(__name__)
 sse_router = APIRouter(prefix="/api/chain", tags=["chain-sse"])
@@ -20,53 +25,54 @@ async def stream_chain(
     session_id: str = Query(...),
 ):
     """
-    Retorna Server-Sent Events com cada step da chain.
-    
-    Frontend consome:
-      const es = new EventSource(`/api/chain/stream?message=...&session_id=...`);
-      es.onmessage = (e) => {
-        const step = JSON.parse(e.data);
-        // step: {name, status, detail, latency_ms}
-        if (step.name === "DONE") { es.close(); }
-      };
+    Retorna Server-Sent Events com o resultado do Cognitive OS.
+    Mantém o contrato de dados que o frontend (JavaScript) espera.
     """
-    queue: asyncio.Queue[StepResult] = asyncio.Queue()
-    chain = get_oracle_chain()
-
-    # Contexto mínimo para streaming público — contexto rico vem do Redis
+    # Contexto mínimo para streaming público
     user_context = {"role": "student"}
 
     async def event_generator():
-        # Inicia a chain em background
-        task = asyncio.create_task(
-            chain.invoke(
+        t0 = time.monotonic()
+        
+        # 1. Evento de Início (Frontend mostra "Processando...")
+        yield f"data: {json.dumps({'name': 'start', 'status': 'ok', 'detail': 'Iniciando Cognitive OS', 'latency_ms': 0})}\n\n"
+        
+        try:
+            # 2. Executa a inteligência
+            result = await processar(
                 message=message,
                 session_id=session_id,
                 user_context=user_context,
-                debug_queue=queue,
+                history=""
             )
-        )
-        try:
-            while True:
-                try:
-                    step = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    payload = json.dumps({
-                        "name":       step.name,
-                        "status":     step.status,
-                        "detail":     step.detail,
-                        "latency_ms": step.latency_ms,
-                        "data":       step.data,
-                    }, ensure_ascii=False)
-                    yield f"data: {payload}\n\n"
-
-                    if step.name == "DONE":
-                        break
-                except asyncio.TimeoutError:
-                    yield "data: {\"name\": \"timeout\", \"status\": \"error\"}\n\n"
-                    break
-        finally:
-            if not task.done():
-                task.cancel()
+            
+            latencia = int((time.monotonic() - t0) * 1000)
+            
+            # 3. Evento de Resposta Pronta
+            if getattr(result, "error", None):
+                payload = {
+                    "name": "generate", 
+                    "status": "error", 
+                    "detail": result.error, 
+                    "latency_ms": latencia
+                }
+            else:
+                payload = {
+                    "name": "generate", 
+                    "status": "ok", 
+                    "detail": result.answer, 
+                    "latency_ms": latencia,
+                    "data": {"route": getattr(result, "rota", "GERAL")}
+                }
+            
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                
+        except Exception as e:
+            logger.error(f"Erro no SSE Stream: {e}")
+            yield f"data: {json.dumps({'name': 'error', 'status': 'error', 'detail': str(e), 'latency_ms': 0})}\n\n"
+            
+        # 4. Evento Finalizador (Frontend fecha a conexão SSE)
+        yield f"data: {json.dumps({'name': 'DONE', 'status': 'ok', 'detail': '', 'latency_ms': 0})}\n\n"
 
     return StreamingResponse(
         event_generator(),

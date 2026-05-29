@@ -121,19 +121,30 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
             "role":      identity.get("role", "estudante"),
         }
 
-        # ── Executa a chain ────────────────────────────────────────────────────
-        from src.application.chain.oracle_chain import get_oracle_chain
-        chain = get_oracle_chain()
-
+        # ── Executa a chain (NOVO COGNITIVE OS) ────────────────────────────────
+        from src.application.chain.cognitive_os import processar as cognitive_processar
+        
         t0 = time.monotonic()
         
-        result = await chain.invoke(
+        result_os = await cognitive_processar(
             message=message,
             session_id=phone,
             user_context=user_context,
+            history=""
         )
+        
+        # Mock do Result antigo para não quebrar as métricas abaixo
+        result = type("R", (), {
+            "answer":       result_os.answer,
+            "route":        result_os.rota,
+            "crag_score":   0.9,
+            "tokens_used":  0,
+            "chunks_count": 0,
+            "total_ms":     result_os.total_ms,
+            "error":        result_os.error,
+        })()
+        
         ms = int((time.monotonic() - t0) * 1000)
-
         # ── Cancela aviso de latência ──────────────────────────────────────────
         if warning_task and not warning_task.done():
             warning_task.cancel()

@@ -6,6 +6,8 @@ from sqlalchemy.orm import DeclarativeBase
 from src.domain.entities.enums import RoleEnum, CentroEnum, StatusMatriculaEnum,TurnoEnum
 from datetime import datetime, timezone
 from sqlalchemy.orm import relationship
+
+from sqlalchemy.dialects.postgresql import ARRAY
 class Base(DeclarativeBase):
     pass
 
@@ -204,3 +206,35 @@ def query_subarvore_sql(path_raiz: str) -> str:
           AND u.ativo = true
         ORDER BY u.path
     """
+
+
+
+
+class IntentRouter(Base):
+    __tablename__ = "intents_router"
+
+    id           = Column(Integer, primary_key=True)
+    nome         = Column(String(50), nullable=False, unique=True)
+    regex        = Column(String(400), nullable=True)
+    exemplos     = Column(ARRAY(String), default=list)
+    doc_type     = Column(String(50), nullable=True)
+    k_vector     = Column(Integer, default=6)
+    k_text       = Column(Integer, default=8)
+    ativo        = Column(Boolean, default=True)
+    criado_em    = Column(DateTime(timezone=True), server_default=func.now())
+    atualizado_em = Column(DateTime(timezone=True), onupdate=func.now())
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+
+    id            = Column(Integer, primary_key=True)
+    chunk_id      = Column(String(16), nullable=False, unique=True, index=True)
+    source        = Column(String(300), nullable=False, index=True)
+    titulo        = Column(String(500), nullable=True)
+    doc_type      = Column(String(50), nullable=True, index=True)
+    chunk_index   = Column(Integer, nullable=False)
+    chars         = Column(Integer, nullable=True)
+    parser_usado  = Column(String(50), nullable=True)
+    chunker_usado = Column(String(50), nullable=True)
+    label         = Column(String(300), nullable=True)
+    indexado_em   = Column(DateTime(timezone=True), server_default=func.now())
