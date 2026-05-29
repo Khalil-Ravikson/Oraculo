@@ -345,14 +345,25 @@ async def _handle_message(**kwargs) -> None:
         except Exception as e:
             logger.warning("⚠️  enviar_digitando falhou: %s", e)
 
-        # ── OracleChain ───────────────────────────────────────────────────────
-        from src.application.chain.oracle_chain import get_oracle_chain
-        chain  = get_oracle_chain()
-        result = await chain.invoke(
-            message=text,  # Envia o texto limpo ou o original recebido
+        # ── CognitiveOS: ───────────────────────────────────────────────────────
+        from src.application.chain.cognitive_os import processar as cognitive_processar
+        result_os = await cognitive_processar(
+            message=text,
             session_id=sender,
             user_context=user_context,
+            history="",   # carregado internamente pelo OS
         )
+        # Adapta para a interface esperada pelo resto do código:
+        result = type("R", (), {
+            "answer":       result_os.answer,
+            "route":        result_os.rota,
+            "crag_score":   0.0,
+            "tokens_used":  0,
+            "chunks_count": 0,
+            "total_ms":     result_os.total_ms,
+            "error":        result_os.error,
+        })()
+
 
         answer = result.answer or ""
         if answer and not result.error:

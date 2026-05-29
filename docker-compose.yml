@@ -1,4 +1,4 @@
-# docker-compose.yml — Oráculo UEMA v6.2 (Dev/Stable) - Langfuse V2 (Empresa / WSL)
+# docker-compose.yml — Oráculo UEMA v6.2 (Dev/Stable) 
 networks:
   oraculo_net:
     driver: bridge
@@ -9,7 +9,6 @@ networks:
 volumes:
   postgres_data:
   redis_data:
-  langfuse_db_data:
   grafana_data:
   prometheus_data:
 
@@ -19,9 +18,6 @@ x-app-env: &app-env
     # Usando IPs fixos para blindar contra falhas de DNS do WSL
     REDIS_URL: "redis://172.18.0.50:6379/0"
     DATABASE_URL: "postgresql+asyncpg://user:${POSTGRES_PASSWORD}@172.18.0.40:5432/oraculo"
-    LANGFUSE_HOST: "http://langfuse:3000"
-    LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY}"
-    LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY}"
     LLAMA_CLOUD_API_KEY: "${LLAMA_CLOUD_API_KEY}"
 
 x-restart: &restart
@@ -56,6 +52,11 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d oraculo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis/redis-stack:latest
@@ -70,6 +71,11 @@ services:
       REDIS_ARGS: "--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru"
     ports:
       - "8001:8001"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis_exporter:
     image: oliver006/redis_exporter:latest
@@ -112,38 +118,6 @@ services:
     networks:
       - oraculo_net
 
-  # ── Langfuse V2 (Estável, sem ClickHouse) ──
-  langfuse_db:
-    image: postgres:16-alpine
-    container_name: oraculo_langfuse_db
-    <<: [*restart, *logging]
-    networks:
-      - oraculo_net
-    environment:
-      POSTGRES_USER: langfuse
-      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse_pass}
-      POSTGRES_DB: langfuse
-      PGDATA: /var/lib/postgresql/data/pgdata
-    volumes:
-      - langfuse_db_data:/var/lib/postgresql/data
-
-  langfuse:
-    image: langfuse/langfuse:2
-    container_name: oraculo_langfuse
-    <<: [*restart, *logging]
-    ports:
-      - "3000:3000"
-    networks:
-      - oraculo_net
-    environment:
-      DATABASE_URL: "postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse_pass}@langfuse_db:5432/langfuse"
-      NEXTAUTH_SECRET: "${LANGFUSE_SECRET:-mynextauthsecret_v2}"
-      SALT: "${LANGFUSE_SALT:-salt-dev}"
-      NEXTAUTH_URL: "http://localhost:3000"
-      TELEMETRY_ENABLED: "false"
-    depends_on:
-      - langfuse_db
-
   # ── Aplicação Principal Oráculo ──
   migration:
     <<: [*build, *app-env]
@@ -153,7 +127,7 @@ services:
       - oraculo_net
     restart: "no"
     volumes:
-      - ./migrations:/app/migrations  # 👈 E AQUI!
+      - ./migrations:/app/migrations
 
   api:
     <<: [*build, *restart, *logging, *app-env]
@@ -187,14 +161,42 @@ services:
     networks:
       - oraculo_net
 
+  worker_rag:
+    <<: [*build, *restart, *logging, *app-env]
+    container_name: oraculo_worker_rag
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker",
+              "--loglevel=info", "--concurrency=2", "--queues=rag_search"]
+    volumes:
+      - ./src:/app/src
+      - ./dados:/app/dados
+      - ./dados/tmp:/tmp/oraculo_cv
+    networks:
+      - oraculo_net
+
+  worker_synthesis:
+    <<: [*build, *restart, *logging, *app-env]
+    container_name: oraculo_worker_synthesis
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker",
+              "--loglevel=info", "--concurrency=2", "--queues=synthesis"]
+    volumes:
+      - ./src:/app/src
+      - ./dados:/app/dados
+      - ./dados/tmp:/tmp/oraculo_cv
+    networks:
+      - oraculo_net
+
   beat:
     <<: [*build, *restart, *logging, *app-env]
     container_name: oraculo_beat
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "beat",
+              "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
     volumes:
       - ./src:/app/src
+      - ./dados/tmp:/tmp/oraculo_cv
+      - ./dados:/app/dados
     networks:
       - oraculo_net
+
   # ── EVOLUTION API v2.3.7 (Build Local do GitHub) ──
   evolution_api:
     build:

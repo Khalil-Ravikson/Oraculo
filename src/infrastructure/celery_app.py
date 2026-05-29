@@ -49,20 +49,20 @@ celery_app.conf.update(
         "src.application.tasks",
         'src.application.tasks.ingestion_tasks', # <--- ADICIONE ESTA LINHA!
         "src.application.tasks.tasks_admin",
+        "src.application.workers.worker_rag_search",    # ← NOVO
+        "src.application.workers.worker_synthesis",     # ← NOVO
+        "src.application.tasks.beat_nightly_memory",    # ← NOVO
+
     ],
 
     # ── Beat Schedule ─────────────────────────────────────────────────────────
     beat_schedule = {
-        "verificar_prazos_dias_uteis": {
-            "task":     "verificar_e_notificar_prazos",
-            "schedule": crontab(hour=8, minute=0, day_of_week="1-5"),
-            "options":  {"queue": "notificacoes"},
+        "nightly_memory_sync": {
+            "task":     "beat_nightly_memory_sync",
+            "schedule": crontab(hour=2, minute=0),
+            "options":  {"queue": "default"},
         },
-        "verificar_prazos_fim_semana": {
-            "task":     "verificar_e_notificar_prazos",
-            "schedule": crontab(hour=9, minute=0, day_of_week="0,6"),
-            "options":  {"queue": "notificacoes"},
-        },
+
         # ── Sprint 1: recovery periódico (opcional, defensivo) ────────────────
         # Verifica XPENDING a cada 5 minutos — garante zero perda mesmo se o
         # signal worker_ready falhar por algum motivo no startup.
@@ -81,6 +81,10 @@ celery_app.conf.update(
         "ingerir_documento_whatsapp":   {"queue": "admin"},
         "executar_comando_admin":       {"queue": "admin"},
         "stream_recovery":              {"queue": "default"},
+        "worker_rag_search":          {"queue": "rag_search"},
+        "worker_synthesis":           {"queue": "synthesis"},
+        "beat_nightly_memory_sync":   {"queue": "default"},
+
     },
 
     beat_scheduler          = "celery.beat:PersistentScheduler",

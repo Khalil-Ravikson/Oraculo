@@ -3,6 +3,7 @@
 .env.local
 !.env.example
 .env.*
+.venv
 
 # Sessões do WhatsApp e Dados do Banco
 waha-data/

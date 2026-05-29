@@ -27,7 +27,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 # Metadata da migration
 revision = "0002_observability_tables"
-down_revision = "0001"   # ajuste para o revision anterior real
+down_revision = None   # ajuste para o revision anterior real
 branch_labels = None
 depends_on = None
 

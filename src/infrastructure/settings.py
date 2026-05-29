@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     GEMINI_TEMP:       float = 0.2
     GEMINI_MAX_TOKENS: int   = 1024
 
+
+    # Nightly Memory flag
+    ENABLE_NIGHTLY_MEMORY: bool = False
+    
+    # Workers config
+    RAG_SEARCH_TIMEOUT_S:  float = 10.0
+    SYNTHESIS_TIMEOUT_S:   float = 12.0
+    COGNITIVE_OS_TIMEOUT_S: float = 15.0
+
     # ── WhatsApp ──────────────────────────────────────────────────
     EVOLUTION_BASE_URL:      str = ""
     EVOLUTION_API_KEY:       str = ""
