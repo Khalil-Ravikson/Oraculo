@@ -251,58 +251,50 @@ async def chat_send(request: Request, data: WebChatRequest):
 
 @router.get("/chat/stream")
 async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
-    """SSE: executa o Cognitive OS e streama o resultado simulado."""
+    """Endpoint de SSE para o Chat do Hub."""
     
-    if not msg or not thread_id:
-        return JSONResponse({"erro": "msg e thread_id obrigatórios"}, status_code=400)
+    if not msg:
+        return JSONResponse({"error": "Mensagem obrigatória"}, status_code=400)
 
     async def _generator():
-        import time
-        import json
         try:
             from src.application.chain.cognitive_os import processar
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'msg': f'Import Error: {str(e)}'})}\n\n"
-            return
-
-        user_context = {"nome": "Admin Simulador", "role": "admin", "is_admin": True}
-        
-        # 1. Avisa o frontend que a IA começou a pensar
-        yield f"data: {json.dumps({'type': 'start', 'hitl': False})}\n\n"
-        yield f"data: {json.dumps({'type': 'step', 'name': 'processando', 'status': 'running', 'detail': 'Enviando para o Cognitive OS...', 'ms': 0})}\n\n"
-
-        try:
-            t0 = time.monotonic()
             
-            # 2. Chama a nova arquitetura
+            # 1. Envia o primeiro passo para o painel de debug
+            yield f"data: {json.dumps({'type': 'step', 'detail': 'Iniciando Orquestrador Cognitive OS'})}\n\n"
+            await asyncio.sleep(0.5) # Simula um pequeno tempo de reflexão
+            
+            # 2. Informa o planejamento
+            yield f"data: {json.dumps({'type': 'step', 'detail': 'A analisar intenção e gerar plano de ação...'})}\n\n"
+            
+            # 3. Dispara a lógica pesada
+            # Nota: O ideal seria o cognitive_os usar Pub/Sub do Redis para emitir logs,
+            # mas enquanto isso não está pronto, mandamos os logs básicos por aqui.
             result = await processar(
                 message=msg, 
                 session_id=thread_id, 
-                user_context=user_context,
+                user_context={"nome": "Admin", "role": "admin", "is_admin": True},
                 history=""
             )
             
-            ms = int((time.monotonic() - t0) * 1000)
+            # 4. Informa a conclusão do processamento
+            yield f"data: {json.dumps({'type': 'step', 'detail': 'Processamento concluído. A gerar resposta final...'})}\n\n"
             
-            # 3. Avisa que o processamento terminou
-            yield f"data: {json.dumps({'type': 'step', 'name': 'processando', 'status': 'ok', 'detail': 'Concluído', 'ms': ms})}\n\n"
-
-            # 4. Entrega a resposta final
             if getattr(result, "error", None):
-                yield f"data: {json.dumps({'type': 'error', 'msg': str(result.error)[:200]})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'msg': str(result.error)})}\n\n"
             else:
-                yield f"data: {json.dumps({'type': 'response', 'text': getattr(result, 'answer', ''), 'crag': 0.9})}\n\n"  
+                yield f"data: {json.dumps({'type': 'response', 'text': getattr(result, 'answer', '')})}\n\n"
+                
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'msg': str(e)[:200]})}\n\n"
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'msg': str(e)})}\n\n"
+        finally:
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-        # 5. Fecha a conexão com o frontend
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-    return StreamingResponse(
-        _generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    # Não esqueça o return!
+    return StreamingResponse(_generator(), media_type="text/event-stream")
+            
 @router.get("/audit/data")
 async def audit_data(request: Request):
     """Endpoint REST para alimentar a tabela de Auditoria."""

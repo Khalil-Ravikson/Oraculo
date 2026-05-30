@@ -28,25 +28,44 @@ async function sendMessage() {
     const msg = input.value.trim();
     if (!msg) return;
 
-    // UI Feedback
+    // Coloca a msg na tela
     document.getElementById('chat-messages').innerHTML += `<div class="msg user">${msg}</div>`;
     input.value = '';
+    
     const monitor = document.getElementById('steps-container');
-    monitor.innerHTML = '<div>⚙️ Iniciando plano...</div>';
+    monitor.innerHTML = '<div style="color: blue;">[Iniciando Orquestração...]</div>';
 
     const source = new EventSource(`/hub/chat/stream?msg=${encodeURIComponent(msg)}&thread_id=${THREAD_ID}`);
     
     source.onmessage = (event) => {
-        const d = JSON.parse(event.data);
+        console.log("Chegou do backend:", event.data); // Aperte F12 para ver a mágica aqui!
         
-        if (d.type === 'step') {
-            monitor.innerHTML += `<div>⚙️ ${d.detail}</div>`;
-        }
-        if (d.type === 'response') {
-            document.getElementById('chat-messages').innerHTML += `<div class="msg bot">${d.text.replace(/\n/g, '<br>')}</div>`;
-        }
-        if (d.type === 'done') {
-            source.close();
+        try {
+            const d = JSON.parse(event.data);
+            
+            // Adiciona logs no painel da direita
+            if (d.type === 'step' || d.type === 'start') {
+                monitor.innerHTML += `<div style="margin-top: 4px;">⚙️ ${d.detail || d.name || 'Processando...'}</div>`;
+            }
+            
+            // Adiciona resposta final na esquerda
+            if (d.type === 'response') {
+                const text = d.text ? d.text.replace(/\n/g, '<br>') : "⚠️ Resposta vazia gerada pelo Worker.";
+                document.getElementById('chat-messages').innerHTML += `<div class="msg bot">${text}</div>`;
+            }
+            
+            // Tratamento de ERRO visível
+            if (d.type === 'error') {
+                monitor.innerHTML += `<div style="color: red; margin-top: 4px;">❌ ERRO: ${d.msg}</div>`;
+                document.getElementById('chat-messages').innerHTML += `<div class="msg bot" style="border: 1px solid red;">❌ Falha no sistema: Verifique o painel lateral.</div>`;
+            }
+
+            if (d.type === 'done') {
+                monitor.innerHTML += `<div style="color: green; margin-top: 4px;">✅ Fluxo encerrado.</div>`;
+                source.close();
+            }
+        } catch(e) {
+            console.error("Falha no JSON do SSE:", e);
         }
     };
 }

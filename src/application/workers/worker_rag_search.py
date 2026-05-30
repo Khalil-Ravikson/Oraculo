@@ -14,6 +14,7 @@ import time
 from prometheus_client import Counter, Histogram
 
 from src.infrastructure.celery_app import celery_app
+from src.application.workers.registry import register 
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,10 @@ STREAM_MAXLEN        = 5_000
     default_retry_delay=5,
     queue="rag_search",
 )
+
+
+@register("rag_search") # NOVO DECORADOR
+@celery_app.task(name="worker_rag_search", bind=True, max_retries=3)
 def worker_rag_search_task(self, event: dict) -> dict:
     return asyncio.run(_executar(self, event))
 

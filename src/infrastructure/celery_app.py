@@ -52,6 +52,15 @@ celery_app.conf.update(
         "src.application.workers.worker_rag_search",    # ← NOVO
         "src.application.workers.worker_synthesis",     # ← NOVO
         "src.application.tasks.beat_nightly_memory",    # ← NOVO
+        "src.application.workers.worker_audio_to_text",
+    "src.application.workers.worker_text_to_audio",
+    "src.application.workers.worker_media_download",
+    "src.application.workers.worker_graph_extractor",
+    "src.application.workers.worker_db_connector",
+    "src.application.workers.worker_memory_manager",
+    "src.application.workers.worker_reranker",
+    "src.application.workers.worker_action",
+
 
     ],
 
@@ -84,6 +93,15 @@ celery_app.conf.update(
         "worker_rag_search":          {"queue": "rag_search"},
         "worker_synthesis":           {"queue": "synthesis"},
         "beat_nightly_memory_sync":   {"queue": "default"},
+        "worker_audio_to_text":   {"queue": "media"},
+"worker_text_to_audio":   {"queue": "media"},
+"worker_ytb_download":    {"queue": "media"},
+"worker_insta_download":  {"queue": "media"},
+"worker_graph_extractor": {"queue": "graph"},
+"worker_db_connector":    {"queue": "default"},
+"worker_memory_manager":  {"queue": "default"},
+"worker_reranker":        {"queue": "rag_search"},
+"worker_action":          {"queue": "default"},
 
     },
 

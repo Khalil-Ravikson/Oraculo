@@ -1,14 +1,15 @@
 """
-application/tasks/process_message_task.py — v5 (LangChain Runnables)
+application/tasks/process_message_task.py — v6 (Cognitive OS)
 =====================================================================
 
 MUDANÇA PRINCIPAL:
-  ANTES: graph.invoke(state, config) — LangGraph opaco, logs silenciosos
-  DEPOIS: chain.invoke(message, session_id, ctx) — pipeline linear, debug completo
+  Migração completa para o Cognitive OS (Multi-agente).
+  O antigo OracleChain (LangChain) foi totalmente removido.
 
-O resto do fluxo é idêntico:
+Fluxo:
+  - Validação de Identidade (Porteiro)
   - Redis Lock (anti-spam)
-  - Mensagem de aviso após 3s
+  - Chamada ao Cognitive OS
   - XACK no Redis Stream
   - Recovery de XPENDING no startup
 """
@@ -35,7 +36,7 @@ _WARNING_MSG   = "⏳ Processando, aguarde um instante..."
     queue="default",
 )
 def processar_mensagem_task(self, identity: dict, stream_id: str = "") -> None:
-    """Entry point Celery. Usa OracleChain (LangChain) para gerar resposta."""
+    """Entry point Celery. Usa Cognitive OS para gerar resposta."""
     asyncio.run(_processar_async(self, identity, stream_id))
 
 
@@ -43,9 +44,6 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
     phone   = identity.get("user_id") or identity.get("sender_phone", "unknown")
     chat_id = identity.get("chat_id", "")
     message = identity.get("body", "")
-
-
-
 
     # ── Validação de identidade (Porteiro) ────────────────────────────────────
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -57,17 +55,21 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
 
     if not identidade:
         logger.info("🚫 [TASK] Usuário não cadastrado: %s", phone[-6:])
+        from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
+        gateway = EvolutionAdapter()
         await gateway.enviar_mensagem(
             chat_id,
             "👋 Para usar o Oráculo, você precisa estar cadastrado. "
             "Entre em contato com a secretaria ou CTIC."
         )
-        success = True
+        if stream_id:
+            _xack_stream(stream_id)
         return
 
     if identidade.status != "ativo":
         logger.info("🚫 [TASK] Usuário inativo: %s | status=%s", phone[-6:], identidade.status)
-        success = True
+        if stream_id:
+            _xack_stream(stream_id)
         return
 
     # Monta user_context rico a partir da identidade
@@ -77,6 +79,8 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
 
     if not message.strip():
         logger.debug("⏭️  Mensagem vazia ignorada para %s", phone)
+        if stream_id:
+            _xack_stream(stream_id)
         return
 
     # ── Lock Redis ─────────────────────────────────────────────────────────────
@@ -97,9 +101,9 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
 
         # ── Aviso de latência após 3s ──────────────────────────────────────────
         warning_task = asyncio.create_task(
-            _aviso_latencia(gateway, chat_id, _WARNING_DELAY)
+            _aviso_latencia(gateway, chat_id, phone, _WARNING_DELAY)
         )
-        result = await chain.invoke(...)
+        
         # ── Verifica bloqueio admin ────────────────────────────────────────────
         if r_text.get("admin:maintenance_mode") == "1":
             if not identity.get("is_admin"):
@@ -121,7 +125,7 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
             "role":      identity.get("role", "estudante"),
         }
 
-        # ── Executa a chain (NOVO COGNITIVE OS) ────────────────────────────────
+        # ── Executa a chain (COGNITIVE OS) ─────────────────────────────────────
         from src.application.chain.cognitive_os import processar as cognitive_processar
         
         t0 = time.monotonic()
@@ -133,7 +137,7 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
             history=""
         )
         
-        # Mock do Result antigo para não quebrar as métricas abaixo
+        # Adaptador (Mock) para manter a compatibilidade com a função _salvar_metrica
         result = type("R", (), {
             "answer":       result_os.answer,
             "route":        result_os.rota,
@@ -145,6 +149,7 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
         })()
         
         ms = int((time.monotonic() - t0) * 1000)
+        
         # ── Cancela aviso de latência ──────────────────────────────────────────
         if warning_task and not warning_task.done():
             warning_task.cancel()
@@ -154,12 +159,11 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
             await gateway.enviar_mensagem(chat_id, result.answer)
             success = True
             logger.info(
-                "✅ [TASK] Resposta enviada | phone=%s | %dms | route=%s | "
-                "crag=%.3f | tokens=%d",
-                phone[-6:], ms, result.route, result.crag_score, result.tokens_used,
+                "✅ [TASK] Resposta enviada | phone=%s | %dms | route=%s",
+                phone[-6:], ms, result.route
             )
         else:
-            logger.warning("⚠️  [TASK] Chain retornou resposta vazia para %s", phone[-6:])
+            logger.warning("⚠️  [TASK] Sistema retornou resposta vazia para %s", phone[-6:])
             success = True   # não falha — pode ser HITL pendente
 
         # ── Registra métricas no Redis ─────────────────────────────────────────
@@ -191,6 +195,7 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
             pass
     if success and stream_id:
         _xack_stream(stream_id)
+
 
 # Em process_message_task.py — _aviso_latencia()
 async def _aviso_latencia(gateway, chat_id: str, number: str, delay: float) -> None:
@@ -276,7 +281,7 @@ async def _handle_message(**kwargs) -> None:
     from src.application.routing.message_router import MessageRouter, DispatchTarget
     from src.application.routing.command_registry import CommandContext, dispatch_admin, dispatch_public
     from src.application.routing.registration_funnel import RegistrationFunnel
-    from src.infrastructure.settings import settings  # 🔥 Importado para ler o .env real
+    from src.infrastructure.settings import settings 
 
     r          = get_redis_text()
     gateway    = EvolutionAdapter()
@@ -286,10 +291,9 @@ async def _handle_message(**kwargs) -> None:
     sender     = kwargs["sender_jid"]
     remote_jid = kwargs["remote_jid"]
     text       = kwargs["text"]
-    chat_id    = remote_jid  # Evolution usa remoteJid para envio
+    chat_id    = remote_jid  
 
     # 🛑 FILTRO DE ENTRADA: Se não for o grupo exclusivo do .env, ignora na hora
-    # Isso limpa e salva a fila do seu Celery dos grupos de promoção
     if remote_jid != settings.ALLOWED_GROUP_ID:
         return
 
@@ -301,7 +305,6 @@ async def _handle_message(**kwargs) -> None:
     is_registered  = user_data is not None
     in_reg_mode    = r.get(f"register:mode:{sender}") == "1"
     
-    # 🔥 CORREÇÃO: Puxa o grupo permitido direto do Settings configurado no .env
     allowed_group  = settings.ALLOWED_GROUP_ID
 
     decision = router.route(
@@ -311,7 +314,6 @@ async def _handle_message(**kwargs) -> None:
         allowed_group_jid=allowed_group, remote_jid=remote_jid,
     )
 
-    # Força o target para LLM se estiver no grupo homologado para garantir o disparo
     if decision.target == DispatchTarget.IGNORE:
         decision.target = DispatchTarget.LLM
 
@@ -338,19 +340,18 @@ async def _handle_message(**kwargs) -> None:
         await gateway.enviar_mensagem(chat_id, reply)
         return
     
-    # ── LLM (OracleChain) ─────────────────────────────────────────────────────
+    # ── LLM (COGNITIVE OS) ────────────────────────────────────────────────────
     if decision.target == DispatchTarget.LLM:
-        # 🔥 FALLBACK: Se o usuário não estiver no banco, pegamos o pushName do WhatsApp para não quebrar
         user_context = {
             "nome":  user_data.get("nome", "") if user_data else kwargs.get("push_name", "Estudante"),
-            "curso": user_data.get("curso", "") if user_data else "UEMA",
+            "curso": user_data.get("curso", "") if user_data else "Instituição",
             "role":  user_data.get("role", "student") if user_data else "guest",
         }
 
         # ── Humanização: simula "digitando..." no grupo ───────────────────────
         try:
             await gateway.enviar_digitando(
-                number=remote_jid,   # grupo: usar remote_jid diretamente
+                number=remote_jid,   
                 duration_ms=4000,
             )
         except Exception as e:
@@ -362,9 +363,10 @@ async def _handle_message(**kwargs) -> None:
             message=text,
             session_id=sender,
             user_context=user_context,
-            history="",   # carregado internamente pelo OS
+            history="",   
         )
-        # Adapta para a interface esperada pelo resto do código:
+        
+        # Adaptador (Mock) para manter a compatibilidade
         result = type("R", (), {
             "answer":       result_os.answer,
             "route":        result_os.rota,
@@ -381,7 +383,6 @@ async def _handle_message(**kwargs) -> None:
             answer += "\n\n_Avalie: !1 (péssimo) a !5 (perfeito)_"
 
         if answer:
-            # Envia diretamente para o chat_id do grupo homologado
             await gateway.enviar_mensagem(chat_id, answer)
             logger.info("✅ [CELERY WORKER] Resposta da IA enviada com sucesso para o grupo!")
 

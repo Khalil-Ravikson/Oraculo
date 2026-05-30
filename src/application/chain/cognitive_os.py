@@ -161,51 +161,23 @@ async def processar(
 
 
 async def _despachar_workers(plan) -> None:
-    """
-    Despacha cada step do DAG para o Celery respeitando a ordem de dependências.
-    Steps sem dependências são despachados imediatamente (em paralelo).
-    Steps com dependências são despachados após armazenar contexto no Redis.
-    """
-    from src.application.workers.worker_rag_search import worker_rag_search_task
-    from src.application.workers.worker_synthesis import worker_synthesis_task
-
-    plan_dict = plan.to_dict()
-
+    from src.application.workers.registry import dispatch
+    
     for step in plan.steps:
-        step_id   = step["id"]
-        worker    = step["worker"]
-        args      = step.get("args", {})
-        depends_on = step.get("depends_on", [])
-
         event = {
             "plan_id":      plan.plan_id,
             "session_id":   plan.session_id,
-            "step_id":      step_id,
-            "depends_on":   depends_on,
+            "step_id":      step["id"],
+            "depends_on":   step.get("depends_on", []),
             "plan_context": plan.context,
-            **args,
-            # query sempre presente para os workers
-            "query": plan.context.get("query", ""),
+            "query":        plan.context.get("query", ""),
+            **step.get("args", {}),
         }
+        # A mágica acontece aqui: uma única linha substitui os if/else!
+        dispatch(step["worker"], event)
 
-        if worker == "rag_search":
-            # Despacha imediatamente (sem dependências em geral)
-            worker_rag_search_task.apply_async(args=[event], queue="rag_search")
-            logger.debug("📤 [OS] Despachado rag_search step=%s plan=%s", step_id, plan.plan_id[:8])
 
-        elif worker == "synthesis":
-            # Synthesis aguarda internamente as deps via polling Redis
-            worker_synthesis_task.apply_async(args=[event], queue="synthesis")
-            logger.debug("📤 [OS] Despachado synthesis step=%s plan=%s", step_id, plan.plan_id[:8])
-
-        elif worker == "greeting":
-            # Greeting é rápido — executa inline sem Celery
-            _executar_greeting(plan)
-
-        elif worker == "crud_confirm":
-            # HITL — salva no Redis e retorna mensagem de confirmação
-            _iniciar_crud_hitl(plan, args)
-
+        
 async def _aguardar_resposta_final(plan_id: str, timeout: float) -> str | None:
     """
     Faz polling no Redis Stream, mas verifica primeiro se a resposta já está lá (Catch-up).
@@ -277,7 +249,7 @@ def _executar_greeting(plan) -> None:
         key = f"{RESULTS_CACHE_PREFIX}{plan.plan_id}:s1"
         r.setex(key, RESULTS_TTL,
                 json.dumps({"answer": random.choice(saudacoes), "status": "ok"},
-                           ensure_ascii=False))
+                ensure_ascii=False))
         # Publica também no stream final
         r.xadd(
             STREAM_FINAL_RESPONSES,

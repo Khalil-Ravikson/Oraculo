@@ -26,7 +26,7 @@ import logging
 import time
 from dataclasses import dataclass
 from typing import Any
-
+import asyncio # Garanta que isso está no topo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -125,6 +125,7 @@ class IntentSeederService:
                 continue
 
             try:
+                await asyncio.sleep(8.0)
                 vetores = await self._embeddings_batch(
                     embedding_model, intent.exemplos
                 )

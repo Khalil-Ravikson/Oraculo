@@ -83,43 +83,10 @@ async def rotear(
     t0 = time.monotonic()
     ctx = user_context or {}
 
-    # ── Passo A: Semantic Cache ────────────────────────────────────────────────
-    try:
-        from src.infrastructure.cache.semantic_cache import get_semantic_cache
-        cache = get_semantic_cache()
-
-        # Tenta exact match primeiro (hash)
-        cached = await cache.get(query, rota=None)  # None = qualquer rota
-        if cached:
-            layer = cached.get("cache_layer", "exact")
-            _CACHE_HIT.labels(layer=layer).inc()
-            ms = int((time.monotonic() - t0) * 1000)
-            _LATENCY.observe(ms)
-            logger.debug("🗃️  [ROUTER] Cache HIT (%s) | query='%.40s'", layer, query)
-            return RouterDecision(
-                rota=cached["rota"],
-                confianca=cached.get("confianca", 1.0),
-                motivo=f"cache_{layer}",
-                cache_hit=True,
-                cache_layer=layer,
-                latencia_ms=ms,
-                dag_hint=_dag_hint_para_rota(cached["rota"]),
-            )
-    except Exception as e:
-        logger.warning("⚠️  [ROUTER] SemanticCache.get falhou (ignorado): %s", e)
+    # APAGAMOS O CACHE PROBLEMÁTICO AQUI! Vai direto para o Flash.
 
     # ── Passo B: Gemini Flash classifica ─────────────────────────────────────
     decision = await _classificar_com_flash(query, ctx)
-
-    # Salva no cache para próximas requisições iguais/semelhantes
-    try:
-        await cache.set(
-            query=query,
-            rota=decision.rota,
-            resposta=json.dumps({"rota": decision.rota, "confianca": decision.confianca}),
-        )
-    except Exception as e:
-        logger.debug("Cache.set falhou (ignorado): %s", e)
 
     ms = int((time.monotonic() - t0) * 1000)
     _LATENCY.observe(ms)
@@ -133,17 +100,13 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
     import google.genai as genai
     from google.genai import types
 
-    # Contexto compacto do aluno para evitar ambiguidades
-    ctx_str = ""
-    if ctx.get("curso"):
-        ctx_str = f"Aluno de {ctx['curso']}"
-
+    ctx_str = f"Aluno de {ctx['curso']}" if ctx.get("curso") else ""
     prompt = f"{ctx_str}\nMensagem: \"{query[:300]}\"\nClassifique:"
 
     try:
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         response = await client.aio.models.generate_content(
-            model="gemini-3-flash-preview",   # modelo mais barato
+            model="gemini-3.1-flash-lite-preview",   # 🔥 MODELO CORRIGIDO AQUI
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_ROUTER,
@@ -159,22 +122,27 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
             _FLASH_TOKENS.labels(direction="input").inc(usage.prompt_token_count or 0)
             _FLASH_TOKENS.labels(direction="output").inc(usage.candidates_token_count or 0)
 
-        data = json.loads(response.text or "{}")
+        # 🔥 CORREÇÃO DO JSON MARKDOWN (Evita o Expecting value line 1 column 1)
+        texto = response.text.strip()
+        if texto.startswith("```json"):
+            texto = texto[7:-3].strip()
+        elif texto.startswith("```"):
+            texto = texto[3:-3].strip()
+
+        data = json.loads(texto or "{}")
+        
         rota = data.get("rota", "GERAL").upper()
         if rota not in ROTAS_VALIDAS:
             rota = "GERAL"
+            
         confianca = float(data.get("confianca", 0.5))
         motivo = str(data.get("motivo", ""))[:60]
 
         logger.info("🧭 [ROUTER] Flash: rota=%s conf=%.2f | '%.40s'", rota, confianca, query)
 
         return RouterDecision(
-            rota=rota,
-            confianca=confianca,
-            motivo=motivo,
-            cache_hit=False,
-            cache_layer="miss",
-            latencia_ms=0,  # preenchido pelo caller
+            rota=rota, confianca=confianca, motivo=motivo,
+            cache_hit=False, cache_layer="miss", latencia_ms=0,
             dag_hint=_dag_hint_para_rota(rota),
         )
 
@@ -182,14 +150,11 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
         logger.error("❌ [ROUTER] Flash falhou, usando fallback regex: %s", e)
         rota = _regex_fallback(query)
         return RouterDecision(
-            rota=rota,
-            confianca=0.4,
-            motivo=f"regex_fallback: {type(e).__name__}",
-            cache_hit=False,
-            cache_layer="miss",
-            latencia_ms=0,
+            rota=rota, confianca=0.4, motivo=f"regex_fallback: {type(e).__name__}",
+            cache_hit=False, cache_layer="miss", latencia_ms=0,
             dag_hint=_dag_hint_para_rota(rota),
         )
+
 
 
 def _regex_fallback(query: str) -> str:

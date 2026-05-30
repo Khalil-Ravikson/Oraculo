@@ -185,6 +185,22 @@ services:
     networks:
       - oraculo_net
 
+  worker_media:
+    <<: [*build, *restart, *logging, *app-env]
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker",
+              "--loglevel=info", "--concurrency=2", "--queues=media"]
+    volumes: ["./src:/app/src", "./dados:/app/dados", "/tmp:/tmp"]
+    networks: [oraculo_net]
+
+  worker_graph:
+    <<: [*build, *restart, *logging, *app-env]
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker",
+              "--loglevel=info", "--concurrency=1", "--queues=graph"]
+    volumes: ["./src:/app/src", "./dados:/app/dados"]
+    networks: [oraculo_net]
+
+
+
   beat:
     <<: [*build, *restart, *logging, *app-env]
     container_name: oraculo_beat
