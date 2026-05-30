@@ -100,7 +100,13 @@ async def _startup(settings) -> None:
         # Singleton de Embeddings (Google Gemini)
         _ = get_embeddings().embed_query("teste de aquecimento")
         logger.info("✅ Modelo de Embeddings carregado")
-        
+        # 🔥 ADICIONE ESTE BLOCO AQUI PARA O PRÉ-AQUECIMENTO DOS WORKERS 👇
+        logger.info("⚙️  Fazendo Autodiscovery dos Workers do Cognitive OS...")
+        from src.application.workers.registry import _autodiscover_workers, available
+        _autodiscover_workers()
+        logger.info("✅ Workers carregados na RAM: %s", available())
+
+
         # A OracleChain não existe mais! O Cognitive OS é invocado sob demanda via Celery.
         logger.info("✅ Arquitetura Multi-Agente (Cognitive OS) pronta")
     except Exception as exc:

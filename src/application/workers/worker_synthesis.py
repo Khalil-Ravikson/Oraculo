@@ -28,6 +28,7 @@ import time
 
 from prometheus_client import Counter, Histogram
 
+from src.application.workers.registry import register
 from src.infrastructure.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ Se a informação não estiver no contexto: diga "Não encontrei essa informaç�
 NUNCA invente datas, números ou emails.
 Use *negrito* para dados importantes. Máximo 3 parágrafos. Seja conciso."""
 
-
+@register("synthesis")
 @celery_app.task(
     name="worker_synthesis",
     bind=True,

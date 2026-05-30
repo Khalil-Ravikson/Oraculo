@@ -20,7 +20,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-
+import re
 from prometheus_client import Counter, Histogram
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,16 @@ _LATENCY = Histogram(
 ROTAS_VALIDAS = frozenset({
     "CALENDARIO", "EDITAL", "CONTATOS", "WIKI", "CRUD", "GREETING", "GERAL"
 })
+
+_RE_GREETING = re.compile(
+    r'^(oi|olá|ola|bom\s?dia|boa\s?tarde|boa\s?noite|hey|hi|hello|'
+    r'tudo\s?bem|e\s?aí|eai|opa|obrigad[ao]|valeu|vlw|tmj|ok|certo|👍|🙏|perfeito)\s*[!.?]*$',
+    re.I | re.UNICODE,
+    )
+
+def _regex_rapido(query: str) -> str | None:
+    """Fast-path regex ANTES do Flash — economiza ~50 tokens por saudação."""
+    return "GREETING" if _RE_GREETING.match(query.strip()) else None
 
 # ── Prompt zero-shot para Flash ────────────────────────────────────────────────
 _SYSTEM_ROUTER = """Você é um classificador de intenções para o Oráculo UEMA.
@@ -77,17 +87,23 @@ async def rotear(
     session_id: str,
     user_context: dict | None = None,
 ) -> RouterDecision:
-    """
-    Entry point do router. Thread-safe, stateless.
-    """
     t0 = time.monotonic()
     ctx = user_context or {}
 
-    # APAGAMOS O CACHE PROBLEMÁTICO AQUI! Vai direto para o Flash.
+    # ── Fast-path: saudações não precisam de LLM ─────────
+    rota_rapida = _regex_rapido(query)
+    if rota_rapida:
+        ms = int((time.monotonic() - t0) * 1000)
+        _LATENCY.observe(ms)
+        _CACHE_HIT.labels(layer="regex").inc()
+        return RouterDecision(
+            rota=rota_rapida, confianca=0.97, motivo="regex_fast_path",
+            cache_hit=True, cache_layer="regex", latencia_ms=ms,
+            dag_hint=_dag_hint_para_rota(rota_rapida),
+        )
 
-    # ── Passo B: Gemini Flash classifica ─────────────────────────────────────
+    # ── Flash para queries complexas ──────────────────────
     decision = await _classificar_com_flash(query, ctx)
-
     ms = int((time.monotonic() - t0) * 1000)
     _LATENCY.observe(ms)
     decision.latencia_ms = ms
@@ -106,7 +122,7 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
     try:
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         response = await client.aio.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",   # 🔥 MODELO CORRIGIDO AQUI
+            model="gemini-3.1-flash-lite-preview",   # 
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_ROUTER,
@@ -154,7 +170,6 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
             cache_hit=False, cache_layer="miss", latencia_ms=0,
             dag_hint=_dag_hint_para_rota(rota),
         )
-
 
 
 def _regex_fallback(query: str) -> str:

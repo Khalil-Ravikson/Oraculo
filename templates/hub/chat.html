@@ -1,73 +1,145 @@
 {% extends "hub/_base.html" %}
 
 {% block content %}
-<div class="dbg-root">
-  <div class="chat-panel">
-    <div class="chat-messages" id="chat-messages"></div>
-    <div class="chat-input-row">
-      <textarea id="chat-input" class="chat-input" placeholder="Pergunte algo..."></textarea>
-      <button class="send-btn" onclick="sendMessage()">ENVIAR</button>
+<link rel="stylesheet" href="/static/css/chat-debugger.css">
+
+<div class="cx-root">
+  <div class="cx-chat">
+    <div class="cx-chat-hdr">
+      <div class="badge">● LIVE</div>
+      <div class="title">Oráculo UEMA — Cognitive OS</div>
+      <div class="cx-session" id="session-id-display">session: {{ session_id | truncate(18, True, '…') }}</div>
+    </div>
+
+    <div class="cx-messages" id="cx-messages">
+      <div class="cx-msg bot">
+        <div class="cx-avatar">OS</div>
+        <div>
+          <div class="cx-bubble">Olá, <strong>{{ username }}</strong>. Cognitive OS ativo — pipeline multi-agente disponível.<br>Pergunte qualquer coisa sobre a UEMA.</div>
+          <div class="cx-meta">sistema · agora</div>
+        </div>
+      </div>
+    </div>
+    <div class="cx-typing" id="cx-typing">
+      <div class="cx-avatar" style="background:#1a2520;color:var(--green);border:1px solid #1e3828;">OS</div>
+      <div class="dots">
+        <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      </div>
+    </div>
+
+    <div class="cx-typing" id="cx-typing">
+      <div class="cx-avatar" style="background:#1a2520;color:var(--green);border:1px solid #1e3828;">OS</div>
+      <div class="dots">
+        <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      </div>
+    </div>
+
+    <div class="cx-input-row">
+      <textarea
+        id="cx-input"
+        class="cx-input"
+        placeholder="Escreva e pressione Enter…"
+        rows="1"
+      ></textarea>
+      <button class="cx-send" id="cx-send" onclick="window.sendMessage()">ENVIAR</button>
     </div>
   </div>
 
-  <div class="debug-panel">
-    <div class="debug-header"><span>COGNITIVE OS MONITOR</span></div>
-    <div id="steps-container" style="padding:15px; color:#888; font-family:monospace; font-size:12px;">
-      Aguardando processamento...
+  <div class="cx-debug">
+    <div class="cx-tabs">
+      <button class="cx-tab active" onclick="window.switchTab('pipeline', this)">Pipeline</button>
+      <button class="cx-tab" onclick="window.switchTab('charts', this)">Métricas</button>
+      <button class="cx-tab" onclick="window.switchTab('commands', this)">Comandos</button>
+    </div>
+
+    <div class="cx-tab-content active" id="tab-pipeline">
+      <div class="cx-pipeline" id="cx-pipeline">
+        <div class="cx-pipeline-empty" id="pipeline-empty">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/>
+          </svg>
+          Aguardando mensagem…
+        </div>
+      </div>
+    </div>
+
+    <div class="cx-tab-content" id="tab-charts">
+      <div class="cx-charts">
+        <div class="cx-stat-grid">
+          <div class="cx-stat">
+            <div class="cx-stat-value green" id="stat-total-ms">—</div>
+            <div class="cx-stat-label">Latência Total</div>
+          </div>
+          <div class="cx-stat">
+            <div class="cx-stat-value blue" id="stat-rota">—</div>
+            <div class="cx-stat-label">Última Rota</div>
+          </div>
+          <div class="cx-stat">
+            <div class="cx-stat-value yellow" id="stat-msgs">0</div>
+            <div class="cx-stat-label">Mensagens</div>
+          </div>
+          <div class="cx-stat">
+            <div class="cx-stat-value" id="stat-workers">—</div>
+            <div class="cx-stat-label">Workers</div>
+          </div>
+        </div>
+        <div class="cx-chart-card">
+          <div class="cx-chart-label">Latência por Step (ms)</div>
+          <canvas id="chart-latency" class="cx-chart-canvas" height="160"></canvas>
+        </div>
+        <div class="cx-chart-card">
+          <div class="cx-chart-label">Distribuição de Rotas</div>
+          <canvas id="chart-routes" class="cx-chart-canvas" height="140"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="cx-tab-content" id="tab-commands">
+      <div class="cx-commands">
+        <div class="cx-cmd-section">Perguntas Rápidas</div>
+        <button class="cx-cmd-btn" onclick="window.quickSend('Quando é a matrícula de veteranos 2026.1?')">
+          <span class="icon">📅</span> Matrícula veteranos 2026.1
+        </button>
+        <button class="cx-cmd-btn" onclick="window.quickSend('Quantas vagas tem Engenharia Civil no PAES 2026?')">
+          <span class="icon">📋</span> Vagas PAES 2026
+        </button>
+        <button class="cx-cmd-btn" onclick="window.quickSend('Qual o email do CTIC para suporte técnico?')">
+          <span class="icon">📞</span> Contato CTIC
+        </button>
+        <button class="cx-cmd-btn" onclick="window.quickSend('Oi')">
+          <span class="icon">👋</span> Teste saudação (GREETING)
+        </button>
+
+        <div class="cx-cmd-section" style="margin-top:8px">Ações de Sistema</div>
+        <button class="cx-cmd-btn" onclick="window.apiAction('/api/admin/cache', 'DELETE', 'Cache limpo!')">
+          <span class="icon">🗑️</span> Limpar cache semântico
+          <span class="key">DELETE</span>
+        </button>
+        <button class="cx-cmd-btn" onclick="window.clearPipeline()">
+          <span class="icon">🔄</span> Limpar painel pipeline
+        </button>
+        <button class="cx-cmd-btn" onclick="window.clearChat()">
+          <span class="icon">💬</span> Limpar chat
+        </button>
+
+        <div class="cx-cmd-section" style="margin-top:8px">Pergunta Customizada</div>
+        <div class="cx-cmd-custom">
+          <input type="text" class="cx-cmd-input" id="custom-query" placeholder="Digite uma query de teste…">
+          <button class="cx-cmd-run" onclick="window.runCustom()">▶ RUN</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
+
+<script>
+  window.APP_CONFIG = {
+    THREAD_ID: "{{ session_id }}"
+  };
+</script>
 {% endblock %}
 
 {% block scripts %}
-<script>
-const THREAD_ID = "{{ session_id }}";
-
-async function sendMessage() {
-    const input = document.getElementById('chat-input');
-    const msg = input.value.trim();
-    if (!msg) return;
-
-    // Coloca a msg na tela
-    document.getElementById('chat-messages').innerHTML += `<div class="msg user">${msg}</div>`;
-    input.value = '';
-    
-    const monitor = document.getElementById('steps-container');
-    monitor.innerHTML = '<div style="color: blue;">[Iniciando Orquestração...]</div>';
-
-    const source = new EventSource(`/hub/chat/stream?msg=${encodeURIComponent(msg)}&thread_id=${THREAD_ID}`);
-    
-    source.onmessage = (event) => {
-        console.log("Chegou do backend:", event.data); // Aperte F12 para ver a mágica aqui!
-        
-        try {
-            const d = JSON.parse(event.data);
-            
-            // Adiciona logs no painel da direita
-            if (d.type === 'step' || d.type === 'start') {
-                monitor.innerHTML += `<div style="margin-top: 4px;">⚙️ ${d.detail || d.name || 'Processando...'}</div>`;
-            }
-            
-            // Adiciona resposta final na esquerda
-            if (d.type === 'response') {
-                const text = d.text ? d.text.replace(/\n/g, '<br>') : "⚠️ Resposta vazia gerada pelo Worker.";
-                document.getElementById('chat-messages').innerHTML += `<div class="msg bot">${text}</div>`;
-            }
-            
-            // Tratamento de ERRO visível
-            if (d.type === 'error') {
-                monitor.innerHTML += `<div style="color: red; margin-top: 4px;">❌ ERRO: ${d.msg}</div>`;
-                document.getElementById('chat-messages').innerHTML += `<div class="msg bot" style="border: 1px solid red;">❌ Falha no sistema: Verifique o painel lateral.</div>`;
-            }
-
-            if (d.type === 'done') {
-                monitor.innerHTML += `<div style="color: green; margin-top: 4px;">✅ Fluxo encerrado.</div>`;
-                source.close();
-            }
-        } catch(e) {
-            console.error("Falha no JSON do SSE:", e);
-        }
-    };
-}
-</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/static/js/chat-debugger.js"></script>
 {% endblock %}

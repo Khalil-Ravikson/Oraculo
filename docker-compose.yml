@@ -140,6 +140,12 @@ services:
       - ./dados:/app/dados
       - ./dados/tmp:/tmp/oraculo_cv
       - ./migrations:/app/migrations
+      # Isto liga a pasta local 'src' à pasta 'src' dentro do container
+      - ./src:/app/src
+      # Isto liga a pasta 'templates' local à pasta do container
+      - ./templates:/app/templates
+      # Isto liga a pasta 'static' local à pasta do container
+      - ./static:/app/static
     networks:
       - oraculo_net
     environment:

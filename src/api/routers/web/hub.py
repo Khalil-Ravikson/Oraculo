@@ -249,51 +249,86 @@ async def chat_send(request: Request, data: WebChatRequest):
 
 
 
+def _sse_step(step: str, status: str, detail: str, elapsed: float = 0, extra: dict | None = None) -> str:
+    import json as _json
+    p = {"type": "step", "step": step, "status": status, "detail": detail, "ms": int(elapsed * 1000)}
+    if extra:
+        p.update(extra)
+    return f"data: {_json.dumps(p, ensure_ascii=False)}\n\n"
+
+
 @router.get("/chat/stream")
 async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
-    """Endpoint de SSE para o Chat do Hub."""
-    
     if not msg:
         return JSONResponse({"error": "Mensagem obrigatória"}, status_code=400)
 
-    async def _generator():
-        try:
-            from src.application.chain.cognitive_os import processar
-            
-            # 1. Envia o primeiro passo para o painel de debug
-            yield f"data: {json.dumps({'type': 'step', 'detail': 'Iniciando Orquestrador Cognitive OS'})}\n\n"
-            await asyncio.sleep(0.5) # Simula um pequeno tempo de reflexão
-            
-            # 2. Informa o planejamento
-            yield f"data: {json.dumps({'type': 'step', 'detail': 'A analisar intenção e gerar plano de ação...'})}\n\n"
-            
-            # 3. Dispara a lógica pesada
-            # Nota: O ideal seria o cognitive_os usar Pub/Sub do Redis para emitir logs,
-            # mas enquanto isso não está pronto, mandamos os logs básicos por aqui.
-            result = await processar(
-                message=msg, 
-                session_id=thread_id, 
-                user_context={"nome": "Admin", "role": "admin", "is_admin": True},
-                history=""
-            )
-            
-            # 4. Informa a conclusão do processamento
-            yield f"data: {json.dumps({'type': 'step', 'detail': 'Processamento concluído. A gerar resposta final...'})}\n\n"
-            
-            if getattr(result, "error", None):
-                yield f"data: {json.dumps({'type': 'error', 'msg': str(result.error)})}\n\n"
-            else:
-                yield f"data: {json.dumps({'type': 'response', 'text': getattr(result, 'answer', '')})}\n\n"
-                
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            yield f"data: {json.dumps({'type': 'error', 'msg': str(e)})}\n\n"
-        finally:
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+    import time as _t
 
-    # Não esqueça o return!
-    return StreamingResponse(_generator(), media_type="text/event-stream")
+    async def _generator():
+        t_total = _t.monotonic()
+        try:
+            # ── 1. Router ─────────────────────────────────
+            yield _sse_step("router", "running", "Classificando intenção…")
+            t0 = _t.monotonic()
+            from src.application.routing.semantic_router import rotear
+            decision = await rotear(msg, thread_id, {"role": "admin"})
+            yield _sse_step("router", "ok",
+                f"→ {decision.rota} ({decision.confianca:.0%})",
+                _t.monotonic() - t0,
+                {"rota": decision.rota}
+            )
+
+            # ── 2. Planner ────────────────────────────────
+            yield _sse_step("planner", "running", "Gerando plano DAG…")
+            t0 = _t.monotonic()
+            from src.application.chain.planner import criar_plano
+            plan = await criar_plano(
+                query=msg, session_id=thread_id, rota=decision.rota,
+                dag_hint=decision.dag_hint,
+                user_context={"role": "admin", "nome": "Admin"},
+                history="", fatos=[],
+            )
+            workers_str = " → ".join(s["worker"] for s in plan.steps)
+            yield _sse_step("planner", "ok", workers_str,
+                _t.monotonic() - t0,
+                {"plan_id": plan.plan_id[:8]}
+            )
+
+            # ── 3. Dispatch ───────────────────────────────
+            yield _sse_step("dispatch", "running", f"Despachando {len(plan.steps)} worker(s)…")
+            t0 = _t.monotonic()
+            from src.application.chain.cognitive_os import _despachar_workers, _aguardar_resposta_final
+            await _despachar_workers(plan)
+            yield _sse_step("dispatch", "ok", "Workers enfileirados (Celery)", _t.monotonic() - t0)
+
+            # ── 4. Synthesis ──────────────────────────────
+            yield _sse_step("synthesis", "running", "Aguardando resposta dos workers…")
+            t0 = _t.monotonic()
+            answer = await _aguardar_resposta_final(plan.plan_id, timeout=15.0)
+            synth_ms = _t.monotonic() - t0
+
+            if answer is None:
+                answer = "⏳ Timeout (15s). Tente reformular a pergunta."
+                yield _sse_step("synthesis", "error", "Timeout", synth_ms)
+            else:
+                yield _sse_step("synthesis", "ok", f"{len(answer)} chars gerados", synth_ms)
+
+            total_ms = int((_t.monotonic() - t_total) * 1000)
+
+            yield f"data: {json.dumps({'type':'response','text':answer,'rota':decision.rota,'total_ms':total_ms}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type':'metrics','rota':decision.rota,'total_ms':total_ms,'workers':len(plan.steps),'confianca':round(decision.confianca,2)}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.exception("SSE /chat/stream error: %s", e)
+            yield f"data: {json.dumps({'type':'error','msg':str(e)[:200]})}\n\n"
+        finally:
+            yield f"data: {json.dumps({'type':'done'})}\n\n"
+
+    return StreamingResponse(
+        _generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
             
 @router.get("/audit/data")
 async def audit_data(request: Request):
