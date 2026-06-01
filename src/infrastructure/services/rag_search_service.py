@@ -25,11 +25,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TransformedQuery — guarda estado das queries transformadas
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class TransformedQuery:
+    original: str
+    primary: str
+    variants: list[str] = field(default_factory=list)
+    step_back: str = ""
+    keywords: list[str] = field(default_factory=list)
+    strategy_used: str = "passthrough"
+    was_transformed: bool = False
+
+    @property
+    def all_queries(self) -> list[str]:
+        queries = [self.primary]
+        queries.extend(v for v in self.variants if v and v != self.primary)
+        return queries
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,15 +83,15 @@ class ToolResult:
 
 class QueryTransformService:
     """
-    Transforma a query do usuário para melhorar o recall.
-
-    ESTRATÉGIA POR CUSTO:
-      1. Heurística local (0 tokens): enriquece termos UEMA, resolve pronomes
-      2. Gemini Flash (só se query curta/vaga e rota == GERAL):
-         ~30 tokens por chamada
-
-    NÃO usa HyDE aqui (muito caro para produção).
-    HyDE fica disponível via flag para queries complexas no futuro.
+    Transforma a query do usuário para melhorar o recall e precisão da busca RAG.
+    
+    ESTRATÉGIAS UTILIZADAS:
+      1. ProperNounQueryStrategy: regex local que envolve nomes próprios em aspas
+         para forçar exact matching via BM25/FTS no Redis.
+      2. KeywordEnrich: enriquece com sinônimos do domínio UEMA e fatos do usuário.
+      3. StepBackStrategy: gera uma query de generalização (fallback) removendo
+         datas e especificações, permitindo busca ampla.
+      4. Gemini Flash: reescrita contextual em caso de pronomes/queries vagas.
     """
 
     _SINONIMOS = {
@@ -85,7 +107,7 @@ class QueryTransformService:
         query: str,
         fatos: list[str] | None = None,
     ) -> str:
-        """Enriquecimento local sem LLM."""
+        """Enriquece a query localmente usando sinônimos do domínio e fatos do usuário."""
         norm = _normalizar(query)
         extras: list[str] = []
 
@@ -93,7 +115,7 @@ class QueryTransformService:
             if termo in norm:
                 extras.extend(sinonimos[:1])
 
-        # Injeta fato mais relevante do usuário
+        # Injeta fato mais relevante do usuário se disponível
         if fatos:
             extras.append(fatos[0][:60])
 
@@ -106,11 +128,7 @@ class QueryTransformService:
         rota: str,
         historico: str = "",
     ) -> str:
-        """
-        Reescrita via Gemini Flash — só ativa para queries vagas em rota GERAL
-        ou queries com pronomes que precisam de resolução de referência.
-        """
-        # Heurística: vale chamar o Flash?
+        """Reescrita contextual via Gemini Flash para queries vagas ou com pronomes."""
         q_lower = query.lower()
         tem_pronome = any(p in q_lower for p in ["isso", "ele", "ela", "aquilo", "esse"])
         e_vaga = len(query.split()) <= 4
@@ -145,6 +163,83 @@ class QueryTransformService:
             logger.debug("QueryTransform Flash falhou: %s", e)
         return query
 
+    async def transformar(
+        self,
+        query: str,
+        rota: str = "GERAL",
+        fatos: list[str] | None = None,
+        historico: str = "",
+    ) -> TransformedQuery:
+        """
+        Gera a query transformada com variantes locais de busca exata e geral (Step-Back).
+        """
+        # 1. Identificar nomes próprios (ProperNounQueryStrategy)
+        re_nome = re.compile(
+            r'\b([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+(?:\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+){1,4})\b'
+        )
+        re_titulos = re.compile(
+            r'\b(Dr\.?|Dra\.?|Prof\.?|Profa\.?|Sr\.?|Sra\.?)\s+', re.I
+        )
+
+        nomes = re_nome.findall(query)
+        nomes = [n for n in nomes if len(n.split()) >= 2]
+        
+        variants = []
+        strategy = "passthrough"
+        was_transformed = False
+        keywords = []
+
+        if nomes:
+            nome_principal = max(nomes, key=len)
+            nome_limpo = re_titulos.sub("", nome_principal).strip()
+            variante_exata = f'"{nome_limpo}"'
+            variante_sem_titulo = query.replace(nome_principal, nome_limpo)
+            
+            variants.append(variante_exata)
+            if (variante_sem_titulo != query) and (variante_sem_titulo not in variants):
+                variants.append(variante_sem_titulo)
+            
+            keywords.append(nome_limpo)
+            strategy = "proper_noun"
+            was_transformed = True
+
+        # 2. Enriquecimento de palavras-chave UEMA
+        query_enriquecida = self.transformar_local(query, fatos)
+        if query_enriquecida != query:
+            if strategy == "passthrough":
+                strategy = "keyword_enrich"
+            was_transformed = True
+            primary = query_enriquecida
+        else:
+            primary = query
+
+        # 3. Gerar query Step-Back (StepBackStrategy)
+        texto_sb = query
+        texto_sb = re.sub(r"\b\d{2}/\d{2}/\d{4}\b", "", texto_sb)
+        texto_sb = re.sub(r"\b20\d{2}[\./]\d{1,2}\b", "", texto_sb)
+        texto_sb = re.sub(r"\b(br-ppi|br-q|br-dc|ir-ppi|cfo-pp|pcd)\b", "cota", texto_sb, flags=re.I)
+        texto_sb = re.sub(r"\b([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]{3,})\b", "", texto_sb)
+        step_back = " ".join(texto_sb.split())
+        if len(step_back) < 10:
+            step_back = " ".join(query.split()[:3])
+
+        # 4. Gemini Flash (reescrita externa opcional)
+        query_llm = await self.transformar_com_flash(primary, rota, historico)
+        if query_llm != primary:
+            primary = query_llm
+            strategy = "llm_transform"
+            was_transformed = True
+
+        return TransformedQuery(
+            original=query,
+            primary=primary,
+            variants=variants,
+            step_back=step_back,
+            keywords=keywords,
+            strategy_used=strategy,
+            was_transformed=was_transformed,
+        )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RAGSearchService principal
@@ -152,12 +247,9 @@ class QueryTransformService:
 
 class RAGSearchService:
     """
-    Service de busca RAG. Injetado nos workers e nas tools de domínio.
-
-    USO NOS WORKERS:
-        svc = RAGSearchService()
-        result = await svc.buscar("matrícula veteranos", doc_type="calendario")
-        chunks = result.data.get("chunks", [])
+    Serviço central de busca RAG. Injetado nos workers e nas tools de domínio.
+    Gerencia transformação de queries, busca assíncrona paralela, fusão via RRF,
+    deduplicação de conteúdo textual e fallback automático via Step-Back.
     """
 
     def __init__(
@@ -169,6 +261,11 @@ class RAGSearchService:
         self._emb = embedding_model
         self._qt = query_transform or QueryTransformService()
         self._use_rerank = use_rerank
+
+    async def _obter_embedding_async(self, q: str) -> list[float]:
+        """Gera embedding assincronamente sem bloquear o event loop principal."""
+        emb = self._get_embeddings()
+        return await asyncio.to_thread(emb.embed_query, _normalizar(q))
 
     async def buscar(
         self,
@@ -182,36 +279,101 @@ class RAGSearchService:
         historico: str = "",
     ) -> ToolResult:
         """
-        Busca híbrida completa com query transform e rerank.
-
-        Returns:
-          ToolResult.message = contexto formatado para o LLM
-          ToolResult.data    = {"chunks": [...], "found": bool, ...}
+        Busca híbrida avançada utilizando expansão paralela, fusão RRF e pipeline de fallback.
+        
+        Fluxo de Execução:
+          1. Expansão de queries (Proper Nouns + local keyword enrichment).
+          2. Geração assíncrona concorrente dos embeddings necessários.
+          3. Execução paralela de buscas híbridas no Redis para todas as queries.
+          4. Fusão de rankings usando Reciprocal Rank Fusion (RRF) na memória.
+          5. Deduplicação por conteúdo textual (fingerprint de 100 caracteres).
+          6. Fallback dinâmico para a query Step-Back se os resultados forem nulos.
+          7. Filtragem opcional por tipo de documento (doc_type).
+          8. Rerank local via Cross-Encoder (CPU) e formatação final.
         """
         try:
-            # 1. Query Transform (heurística local, sempre)
-            query_enriquecida = self._qt.transformar_local(query, fatos)
+            # 1. Transformação e expansão de query
+            transformed = await self._qt.transformar(query, rota, fatos, historico)
+            queries_to_search = transformed.all_queries
 
-            # 2. Query Transform (Flash, só se vaga/pronome)
-            query_final = await self._qt.transformar_com_flash(
-                query_enriquecida, rota, historico
-            )
-            query_norm = _normalizar(query_final)
+            # 2. Geração paralela de embeddings
+            emb_tasks = [self._obter_embedding_async(q) for q in queries_to_search]
+            embeddings_list = await asyncio.gather(*emb_tasks)
 
-            # 3. Embedding (Gemini API — nuvem, CPU-friendly)
-            emb = self._get_embeddings()
-            vetor = await asyncio.to_thread(emb.embed_query, query_norm)
-
-            # 4. Busca híbrida KNN + BM25
+            # 3. Execução paralela de buscas híbridas no Redis
             from src.infrastructure.redis_client import busca_hibrida
-            resultados = await asyncio.to_thread(
-                busca_hibrida,
-                query_text=query_norm,
-                query_embedding=vetor,
-                source_filter=source_filter,
-                k_vector=k_vector,
-                k_text=k_text,
-            )
+            
+            search_tasks = []
+            for i, q in enumerate(queries_to_search):
+                kv = k_vector // 2 if i > 0 else k_vector
+                kt = k_text // 2 if i > 0 else k_text
+                
+                # Garante que as sub-queries não tenham k excessivamente baixo
+                kv = max(kv, 3)
+                kt = max(kt, 3)
+                
+                search_tasks.append(
+                    asyncio.to_thread(
+                        busca_hibrida,
+                        query_text=_normalizar(q),
+                        query_embedding=embeddings_list[i],
+                        source_filter=source_filter,
+                        k_vector=kv,
+                        k_text=kt,
+                    )
+                )
+            
+            resultados_listas = await asyncio.gather(*search_tasks)
+
+            # 4. Fusão RRF (Reciprocal Rank Fusion) para combinar rankings paralelos
+            rrf_const = 60
+            fused_scores = {}
+            docs_map = {}
+            for lista in resultados_listas:
+                for rank, doc in enumerate(lista, start=1):
+                    doc_id = doc["id"]
+                    fused_scores[doc_id] = fused_scores.get(doc_id, 0.0) + 1.0 / (rrf_const + rank)
+                    # Mantém o documento com o melhor score original
+                    if doc_id not in docs_map or doc.get("rrf_score", 0) > docs_map[doc_id].get("rrf_score", 0):
+                        docs_map[doc_id] = doc
+
+            fused_results = []
+            for doc_id, score in fused_scores.items():
+                doc = docs_map[doc_id].copy()
+                doc["rrf_score"] = score
+                fused_results.append(doc)
+
+            # 5. Deduplicação por conteúdo textual (fingerprint de 100 caracteres)
+            vistos = {}
+            for doc in fused_results:
+                fingerprint = doc.get("content", "")[:100].strip().lower()
+                if fingerprint not in vistos or doc["rrf_score"] > vistos[fingerprint]["rrf_score"]:
+                    vistos[fingerprint] = doc
+            
+            resultados = sorted(vistos.values(), key=lambda d: d["rrf_score"], reverse=True)
+            metodo_busca = "multi_hibrido" if len(queries_to_search) > 1 else "hibrido"
+
+            # 6. Fallback dinâmico via Step-Back se busca principal retornar vazia
+            if not resultados and transformed.step_back:
+                logger.info("⚠️ RAG busca vazia. Acionando Step-Back Fallback: '%s'", transformed.step_back)
+                sb_embedding = await self._obter_embedding_async(transformed.step_back)
+                sb_resultados = await asyncio.to_thread(
+                    busca_hibrida,
+                    query_text=_normalizar(transformed.step_back),
+                    query_embedding=sb_embedding,
+                    source_filter=source_filter,
+                    k_vector=k_vector,
+                    k_text=k_text,
+                )
+                
+                # Deduplica e ordena os resultados do step-back
+                vistos_sb = {}
+                for doc in sb_resultados:
+                    fingerprint = doc.get("content", "")[:100].strip().lower()
+                    if fingerprint not in vistos_sb or doc.get("rrf_score", 0) > vistos_sb[fingerprint].get("rrf_score", 0):
+                        vistos_sb[fingerprint] = doc
+                resultados = sorted(vistos_sb.values(), key=lambda d: d.get("rrf_score", 0), reverse=True)
+                metodo_busca = "step_back_fallback"
 
             if not resultados:
                 return ToolResult.success(
@@ -219,18 +381,18 @@ class RAGSearchService:
                     data={"chunks": [], "found": False, "doc_type": doc_type},
                 )
 
-            # 5. Filtro por doc_type (quando não há source_filter específico)
+            # 7. Filtragem por doc_type (se aplicável)
             if doc_type and doc_type != "geral" and not source_filter:
                 filtrados = [r for r in resultados if r.get("doc_type") == doc_type]
                 resultados = filtrados if filtrados else resultados
 
-            # 6. Rerank local (cross-encoder CPU, modelo leve)
+            # 8. Rerank local via Cross-Encoder (CPU)
             if self._use_rerank and len(resultados) > 1:
                 resultados = await self._rerank(query, resultados, top_k=5)
             else:
                 resultados = resultados[:5]
 
-            # 7. Formata contexto para o LLM com título real (não hash)
+            # 9. Formatação final do contexto
             contexto = self._formatar_contexto(resultados)
             top_score = resultados[0].get("rerank_score", resultados[0].get("rrf_score", 0))
 
@@ -240,9 +402,10 @@ class RAGSearchService:
                     "chunks":     resultados,
                     "found":      True,
                     "doc_type":   doc_type,
-                    "query_used": query_final,
+                    "query_used": transformed.primary,
                     "top_score":  round(top_score, 3),
                     "count":      len(resultados),
+                    "metodo":     metodo_busca,
                 },
             )
 

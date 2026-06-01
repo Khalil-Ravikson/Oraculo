@@ -70,7 +70,7 @@ function upsertStep(id, status, name, detail, ms, extra) {
 
   const container = document.getElementById('cx-pipeline');
   let el = document.getElementById('step-' + id);
-  const icons = { running: '◎', ok: '✓', error: '✗', skip: '—' };
+  const icons = { running: '◎', ok: '✓', error: '✗', skip: '—', warning: '⚠️' };
 
   if (!el) {
     el = document.createElement('div');
@@ -94,7 +94,7 @@ function upsertStep(id, status, name, detail, ms, extra) {
   container.scrollTop = container.scrollHeight;
 }
 
-function addMessage(role, text, meta) {
+function addMessage(role, text, meta, buttons = []) {
   const wrap = document.getElementById('cx-messages');
   const typingIndicator = document.getElementById('cx-typing');
   
@@ -107,11 +107,23 @@ function addMessage(role, text, meta) {
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
     
+  let buttonsHtml = '';
+  if (buttons && buttons.length > 0) {
+    buttonsHtml = '<div class="cx-action-buttons" style="margin-top: 8px; display: flex; gap: 8px;">';
+    buttons.forEach(btn => {
+      // Usa onclick pra chamar o sendMessage passando o value do botão
+      buttonsHtml += `<button style="background: var(--accent2); border: none; padding: 4px 12px; border-radius: 4px; color: white; cursor: pointer; font-size: 11px;" onclick="window.sendMessage('${btn.value}')">${btn.label}</button>`;
+    });
+    buttonsHtml += '</div>';
+  }
+
+  const badgeHtml = meta ? `<span style="background: var(--accent3); padding: 2px 6px; border-radius: 4px; font-size: 9px; color: white; margin-right: 4px;">${meta}</span>` : '';
+
   row.innerHTML = `
     <div class="cx-avatar">${role === 'user' ? 'ADM' : 'OS'}</div>
     <div>
-      <div class="cx-bubble">${safeText}</div>
-      <div class="cx-meta">${meta || ''}</div>
+      <div class="cx-bubble">${safeText}${buttonsHtml}</div>
+      <div class="cx-meta">${badgeHtml}</div>
     </div>`;
 
   // MÁGICA SEGURA: Em vez de inserir antes do typing (que pode estar fora da div), 
@@ -158,7 +170,8 @@ window.sendMessage = function(overrideMsg) {
       } 
       else if (d.type === 'response') {
         hideTyping();
-        addMessage('bot', d.text, d.rota || '');
+        const badge = d.status === 'hitl_pending' ? '⚠️ HITL' : (d.rota || '');
+        addMessage('bot', d.text, badge, d.action_buttons || []);
       } 
       else if (d.type === 'metrics') {
         if (d.total_ms) document.getElementById('stat-total-ms').textContent = d.total_ms + 'ms';

@@ -267,6 +267,53 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
     async def _generator():
         t_total = _t.monotonic()
         try:
+            # ── 0. HITL Interception ──────────────────────
+            from src.infrastructure.redis_client import get_redis_text
+            import json as _json
+            r = get_redis_text()
+            hitl_state_raw = r.get(f"hitl:session:{thread_id}")
+            if hitl_state_raw:
+                try:
+                    hitl_state = _json.loads(hitl_state_raw if isinstance(hitl_state_raw, str) else hitl_state_raw.decode())
+                    msg_lower = msg.strip().lower()
+                    
+                    if msg_lower in ("sim", "s", "yes", "y", "confirmo", "ok"):
+                        r.delete(f"hitl:session:{thread_id}")
+                        action = hitl_state.get("action")
+                        
+                        yield _sse_step("router", "skip", "HITL Interceptado")
+                        yield _sse_step("planner", "skip", "HITL Interceptado")
+                        
+                        if action == "media_download":
+                            from src.application.workers.registry import dispatch
+                            yield _sse_step("dispatch", "ok", "Enviando worker de mídia...")
+                            dispatch(hitl_state.get("worker_name"), hitl_state.get("event"))
+                            
+                            yield _sse_step("synthesis", "ok", "Download iniciado no background")
+                            total_ms = int((_t.monotonic() - t_total) * 1000)
+                            
+                            resp = {'type': 'response', 'text': "✅ Download confirmado! Verifique os logs para acompanhar o progresso.", 'rota': "HITL", 'total_ms': total_ms, 'action_buttons': [], 'status': 'ok'}
+                            yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
+                            yield f"data: {_json.dumps({'type': 'metrics', 'rota': 'HITL', 'total_ms': total_ms, 'workers': 1, 'confianca': 1.0}, ensure_ascii=False)}\n\n"
+                            return
+                        else:
+                            resp = {'type': 'response', 'text': f"✅ Ação '{action}' confirmada.", 'rota': "HITL", 'total_ms': 10, 'action_buttons': [], 'status': 'ok'}
+                            yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
+                            return
+                            
+                    elif msg_lower in ("nao", "não", "n", "no", "cancela", "cancelar"):
+                        r.delete(f"hitl:session:{thread_id}")
+                        resp = {'type': 'response', 'text': "❌ Ação cancelada.", 'rota': "HITL", 'total_ms': 10, 'action_buttons': [], 'status': 'ok'}
+                        yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
+                        return
+                    else:
+                        resp = {'type': 'response', 'text': "⚠️ Responda *SIM* para confirmar ou *NÃO* para cancelar.", 'rota': "HITL", 'total_ms': 10, 'action_buttons': [], 'status': 'ok'}
+                        yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
+                        return
+                except Exception as e:
+                    logger.error("Erro no parse do HITL state no hub: %s", e)
+                    r.delete(f"hitl:session:{thread_id}")
+
             # ── 1. Router ─────────────────────────────────
             yield _sse_step("router", "running", "Classificando intenção…")
             t0 = _t.monotonic()
@@ -277,6 +324,56 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
                 _t.monotonic() - t0,
                 {"rota": decision.rota}
             )
+
+            # ── Fast-Paths GREETING / MEDIA_DOWNLOAD ──────
+            if decision.rota == "GREETING":
+                import random
+                answer = random.choice([
+                    "Olá! 😊 Sou o Oráculo UEMA. Como posso ajudar?",
+                    "Oi! Em que posso ajudá-lo(a) hoje?",
+                    "Olá! Pode perguntar sobre calendário, editais, contatos ou suporte. 🎓",
+                ])
+                yield _sse_step("planner", "skip", "Fast-Path (Inline)")
+                yield _sse_step("dispatch", "skip", "Bypass Celery")
+                yield _sse_step("synthesis", "ok", "Resposta instantânea")
+                
+                total_ms = int((_t.monotonic() - t_total) * 1000)
+                resp = {'type': 'response', 'text': answer, 'rota': decision.rota, 'total_ms': total_ms, 'action_buttons': [], 'status': 'ok'}
+                yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
+                
+                metrics = {'type': 'metrics', 'rota': decision.rota, 'total_ms': total_ms, 'workers': 0, 'confianca': round(decision.confianca, 2)}
+                yield f"data: {_json.dumps(metrics, ensure_ascii=False)}\n\n"
+                return
+
+            if decision.rota == "MEDIA_DOWNLOAD":
+                url = decision.dag_hint.get("url", msg)
+                hitl_state = {
+                    "action": "media_download",
+                    "worker_name": decision.dag_hint["steps"][0],
+                    "event": {
+                        "plan_id": "fast_media",
+                        "session_id": thread_id,
+                        "step_id": "s1",
+                        "url": url,
+                        "hitl_confirmed": True,
+                    }
+                }
+                r.setex(f"hitl:session:{thread_id}", 300, _json.dumps(hitl_state, ensure_ascii=False))
+
+                answer = "🎥 **Mídia detectada!**\n\nIdentifiquei um link suportado.\nDeseja iniciar o download deste arquivo agora?"
+                btns = [{"label": "Sim, baixar", "value": "sim"}, {"label": "Não", "value": "nao"}]
+
+                yield _sse_step("planner", "skip", "Fast-Path HITL")
+                yield _sse_step("dispatch", "skip", "Bypass Celery")
+                yield _sse_step("synthesis", "ok", "Ação Manual Requerida")
+                
+                total_ms = int((_t.monotonic() - t_total) * 1000)
+                resp = {'type': 'response', 'text': answer, 'rota': decision.rota, 'total_ms': total_ms, 'action_buttons': btns, 'status': 'hitl_pending'}
+                yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
+                
+                metrics = {'type': 'metrics', 'rota': decision.rota, 'total_ms': total_ms, 'workers': 0, 'confianca': round(decision.confianca, 2)}
+                yield f"data: {_json.dumps(metrics, ensure_ascii=False)}\n\n"
+                return
 
             # ── 2. Planner ────────────────────────────────
             yield _sse_step("planner", "running", "Gerando plano DAG…")
@@ -304,19 +401,40 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
             # ── 4. Synthesis ──────────────────────────────
             yield _sse_step("synthesis", "running", "Aguardando resposta dos workers…")
             t0 = _t.monotonic()
-            answer = await _aguardar_resposta_final(plan.plan_id, timeout=15.0)
+            final_data = await _aguardar_resposta_final(plan.plan_id, timeout=15.0)
             synth_ms = _t.monotonic() - t0
 
-            if answer is None:
-                answer = "⏳ Timeout (15s). Tente reformular a pergunta."
-                yield _sse_step("synthesis", "error", "Timeout", synth_ms)
+            if final_data is None:
+                answer = "⏳ A sua requisição continua sendo processada em background. Você será notificado quando terminar."
+                action_buttons = []
+                status = "warning"
+                yield _sse_step("synthesis", "warning", "Processamento em background", synth_ms)
             else:
+                answer = final_data.get("answer", "")
+                action_buttons = final_data.get("action_buttons", [])
+                status = final_data.get("status", "ok")
                 yield _sse_step("synthesis", "ok", f"{len(answer)} chars gerados", synth_ms)
 
             total_ms = int((_t.monotonic() - t_total) * 1000)
 
-            yield f"data: {json.dumps({'type':'response','text':answer,'rota':decision.rota,'total_ms':total_ms}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type':'metrics','rota':decision.rota,'total_ms':total_ms,'workers':len(plan.steps),'confianca':round(decision.confianca,2)}, ensure_ascii=False)}\n\n"
+            response_payload = {
+                'type': 'response',
+                'text': answer,
+                'rota': decision.rota,
+                'total_ms': total_ms,
+                'action_buttons': action_buttons,
+                'status': status
+            }
+            yield f"data: {json.dumps(response_payload, ensure_ascii=False)}\n\n"
+            
+            metrics_payload = {
+                'type': 'metrics',
+                'rota': decision.rota,
+                'total_ms': total_ms,
+                'workers': len(plan.steps),
+                'confianca': round(decision.confianca, 2)
+            }
+            yield f"data: {json.dumps(metrics_payload, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             logger.exception("SSE /chat/stream error: %s", e)

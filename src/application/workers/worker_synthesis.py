@@ -57,7 +57,7 @@ STREAM_FINAL_RESPONSES = "oraculo:stream:final_responses"
 RESULTS_CACHE_PREFIX   = "plan:results:"
 RESULTS_TTL            = 120   # segundos — planos expiram após 2min
 STREAM_MAXLEN          = 2_000
-MAX_WAIT_SECONDS       = 30    # timeout aguardando dependências
+MAX_WAIT_SECONDS       = 12    # timeout aguardando dependências
 POLL_INTERVAL          = 0.25  # segundos entre polls
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -75,13 +75,13 @@ Use *negrito* para dados importantes. Máximo 3 parágrafos. Seja conciso."""
     queue="synthesis",
 )
 def worker_synthesis_task(self, event: dict) -> dict:
-    """
-    Task Celery que sintetiza a resposta final.
+    import asyncio
+    return asyncio.run(_run_async(event))
 
-    Args:
-        event: dict com plan_id, session_id, step_id, depends_on[],
-               plan_context (query, user_context, history, fatos),
-               args (max_tokens, tone?)
+
+async def _run_async(event: dict) -> dict:
+    """
+    Função principal async do worker de síntese.
     """
     t_start = time.monotonic()
 
@@ -98,7 +98,7 @@ def worker_synthesis_task(self, event: dict) -> dict:
                 plan_id[:8], step_id, depends_on)
 
     # ── Aguarda dependências ───────────────────────────────────────────────────
-    step_results = _aguardar_dependencias(plan_id, depends_on)
+    step_results = await _aguardar_dependencias_async(plan_id, depends_on)
 
     if step_results is None:
         ms = int((time.monotonic() - t_start) * 1000)
@@ -129,7 +129,7 @@ def worker_synthesis_task(self, event: dict) -> dict:
 
     # ── Gera resposta com Gemini Pro ───────────────────────────────────────────
     try:
-        resposta = _sintetizar_com_pro(
+        resposta = await _sintetizar_async(
             chunks=chunks_unicos[:6],
             plan_ctx=plan_ctx,
             max_tokens=max_tokens,
@@ -156,19 +156,19 @@ def worker_synthesis_task(self, event: dict) -> dict:
     return {"status": status, "plan_id": plan_id, "chars": len(resposta), "latency_ms": ms}
 
 
-def _aguardar_dependencias(
+async def _aguardar_dependencias_async(
     plan_id: str,
     depends_on: list[str],
     timeout: float = MAX_WAIT_SECONDS,
 ) -> dict | None:
     """
-    Aguarda todos os steps dependentes estarem no Redis.
-    Usa polling com sleep. Retorna {step_id: result_data} ou None se timeout.
+    Aguarda todos os steps dependentes estarem no Redis sem bloquear a thread.
     """
     if not depends_on:
         return {}
 
     import time as _time
+    import asyncio
     from src.infrastructure.redis_client import get_redis_text
     r = get_redis_text()
 
@@ -190,24 +190,13 @@ def _aguardar_dependencias(
         if len(resultados) >= len(depends_on):
             return resultados
 
-        _time.sleep(POLL_INTERVAL)
+        await asyncio.sleep(POLL_INTERVAL)
 
-    # Timeout — retorna o que tiver (parcial) ou None
     if resultados:
         logger.warning("⚠️  [SYNTH WORKER] Timeout parcial: %d/%d deps",
                        len(resultados), len(depends_on))
         return resultados
     return None
-
-
-def _sintetizar_com_pro(
-    chunks: list[dict],
-    plan_ctx: dict,
-    max_tokens: int,
-) -> str:
-    """Chama Gemini Pro de forma síncrona (Celery worker)."""
-    import asyncio
-    return asyncio.run(_sintetizar_async(chunks, plan_ctx, max_tokens))
 
 
 async def _sintetizar_async(

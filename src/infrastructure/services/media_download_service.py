@@ -29,7 +29,7 @@ class MediaResult:
 
 class MediaDownloadService:
 
-    _MAX_DURATION_S = 600   # 10 min — proteção contra downloads gigantes
+    _MAX_DURATION_S = 3600   # 60 min — proteção contra downloads gigantes
     _MAX_SIZE_MB    = 50
 
     # ── YouTube ────────────────────────────────────────────────────────────────
@@ -37,9 +37,12 @@ class MediaDownloadService:
     async def download_youtube(
         self, url: str, audio_only: bool = False
     ) -> MediaResult:
-        return await asyncio.to_thread(self._ytb_sync, url, audio_only)
+        return await asyncio.to_thread(self._ytb_sync, url, audio_only, True)
 
-    def _ytb_sync(self, url: str, audio_only: bool) -> MediaResult:
+    async def get_youtube_metadata(self, url: str) -> MediaResult:
+        return await asyncio.to_thread(self._ytb_sync, url, False, False)
+
+    def _ytb_sync(self, url: str, audio_only: bool, download: bool) -> MediaResult:
         try:
             import yt_dlp
         except ImportError:
@@ -63,16 +66,20 @@ class MediaDownloadService:
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
+                info = ydl.extract_info(url, download=download)
                 duration = info.get("duration", 0)
                 if duration > self._MAX_DURATION_S:
                     return MediaResult(ok=False, error=f"Vídeo muito longo ({duration}s > {self._MAX_DURATION_S}s)")
 
-                filepath = ydl.prepare_filename(info)
-                if audio_only:
-                    filepath = os.path.splitext(filepath)[0] + ".mp3"
+                size_mb = 0.0
+                if download:
+                    filepath = ydl.prepare_filename(info)
+                    if audio_only:
+                        filepath = os.path.splitext(filepath)[0] + ".mp3"
+                    size_mb = os.path.getsize(filepath) / 1024 / 1024
+                else:
+                    filepath = ""
 
-                size_mb = os.path.getsize(filepath) / 1024 / 1024
                 return MediaResult(
                     ok=True, file_path=filepath,
                     title=info.get("title", "")[:200],
@@ -88,12 +95,13 @@ class MediaDownloadService:
     async def download_instagram(self, url: str) -> MediaResult:
         """
         Baixa post/reel/foto do Instagram via yt-dlp.
-        Para contas públicas funciona sem login.
-        Para contas privadas: configure IG_USERNAME/IG_PASSWORD no .env.
         """
-        return await asyncio.to_thread(self._insta_sync, url)
+        return await asyncio.to_thread(self._insta_sync, url, True)
 
-    def _insta_sync(self, url: str) -> MediaResult:
+    async def get_instagram_metadata(self, url: str) -> MediaResult:
+        return await asyncio.to_thread(self._insta_sync, url, False)
+
+    def _insta_sync(self, url: str, download: bool) -> MediaResult:
         try:
             import yt_dlp
         except ImportError:
@@ -115,11 +123,17 @@ class MediaDownloadService:
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                filepath = ydl.prepare_filename(info)
-                size_mb = os.path.getsize(filepath) / 1024 / 1024
-                ext = os.path.splitext(filepath)[1].lower()
-                mtype = "image" if ext in (".jpg", ".jpeg", ".png", ".webp") else "video"
+                info = ydl.extract_info(url, download=download)
+                
+                size_mb = 0.0
+                mtype = "video"
+                filepath = ""
+                if download:
+                    filepath = ydl.prepare_filename(info)
+                    size_mb = os.path.getsize(filepath) / 1024 / 1024
+                    ext = os.path.splitext(filepath)[1].lower()
+                    mtype = "image" if ext in (".jpg", ".jpeg", ".png", ".webp") else "video"
+
                 return MediaResult(
                     ok=True, file_path=filepath,
                     title=info.get("title", "")[:200],

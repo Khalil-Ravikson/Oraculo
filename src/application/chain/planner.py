@@ -132,6 +132,12 @@ async def criar_plano(
         _PLANNER_LATENCY.observe(ms)
         return plan
 
+    if rota == "MEDIA_DOWNLOAD":
+        plan = _plano_media(query, session_id, user_context, history, fatos or [], dag_hint)
+        ms = int((time.monotonic() - t0) * 1000)
+        _PLANNER_LATENCY.observe(ms)
+        return plan
+
     # ── Gemini Pro para planos RAG ────────────────────────────────────────────
     try:
         plan = await _planejar_com_pro(
@@ -266,6 +272,21 @@ def _plano_crud(
             "args": {"action": "detectar_crud", "description": query[:100]},
             "depends_on": [],
         }],
+        context={"query": query, "user_context": user_context,
+                 "history": history, "fatos": fatos},
+    )
+
+def _plano_media(
+    query: str, session_id: str,
+    user_context: dict, history: str, fatos: list[str], dag_hint: dict
+) -> ExecutionPlan:
+    worker = dag_hint["steps"][0]
+    url = dag_hint.get("url", query)
+    return ExecutionPlan(
+        plan_id=str(uuid.uuid4()),
+        session_id=session_id,
+        rota="MEDIA_DOWNLOAD",
+        steps=[{"id": "s1", "worker": worker, "args": {"url": url}, "depends_on": []}],
         context={"query": query, "user_context": user_context,
                  "history": history, "fatos": fatos},
     )

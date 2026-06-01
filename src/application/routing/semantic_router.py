@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass
 import re
 from prometheus_client import Counter, Histogram
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -44,18 +45,42 @@ _LATENCY = Histogram(
 
 # ── Rotas válidas ──────────────────────────────────────────────────────────────
 ROTAS_VALIDAS = frozenset({
-    "CALENDARIO", "EDITAL", "CONTATOS", "WIKI", "CRUD", "GREETING", "GERAL"
+    "CALENDARIO", "EDITAL", "CONTATOS", "WIKI", "CRUD", "GREETING", "GERAL", "MEDIA_DOWNLOAD"
 })
 
 _RE_GREETING = re.compile(
     r'^(oi|olá|ola|bom\s?dia|boa\s?tarde|boa\s?noite|hey|hi|hello|'
     r'tudo\s?bem|e\s?aí|eai|opa|obrigad[ao]|valeu|vlw|tmj|ok|certo|👍|🙏|perfeito)\s*[!.?]*$',
     re.I | re.UNICODE,
-    )
+)
+
+_RE_YTB = re.compile(r'(https?://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)[\w\-]+)', re.I)
+_RE_INSTA = re.compile(r'(https?://(?:www\.)?instagram\.com/(?:p|reel)/[\w\-]+)', re.I)
 
 def _regex_rapido(query: str) -> str | None:
-    """Fast-path regex ANTES do Flash — economiza ~50 tokens por saudação."""
-    return "GREETING" if _RE_GREETING.match(query.strip()) else None
+    """Layer 1: Fast-path regex ANTES do Flash — economiza ~50 tokens."""
+    if _RE_YTB.search(query):
+        return "MEDIA_DOWNLOAD"
+    if _RE_INSTA.search(query):
+        return "MEDIA_DOWNLOAD"
+    if _RE_GREETING.match(query.strip()):
+        return "GREETING"
+    return None
+
+def _heuristica_basica(query: str) -> str | None:
+    """Layer 2: Padrões comuns heurísticos."""
+    q = query.lower()
+    if "sigaa" in q and "senha" in q:
+        return "WIKI"
+    if "calendário" in q or "calendario" in q:
+        return "CALENDARIO"
+    return None
+
+class RoutingDecision(BaseModel):
+    """Esquema Pydantic para validação estruturada da decisão de roteamento pelo Gemini."""
+    rota: str = Field(description="A rota: CALENDARIO, EDITAL, CONTATOS, WIKI, CRUD, GREETING, ou GERAL")
+    confianca: float = Field(description="Nível de certeza da decisão (0.0 a 1.0)")
+    motivo: str = Field(description="Justificativa breve da decisão (máx 60 caracteres)")
 
 # ── Prompt zero-shot para Flash ────────────────────────────────────────────────
 _SYSTEM_ROUTER = """Você é um classificador de intenções para o Oráculo UEMA.
@@ -90,19 +115,31 @@ async def rotear(
     t0 = time.monotonic()
     ctx = user_context or {}
 
-    # ── Fast-path: saudações não precisam de LLM ─────────
+    # ── Layer 1: Fast-path (Regex) ─────────
     rota_rapida = _regex_rapido(query)
     if rota_rapida:
         ms = int((time.monotonic() - t0) * 1000)
         _LATENCY.observe(ms)
-        _CACHE_HIT.labels(layer="regex").inc()
+        _CACHE_HIT.labels(layer="regex_l1").inc()
         return RouterDecision(
-            rota=rota_rapida, confianca=0.97, motivo="regex_fast_path",
+            rota=rota_rapida, confianca=0.99, motivo="layer_1_regex",
             cache_hit=True, cache_layer="regex", latencia_ms=ms,
-            dag_hint=_dag_hint_para_rota(rota_rapida),
+            dag_hint=_dag_hint_para_rota(rota_rapida, query),
         )
 
-    # ── Flash para queries complexas ──────────────────────
+    # ── Layer 2: Heurística Básica ─────────
+    rota_heuristica = _heuristica_basica(query)
+    if rota_heuristica:
+        ms = int((time.monotonic() - t0) * 1000)
+        _LATENCY.observe(ms)
+        _CACHE_HIT.labels(layer="regex_l2").inc()
+        return RouterDecision(
+            rota=rota_heuristica, confianca=0.85, motivo="layer_2_heuristic",
+            cache_hit=True, cache_layer="regex", latencia_ms=ms,
+            dag_hint=_dag_hint_para_rota(rota_heuristica, query),
+        )
+
+    # ── Layer 3: Flash (LLM) ──────────────────────
     decision = await _classificar_com_flash(query, ctx)
     ms = int((time.monotonic() - t0) * 1000)
     _LATENCY.observe(ms)
@@ -122,13 +159,14 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
     try:
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         response = await client.aio.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",   # 
+            model="gemini-3.1-flash-lite-preview",
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_ROUTER,
                 temperature=0.0,
                 max_output_tokens=80,
                 response_mime_type="application/json",
+                response_schema=RoutingDecision,
             ),
         )
 
@@ -138,7 +176,7 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
             _FLASH_TOKENS.labels(direction="input").inc(usage.prompt_token_count or 0)
             _FLASH_TOKENS.labels(direction="output").inc(usage.candidates_token_count or 0)
 
-        # 🔥 CORREÇÃO DO JSON MARKDOWN (Evita o Expecting value line 1 column 1)
+        # Parsing seguro do JSON
         texto = response.text.strip()
         if texto.startswith("```json"):
             texto = texto[7:-3].strip()
@@ -147,19 +185,22 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
 
         data = json.loads(texto or "{}")
         
-        rota = data.get("rota", "GERAL").upper()
+        # Validação via Pydantic schema
+        decision_validated = RoutingDecision(**data)
+        
+        rota = decision_validated.rota.upper()
         if rota not in ROTAS_VALIDAS:
             rota = "GERAL"
             
-        confianca = float(data.get("confianca", 0.5))
-        motivo = str(data.get("motivo", ""))[:60]
+        confianca = float(decision_validated.confianca)
+        motivo = str(decision_validated.motivo)[:60]
 
         logger.info("🧭 [ROUTER] Flash: rota=%s conf=%.2f | '%.40s'", rota, confianca, query)
 
         return RouterDecision(
             rota=rota, confianca=confianca, motivo=motivo,
             cache_hit=False, cache_layer="miss", latencia_ms=0,
-            dag_hint=_dag_hint_para_rota(rota),
+            dag_hint=_dag_hint_para_rota(rota, query),
         )
 
     except Exception as e:
@@ -168,7 +209,7 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
         return RouterDecision(
             rota=rota, confianca=0.4, motivo=f"regex_fallback: {type(e).__name__}",
             cache_hit=False, cache_layer="miss", latencia_ms=0,
-            dag_hint=_dag_hint_para_rota(rota),
+            dag_hint=_dag_hint_para_rota(rota, query),
         )
 
 
@@ -187,11 +228,20 @@ def _regex_fallback(query: str) -> str:
     return "GERAL"
 
 
-def _dag_hint_para_rota(rota: str) -> dict:
+def _dag_hint_para_rota(rota: str, query: str = "") -> dict:
     """
     Retorna dica de DAG para o Planner.
     Define quais workers devem ser ativados e em que ordem.
     """
+    if rota == "MEDIA_DOWNLOAD":
+        match_ytb = _RE_YTB.search(query)
+        if match_ytb:
+            return {"steps": ["ytb_download"], "url": match_ytb.group(1)}
+        match_insta = _RE_INSTA.search(query)
+        if match_insta:
+            return {"steps": ["insta_download"], "url": match_insta.group(1)}
+        return {"steps": ["ytb_download"], "url": query}
+
     _HINTS = {
         "CALENDARIO":  {"steps": ["rag_search"], "doc_type": "calendario", "k": 8},
         "EDITAL":      {"steps": ["rag_search"], "doc_type": "edital",     "k": 10},

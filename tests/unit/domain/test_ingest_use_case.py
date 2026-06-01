@@ -17,8 +17,8 @@ class MockVectorStore(IVectorStorePort):
     async def salvar_chunks(self, chunks: list) -> None:
         self.chunks_salvos.extend(chunks)
 
-    async def buscar_hibrido(self, query: str, k_vector: int, k_text: int, source_filter: str = None):
-        return []
+    async def buscar_contexto(self, query_text: str, k: int, source_filter: str = None) -> dict:
+        return {"vetorial": [], "textual": []}
 
 # 2. O Teste Unitário
 @pytest.mark.asyncio

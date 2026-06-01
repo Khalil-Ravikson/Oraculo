@@ -30,6 +30,7 @@ ALGORITMO SVS-VAMANA:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import struct
 from functools import lru_cache
@@ -456,11 +457,11 @@ async def acquire_lock(identifier: str, ttl_seconds: int = 60) -> bool:
     Tenta adquirir um lock no Redis. Retorna True se conseguiu, False se já existia.
     Usado para evitar processamento duplicado de mensagens do mesmo usuário.
     """
-    r = await get_redis_text()
+    r = get_redis_text()
     lock_key = f"lock:{identifier}"
     try:
         # nx=True garante que o comando só funciona se a chave NÃO existir
-        adquirido = await r.set(lock_key, "locked", ex=ttl_seconds, nx=True)
+        adquirido = await asyncio.to_thread(r.set, lock_key, "locked", ex=ttl_seconds, nx=True)
         return bool(adquirido)
     except Exception as exc:
         logger.warning("⚠️  Falha ao tentar adquirir lock para %s: %s", identifier, exc)
@@ -469,9 +470,9 @@ async def acquire_lock(identifier: str, ttl_seconds: int = 60) -> bool:
 
 async def release_lock(identifier: str) -> None:
     """Remove o lock do usuário, permitindo novas mensagens."""
-    r = await get_redis_text()
+    r = get_redis_text()
     lock_key = f"lock:{identifier}"
     try:
-        await r.delete(lock_key)
+        await asyncio.to_thread(r.delete, lock_key)
     except Exception as exc:
         logger.warning("⚠️  Falha ao tentar liberar lock para %s: %s", identifier, exc)
