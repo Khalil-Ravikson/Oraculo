@@ -45,7 +45,7 @@ _LATENCY = Histogram(
 
 # ── Rotas válidas ──────────────────────────────────────────────────────────────
 ROTAS_VALIDAS = frozenset({
-    "CALENDARIO", "EDITAL", "CONTATOS", "WIKI", "CRUD", "GREETING", "GERAL", "MEDIA_DOWNLOAD"
+    "CALENDARIO", "EDITAL", "CONTATOS", "WIKI", "CRUD", "GREETING", "GERAL", "MEDIA_DOWNLOAD", "SIGAA"
 })
 
 _REGEX_CACHE: dict[str, re.Pattern] = {}
@@ -72,6 +72,10 @@ _RE_GREETING = re.compile(
 
 _RE_YTB = re.compile(r'(https?://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)[\w\-]+)', re.I)
 _RE_INSTA = re.compile(r'(https?://(?:www\.)?instagram\.com/(?:p|reel)/[\w\-]+)', re.I)
+_RE_SIGAA = re.compile(
+    r'(sigaa|biblioteca|acervo|livro|obra|marc|inscrever|inscrição|processo seletivo|edital sigaa|concurso uema)',
+    re.I
+)
 
 def _regex_rapido(query: str) -> str | None:
     """Layer 1: Fast-path regex ANTES do Flash — economiza ~50 tokens."""
@@ -81,6 +85,8 @@ def _regex_rapido(query: str) -> str | None:
         return "MEDIA_DOWNLOAD"
     if _RE_GREETING.match(query.strip()):
         return "GREETING"
+    if _RE_SIGAA.search(query):
+        return "SIGAA"
     return None
 
 def _heuristica_basica(query: str) -> str | None:
@@ -332,6 +338,14 @@ def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) 
             return {"steps": ["insta_download"], "url": match_insta.group(1)}
         return {"steps": ["ytb_download"], "url": query}
 
+    if rota == "SIGAA":
+        from src.application.use_cases.sigaa_use_cases import SIGAAUseCase
+        uc = SIGAAUseCase()
+        fluxo = uc.detectar_fluxo(query)
+        if fluxo:
+            return {"steps": [fluxo["worker"]], "worker": fluxo["worker"], "args": fluxo["args"]}
+        return {"steps": ["sigaa_biblioteca"], "worker": "sigaa_biblioteca", "args": {}}
+
     if config:
         doc_type = config.get("doc_type", "geral")
         return {
@@ -349,5 +363,6 @@ def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) 
         "CRUD":        {"steps": ["crud_confirm"],                         "k": 0},
         "GREETING":    {"steps": ["greeting"],                             "k": 0},
         "GERAL":       {"steps": ["rag_search"], "doc_type": "geral",      "k": 6},
+        "SIGAA":       {"steps": ["sigaa_biblioteca"],                     "k": 0},
     }
     return _HINTS.get(rota, _HINTS["GERAL"])

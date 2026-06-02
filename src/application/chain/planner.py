@@ -138,6 +138,12 @@ async def criar_plano(
         _PLANNER_LATENCY.observe(ms)
         return plan
 
+    if rota == "SIGAA":
+        plan = _plano_sigaa(query, session_id, user_context, history, fatos or [], dag_hint)
+        ms = int((time.monotonic() - t0) * 1000)
+        _PLANNER_LATENCY.observe(ms)
+        return plan
+
     # ── Gemini Pro para planos RAG ────────────────────────────────────────────
     try:
         plan = await _planejar_com_pro(
@@ -287,6 +293,21 @@ def _plano_media(
         session_id=session_id,
         rota="MEDIA_DOWNLOAD",
         steps=[{"id": "s1", "worker": worker, "args": {"url": url}, "depends_on": []}],
+        context={"query": query, "user_context": user_context,
+                 "history": history, "fatos": fatos},
+    )
+
+def _plano_sigaa(
+    query: str, session_id: str,
+    user_context: dict, history: str, fatos: list[str], dag_hint: dict
+) -> ExecutionPlan:
+    worker = dag_hint.get("worker", "sigaa_biblioteca")
+    args = dag_hint.get("args", {})
+    return ExecutionPlan(
+        plan_id=str(uuid.uuid4()),
+        session_id=session_id,
+        rota="SIGAA",
+        steps=[{"id": "s1", "worker": worker, "args": args, "depends_on": []}],
         context={"query": query, "user_context": user_context,
                  "history": history, "fatos": fatos},
     )

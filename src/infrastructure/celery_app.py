@@ -61,8 +61,7 @@ celery_app.conf.update(
         "src.application.workers.worker_reranker",
         "src.application.workers.worker_action",
         "src.application.workers.worker_greeting",
-
-
+        "src.application.workers.worker_sigaa",
     ],
 
     # ── Beat Schedule ─────────────────────────────────────────────────────────
@@ -80,6 +79,12 @@ celery_app.conf.update(
             "task":     "stream_recovery",
             "schedule": crontab(minute="*/5"),
             "options":  {"queue": "default", "expires": 240},
+        },
+        "sigaa_monitorar_processos": {
+            "task":     "worker_sigaa_processos",
+            "schedule": crontab(hour=8, minute=0),
+            "args":     [{"plan_id": "beat", "session_id": "beat", "nivel": "L"}],
+            "options":  {"queue": "default"},
         },
     },
 
@@ -104,6 +109,9 @@ celery_app.conf.update(
         "worker_reranker":        {"queue": "rag_search"},
         "worker_action":          {"queue": "default"},
         "worker_greeting":       {"queue": "default"},
+        "worker_sigaa_biblioteca":      {"queue": "default"},
+        "worker_sigaa_extensao":        {"queue": "default"},
+        "worker_sigaa_processos":       {"queue": "default"},
     },
 
     beat_scheduler          = "celery.beat:PersistentScheduler",
