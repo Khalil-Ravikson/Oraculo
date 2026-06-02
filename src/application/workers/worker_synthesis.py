@@ -74,12 +74,26 @@ Use *negrito* para dados importantes. Máximo 3 parágrafos. Seja conciso."""
     max_retries=2,
     queue="synthesis",
 )
-def worker_synthesis_task(self, event: dict) -> dict:
+def worker_synthesis_task(self, *args, **kwargs) -> dict:
     import asyncio
-    return asyncio.run(_run_async(event))
+    # Suporta assinatura clássica task(event) e assinatura Canvas task(results, event)
+    if len(args) == 2:
+        results, event = args
+    elif len(args) == 1:
+        if isinstance(args[0], list):
+            results = args[0]
+            event = kwargs.get("event") or {}
+        else:
+            results = []
+            event = args[0]
+    else:
+        results = []
+        event = kwargs.get("event") or {}
+
+    return asyncio.run(_run_async(results, event))
 
 
-async def _run_async(event: dict) -> dict:
+async def _run_async(results: list, event: dict) -> dict:
     """
     Função principal async do worker de síntese.
     """
@@ -94,27 +108,34 @@ async def _run_async(event: dict) -> dict:
     max_tokens  = int(args.get("max_tokens", 512))
     stream_id   = event.get("stream_id", "")
 
-    logger.info("🧠 [SYNTH WORKER] Iniciando | plan=%s step=%s deps=%s",
-                plan_id[:8], step_id, depends_on)
+    logger.info("🧠 [SYNTH WORKER] Iniciando | plan=%s step=%s deps=%s | results=%d",
+                plan_id[:8], step_id, depends_on, len(results))
 
-    # ── Aguarda dependências ───────────────────────────────────────────────────
-    step_results = await _aguardar_dependencias_async(plan_id, depends_on)
-
-    if step_results is None:
-        ms = int((time.monotonic() - t_start) * 1000)
-        logger.error("❌ [SYNTH WORKER] Timeout aguardando deps do plan=%s", plan_id[:8])
-        _publicar_resposta(
-            plan_id=plan_id, session_id=session_id,
-            resposta="Timeout interno. Tente novamente. 🙏",
-            status="timeout", latency_ms=ms,
-        )
-        return {"status": "timeout", "plan_id": plan_id}
-
-    # ── Junta chunks de todos os steps RAG ────────────────────────────────────
     todos_chunks = []
-    for step_id_dep, result_data in step_results.items():
-        chunks = result_data.get("chunks", [])
-        todos_chunks.extend(chunks)
+
+    # 1. Se resultados do chord do Celery foram fornecidos diretamente, extrai os chunks deles
+    if results:
+        for r_data in results:
+            if isinstance(r_data, dict):
+                chunks = r_data.get("chunks", [])
+                todos_chunks.extend(chunks)
+    else:
+        # 2. Fallback: Aguarda dependências no Redis (caso chamado de forma isolada / testes antigos)
+        step_results = await _aguardar_dependencias_async(plan_id, depends_on)
+
+        if step_results is None:
+            ms = int((time.monotonic() - t_start) * 1000)
+            logger.error("❌ [SYNTH WORKER] Timeout aguardando deps do plan=%s", plan_id[:8])
+            _publicar_resposta(
+                plan_id=plan_id, session_id=session_id,
+                resposta="Timeout interno. Tente novamente. 🙏",
+                status="timeout", latency_ms=ms,
+            )
+            return {"status": "timeout", "plan_id": plan_id, "answer": "Timeout interno."}
+
+        for step_id_dep, result_data in step_results.items():
+            chunks = result_data.get("chunks", [])
+            todos_chunks.extend(chunks)
 
     # Deduplicação e ordenação por score
     vistos = set()
@@ -153,7 +174,7 @@ async def _run_async(event: dict) -> dict:
     _marcar_step_completo(plan_id, step_id, {"answer": resposta, "status": status})
 
     logger.info("✅ [SYNTH WORKER] Resposta gerada | %d chars | %dms", len(resposta), ms)
-    return {"status": status, "plan_id": plan_id, "chars": len(resposta), "latency_ms": ms}
+    return {"status": status, "plan_id": plan_id, "answer": resposta, "chars": len(resposta), "latency_ms": ms}
 
 
 async def _aguardar_dependencias_async(

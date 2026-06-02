@@ -205,39 +205,32 @@ async def processar(
             fatos=fatos,
         )
 
-        # ── 3. Despacha Workers (Celery) ───────────────────────────────────────
+        # ── 3. Marca plano em andamento no Redis ──────────────────────────────
+        r.setex(f"plan:status:{plan.plan_id}", 120, "processing")
+
+        # ── 4. Despacha Workers via Celery Canvas (Não bloqueante!) ───────────
         await _despachar_workers(plan)
 
-        # ── 4. Aguarda resposta final ─────────────────────────────────────────
-        final_data = await _aguardar_resposta_final(plan.plan_id, timeout=RESPONSE_TIMEOUT_S)
-
-        if final_data is None:
-            # Timeout: salva estado pendente e retorna mensagem de espera
-            _salvar_plan_pendente(plan)
-            ms = int((time.monotonic() - t0) * 1000)
-            _OS_LATENCY.observe(ms)
-            _OS_REQUESTS.labels(status="timeout").inc()
-            return OSResult(
-                answer="⏳ Sua pergunta está sendo processada. Respondo em instantes!",
-                plan_id=plan.plan_id,
-                rota=decision.rota,
-                cache_hit=False,
-                total_ms=ms,
-                status="timeout",
-            )
+        # ── 5. Dispara aviso de latência com countdown de 3.0 segundos ───────
+        from src.application.tasks.process_message_task import enviar_aviso_latencia_task
+        chat_id = plan.context["user_context"].get("chat_id") or plan.session_id
+        enviar_aviso_latencia_task.apply_async(
+            args=[chat_id, plan.plan_id],
+            countdown=3.0,
+            queue="default"
+        )
 
         ms = int((time.monotonic() - t0) * 1000)
         _OS_LATENCY.observe(ms)
         _OS_REQUESTS.labels(status="ok").inc()
 
         return OSResult(
-            answer=final_data.get("answer", ""),
+            answer="",  # Resposta vazia pois será entregue assincronamente via Canvas callback
             plan_id=plan.plan_id,
             rota=decision.rota,
             cache_hit=False,
             total_ms=ms,
-            status=final_data.get("status", "ok"),
-            action_buttons=final_data.get("action_buttons", [])
+            status="ok",
         )
 
     except Exception as exc:
@@ -257,10 +250,18 @@ async def processar(
 
 
 async def _despachar_workers(plan) -> None:
-    from src.application.workers.registry import dispatch
+    from celery import chord, chain
+    from src.application.workers.worker_rag_search import worker_rag_search_task
+    from src.application.workers.worker_synthesis import worker_synthesis_task
+    from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
     
+    rag_tasks = []
+    synthesis_step = None
+    other_step = None
+
     for step in plan.steps:
-        event = {
+        worker_name = step["worker"]
+        event_args = {
             "plan_id":      plan.plan_id,
             "session_id":   plan.session_id,
             "step_id":      step["id"],
@@ -269,8 +270,69 @@ async def _despachar_workers(plan) -> None:
             "query":        plan.context.get("query", ""),
             **step.get("args", {}),
         }
-        # A mágica acontece aqui: uma única linha substitui os if/else!
-        dispatch(step["worker"], event)
+        
+        if worker_name == "rag_search":
+            rag_tasks.append(worker_rag_search_task.s(event_args))
+        elif worker_name == "synthesis":
+            synthesis_step = step
+        else:
+            other_step = step
+
+    delivery_ctx = {
+        "plan_id": plan.plan_id,
+        "chat_id": plan.context["user_context"].get("chat_id") or plan.session_id,
+        "sender_jid": plan.session_id,
+        "route": plan.rota,
+    }
+
+    # Cenário A: Fluxo RAG clássico (RAG(s) -> Síntese -> Delivery)
+    if rag_tasks and synthesis_step:
+        synthesis_args = {
+            "plan_id":      plan.plan_id,
+            "session_id":   plan.session_id,
+            "step_id":      synthesis_step["id"],
+            "depends_on":   synthesis_step.get("depends_on", []),
+            "plan_context": plan.context,
+            "query":        plan.context.get("query", ""),
+            **synthesis_step.get("args", {}),
+        }
+        
+        # Constrói o fluxo Canvas: chord de RAGs -> Synthesis | WhatsApp Delivery
+        workflow = chord(
+            rag_tasks,
+            worker_synthesis_task.s(synthesis_args) | enviar_resposta_whatsapp_task.s(delivery_ctx)
+        )
+        workflow.apply_async()
+        logger.info("📤 [COGNITIVE OS] Canvas Chord disparado para plan=%s", plan.plan_id[:8])
+
+    # Cenário B: Outros workers sem RAG (ex: greeting, action, etc.)
+    elif other_step:
+        event_args = {
+            "plan_id":      plan.plan_id,
+            "session_id":   plan.session_id,
+            "step_id":      other_step["id"],
+            "depends_on":   other_step.get("depends_on", []),
+            "plan_context": plan.context,
+            "query":        plan.context.get("query", ""),
+            **other_step.get("args", {}),
+        }
+        
+        # Resolve a assinatura do worker dinamicamente a partir do registry
+        from src.application.workers.registry import _REGISTRY, _autodiscover_workers
+        _autodiscover_workers()
+        fn = _REGISTRY.get(other_step["worker"])
+        if fn:
+            workflow = chain(
+                fn.s(event_args),
+                enviar_resposta_whatsapp_task.s(delivery_ctx)
+            )
+            workflow.apply_async()
+            logger.info("📤 [COGNITIVE OS] Canvas Chain disparado para worker=%s plan=%s", 
+                        other_step["worker"], plan.plan_id[:8])
+        else:
+            logger.error("❌ [COGNITIVE OS] Falha ao localizar worker %s no registry", other_step["worker"])
+    else:
+        logger.error("❌ [COGNITIVE OS] Plano inválido ou vazio para plan=%s", plan.plan_id)
 
 
         

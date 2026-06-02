@@ -48,6 +48,22 @@ ROTAS_VALIDAS = frozenset({
     "CALENDARIO", "EDITAL", "CONTATOS", "WIKI", "CRUD", "GREETING", "GERAL", "MEDIA_DOWNLOAD"
 })
 
+_REGEX_CACHE: dict[str, re.Pattern] = {}
+
+def _obter_intent_config(r: Any, nome: str) -> dict:
+    try:
+        raw = r.hget("router:config", nome)
+        if raw:
+            cfg = json.loads(raw if isinstance(raw, str) else raw.decode())
+            return {
+                "doc_type": cfg.get("doc_type", "geral"),
+                "k_vector": cfg.get("k_vector", 6),
+                "k_text":   cfg.get("k_text", 8),
+            }
+    except Exception:
+        pass
+    return {"doc_type": "geral", "k_vector": 6, "k_text": 8}
+
 _RE_GREETING = re.compile(
     r'^(oi|olá|ola|bom\s?dia|boa\s?tarde|boa\s?noite|hey|hi|hello|'
     r'tudo\s?bem|e\s?aí|eai|opa|obrigad[ao]|valeu|vlw|tmj|ok|certo|👍|🙏|perfeito)\s*[!.?]*$',
@@ -115,7 +131,7 @@ async def rotear(
     t0 = time.monotonic()
     ctx = user_context or {}
 
-    # ── Layer 1: Fast-path (Regex) ─────────
+    # ── Layer 1: Fast-path (Hardcoded Regex) ─────────
     rota_rapida = _regex_rapido(query)
     if rota_rapida:
         ms = int((time.monotonic() - t0) * 1000)
@@ -139,7 +155,77 @@ async def rotear(
             dag_hint=_dag_hint_para_rota(rota_heuristica, query),
         )
 
-    # ── Layer 3: Flash (LLM) ──────────────────────
+    # ── Layer 3: Redis-Seeded Regex (Dinamico) ─────────
+    from src.infrastructure.redis_client import get_redis_text
+    r_text = get_redis_text()
+    try:
+        todas_regex = r_text.hgetall("router:regex")
+        if todas_regex:
+            q_lower = query.lower().strip()
+            for nome_raw, regex_raw in todas_regex.items():
+                nome = nome_raw if isinstance(nome_raw, str) else nome_raw.decode()
+                regex = regex_raw if isinstance(regex_raw, str) else regex_raw.decode()
+                if not regex:
+                    continue
+                if nome not in _REGEX_CACHE:
+                    try:
+                        _REGEX_CACHE[nome] = re.compile(regex, re.IGNORECASE)
+                    except re.error:
+                        continue
+                if _REGEX_CACHE[nome].search(q_lower):
+                    cfg = _obter_intent_config(r_text, nome)
+                    ms = int((time.monotonic() - t0) * 1000)
+                    _LATENCY.observe(ms)
+                    _CACHE_HIT.labels(layer="regex_seeded").inc()
+                    return RouterDecision(
+                        rota=nome, confianca=0.95, motivo="seeded_regex_match",
+                        cache_hit=True, cache_layer="regex", latencia_ms=ms,
+                        dag_hint=_dag_hint_para_rota(nome, query, cfg),
+                    )
+    except Exception as e:
+        logger.debug("Falha no roteamento por regex dinâmico: %s", e)
+
+    # ── Layer 4: Redis KNN Search (Dinamico) ─────────
+    try:
+        from src.infrastructure.redis_client import get_redis, IDX_TOOLS
+        from src.rag.embeddings import get_embeddings
+        import numpy as np
+        from redis.commands.search.query import Query as RQuery
+        import asyncio
+
+        r_bytes = get_redis()
+        emb = get_embeddings()
+        vetor = await asyncio.to_thread(emb.embed_query, query.lower().strip())
+        vetor_bytes = np.array(vetor, dtype=np.float32).tobytes()
+
+        q_knn = (
+            RQuery("*=>[KNN 1 @embedding $vec AS score]")
+            .sort_by("score")
+            .return_fields("name", "score")
+            .dialect(2)
+            .paging(0, 1)
+        )
+        res = r_bytes.ft(IDX_TOOLS).search(q_knn, {"vec": vetor_bytes})
+        if res.docs:
+            doc = res.docs[0]
+            distancia = float(getattr(doc, "score", 1.0))
+            similarity = max(0.0, 1.0 - distancia)
+            if similarity >= 0.82:
+                nome_raw = getattr(doc, "name", "GERAL")
+                nome = nome_raw if isinstance(nome_raw, str) else nome_raw.decode()
+                cfg = _obter_intent_config(r_text, nome)
+                ms = int((time.monotonic() - t0) * 1000)
+                _LATENCY.observe(ms)
+                _CACHE_HIT.labels(layer="knn_seeded").inc()
+                return RouterDecision(
+                    rota=nome, confianca=round(0.90 * similarity, 2), motivo="seeded_knn_match",
+                    cache_hit=True, cache_layer="semantic", latencia_ms=ms,
+                    dag_hint=_dag_hint_para_rota(nome, query, cfg),
+                )
+    except Exception as e:
+        logger.debug("Falha no roteamento por KNN dinâmico: %s", e)
+
+    # ── Layer 5: Flash (LLM) ──────────────────────
     decision = await _classificar_com_flash(query, ctx)
     ms = int((time.monotonic() - t0) * 1000)
     _LATENCY.observe(ms)
@@ -190,7 +276,11 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
         
         rota = decision_validated.rota.upper()
         if rota not in ROTAS_VALIDAS:
-            rota = "GERAL"
+            # Também aceita se existir no Redis config (intents semeadas dinamicamente)
+            from src.infrastructure.redis_client import get_redis_text
+            r_text = get_redis_text()
+            if not r_text.hexists("router:config", rota):
+                rota = "GERAL"
             
         confianca = float(decision_validated.confianca)
         motivo = str(decision_validated.motivo)[:60]
@@ -228,7 +318,7 @@ def _regex_fallback(query: str) -> str:
     return "GERAL"
 
 
-def _dag_hint_para_rota(rota: str, query: str = "") -> dict:
+def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) -> dict:
     """
     Retorna dica de DAG para o Planner.
     Define quais workers devem ser ativados e em que ordem.
@@ -241,6 +331,15 @@ def _dag_hint_para_rota(rota: str, query: str = "") -> dict:
         if match_insta:
             return {"steps": ["insta_download"], "url": match_insta.group(1)}
         return {"steps": ["ytb_download"], "url": query}
+
+    if config:
+        doc_type = config.get("doc_type", "geral")
+        return {
+            "steps": ["greeting"] if doc_type == "greeting" else ["rag_search"],
+            "doc_type": doc_type,
+            "k_vector": config.get("k_vector", 6),
+            "k_text": config.get("k_text", 8),
+        }
 
     _HINTS = {
         "CALENDARIO":  {"steps": ["rag_search"], "doc_type": "calendario", "k": 8},

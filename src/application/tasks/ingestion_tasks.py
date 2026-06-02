@@ -13,11 +13,24 @@ from src.infrastructure.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
+def _calcular_sha256(file_path: str) -> str:
+    import hashlib
+    sha256_hash = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
+    except Exception as e:
+        logger.error("❌ Falha ao calcular sha256 para %s: %s", file_path, e)
+        return ""
+
+
 @celery_app.task(
     name        = "processar_documento",
     bind        = True,
-    max_retries = 2,
-    default_retry_delay = 30,
+    max_retries = 20,
+    default_retry_delay = 10,
     queue       = "admin",
 )
 def processar_documento(
@@ -25,6 +38,8 @@ def processar_documento(
     file_path:       str,
     strategy_params: dict,
     chat_id:         str = "",
+    completed_batches: int = 0,
+    accumulated_embeddings: list = None,
 ) -> dict:
     """
     Ingere um documento com a estratégia de chunking especificada.
@@ -44,6 +59,35 @@ def processar_documento(
 
     source = os.path.basename(file_path)
     ext    = os.path.splitext(source)[1].lower()
+
+    # Calcular hash do arquivo
+    file_hash = _calcular_sha256(file_path)
+
+    from src.infrastructure.redis_client import (
+        deletar_chunks_por_source,
+        acquire_token_bucket,
+        get_document_hash,
+        set_document_hash,
+    )
+
+    if completed_batches == 0:
+        # Deduplicação incremental
+        old_hash = get_document_hash(source)
+        if old_hash and old_hash == file_hash:
+            logger.info("♻️  [DEDUPLICAÇÃO] Hash idêntico detectado para '%s'. Ignorando ingestão.", source)
+            result = {
+                "ok":       True,
+                "source":   source,
+                "bypassed": True,
+                "msg":      "Documento idêntico já ingerido. Ignorando.",
+            }
+            if chat_id:
+                _notificar_admin(chat_id, result)
+            return result
+
+        # Se hash diferente, limpa chunks antigos antes de começar
+        logger.info("🗑️  [DEDUPLICAÇÃO] Chave/Hash diferente para '%s'. Deletando chunks antigos.", source)
+        deletar_chunks_por_source(source)
 
     try:
         # ── 1. Parse ──────────────────────────────────────────────────────────
@@ -73,31 +117,41 @@ def processar_documento(
         emb_model  = get_embeddings()
         textos_raw = [c["text"] for c in chunks]
         
-        # --- RATE LIMIT CONTROL: Vetorização em Lotes ---
-        embeddings = []
-        batch_size = 50  # Processa 50 chunks por vez (limite do Gemini free é 100/min)
-        sleep_time = 15  # Espera 15 segundos entre lotes
-        
+        # --- RATE LIMIT CONTROL: Vetorização em Lotes com Token Bucket ---
+        if accumulated_embeddings is None:
+            accumulated_embeddings = []
+            
+        batch_size = 50  # Processa 50 chunks por lote
         total_lotes = (len(textos_raw) + batch_size - 1) // batch_size
-        logger.info("Iniciando vetorização: %d chunks em %d lotes.", len(textos_raw), total_lotes)
+        logger.info("Iniciando vetorização: %d chunks em %d lotes (retomando do lote %d).", 
+                    len(textos_raw), total_lotes, completed_batches + 1)
         
-        for i in range(0, len(textos_raw), batch_size):
+        for i in range(completed_batches * batch_size, len(textos_raw), batch_size):
             lote_atual = textos_raw[i:i + batch_size]
             num_lote = (i // batch_size) + 1
+            
+            # Tenta adquirir 1 token para este lote
+            # Taxa limite: 15 requisições por minuto (15 RPM), refill_rate = 0.25 tokens/s
+            if not acquire_token_bucket("limiter:embeddings", capacity=15, refill_rate=0.25, requested=1):
+                logger.warning("🚨 [RATE LIMIT] Exaustão de tokens no bucket para o lote %d/%d. "
+                               "Colocando a task em espera (Celery retry).", num_lote, total_lotes)
+                # Reagenda a task no Celery desocupando o worker thread
+                raise self.retry(
+                    kwargs={
+                        "completed_batches": num_lote - 1,
+                        "accumulated_embeddings": accumulated_embeddings
+                    },
+                    countdown=10
+                )
             
             logger.info("Vetorizando lote %d/%d (%d chunks)...", num_lote, total_lotes, len(lote_atual))
             
             # Chama a API do Gemini apenas para este lote
             embeddings_lote = emb_model.embed_documents(lote_atual)
-            embeddings.extend(embeddings_lote)
-            
-            # Se não for o último lote, aplica a pausa para não estourar a cota
-            if i + batch_size < len(textos_raw):
-                logger.info("Aguardando %ds para controle de Rate Limit (429)...", sleep_time)
-                time.sleep(sleep_time)
+            accumulated_embeddings.extend(embeddings_lote)
         # ------------------------------------------------
 
-        for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+        for i, (chunk, emb) in enumerate(zip(chunks, accumulated_embeddings)):
             chunk_id = hashlib.md5(f"{source}:{i}".encode()).hexdigest()[:16]
             salvar_chunk(
                 chunk_id    = chunk_id,
@@ -117,6 +171,9 @@ def processar_documento(
                 },
             )
 
+        # Salva o hash atual no Redis após ingestão completa com sucesso
+        set_document_hash(source, file_hash)
+
         ms = int((time.monotonic() - t0) * 1000)
         result = {
             "ok":     True,
@@ -133,6 +190,9 @@ def processar_documento(
         return result
 
     except Exception as e:
+        from celery.exceptions import CeleryError
+        if isinstance(e, CeleryError) or type(e).__name__ in ("Retry", "MaxRetriesExceededError"):
+            raise e
         logger.exception("❌ processar_documento falhou: %s", e)
         raise self.retry(exc=e, countdown=30)
 
@@ -180,13 +240,20 @@ def _notificar_admin(chat_id: str, result: dict) -> None:
     try:
         from src.services.evolution_service import EvolutionService
         svc = EvolutionService()
-        msg = (
-            f"✅ *Ingestão concluída!*\n\n"
-            f"📄 `{result['source']}`\n"
-            f"🧩 Chunks: *{result['chunks']}*\n"
-            f"📊 Chars: {result['chars']:,}\n"
-            f"⏱  {result['ms']}ms"
-        )
+        if result.get("bypassed"):
+            msg = (
+                f"ℹ️ *Documento idêntico já ingerido.*\n\n"
+                f"📄 Ficheiro: `{result['source']}`\n\n"
+                f"Nenhuma alteração detectada. Ignorando re-processamento."
+            )
+        else:
+            msg = (
+                f"✅ *Ingestão concluída!*\n\n"
+                f"📄 `{result['source']}`\n"
+                f"🧩 Chunks: *{result['chunks']}*\n"
+                f"📊 Chars: {result['chars']:,}\n"
+                f"⏱  {result['ms']}ms"
+            )
         asyncio.run(svc.enviar_mensagem(chat_id, msg))
     except Exception as e:
         logger.warning("⚠️  Notificação admin falhou: %s", e)

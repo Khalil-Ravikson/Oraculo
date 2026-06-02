@@ -27,10 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from src.domain.ports.document_parser import IDocumentParser
+from src.domain.ports.document_parser import IDocumentParser
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +89,10 @@ def _get_llamaparse_parser() -> "IDocumentParser":
     from src.infrastructure.adapters.parsers.llamaparse_adapter import LlamaParseAdapter
     return LlamaParseAdapter()
 
+def _get_rapidocr_parser() -> "IDocumentParser":
+    from src.infrastructure.adapters.parsers.rapidocr_adapter import RapidOcrAdapter
+    return RapidOcrAdapter()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Registry
 # ─────────────────────────────────────────────────────────────────────────────
@@ -104,6 +105,7 @@ _REGISTRY: dict[str, callable] = {
     "unstructured":  _get_unstructured_parser,
     "txt":           _get_txt_parser,
     "csv":           _get_csv_parser,
+    "rapidocr":      _get_rapidocr_parser,
 }
 
 # Mapeamento extensão → lista de parsers candidatos (ordem de preferência)
@@ -118,6 +120,9 @@ _EXT_TO_PARSERS: dict[str, list[str]] = {
     ".txt":  ["txt"],
     ".md":   ["txt"],
     ".csv":  ["csv", "txt", "unstructured"],
+    ".png":  ["rapidocr"],
+    ".jpg":  ["rapidocr"],
+    ".jpeg": ["rapidocr"],
 }
 
 # Threshold de chars/página para detectar PDF-scan (abaixo = provavelmente imagem)
@@ -196,23 +201,33 @@ class ParserFactory:
             is_scan = _detect_pdf_scan(file_path)
             if is_scan:
                 logger.info("📷 PDF scan detectado: %s → usando marker", os.path.basename(file_path))
-                candidates = ["marker", "unstructured", "pymupdf"]
+                candidates = ["marker", "rapidocr", "unstructured", "pymupdf"]
             else:
                 logger.info("📄 PDF com texto: %s → usando docling", os.path.basename(file_path))
                 candidates = ["docling", "pymupdf"]
 
+        chosen_parser = None
         for parser_name in candidates:
             try:
-                parser = ParserFactory.get(parser_name)
+                chosen_parser = ParserFactory.get(parser_name)
                 logger.debug("✅ Parser selecionado: %s para %s", parser_name, os.path.basename(file_path))
-                return parser
+                break
             except (ImportError, ValueError):
                 logger.debug("⏭️  Parser '%s' não disponível, tentando próximo...", parser_name)
                 continue
 
-        # Fallback último recurso: txt (sempre disponível)
-        logger.warning("⚠️  Nenhum parser ideal disponível para '%s'. Usando txt fallback.", file_path)
-        return _get_txt_parser()
+        if chosen_parser is None:
+            logger.warning("⚠️  Nenhum parser ideal disponível para '%s'. Usando txt fallback.", file_path)
+            chosen_parser = _get_txt_parser()
+
+        if ext == ".pdf":
+            try:
+                ocr_parser = _get_rapidocr_parser()
+                return AutoParserWrapper(chosen_parser, ocr_parser)
+            except Exception:
+                pass
+
+        return chosen_parser
 
     @staticmethod
     def available() -> list[str]:
@@ -225,6 +240,34 @@ class ParserFactory:
             except (ImportError, Exception):
                 pass
         return available
+
+
+class AutoParserWrapper(IDocumentParser):
+    """
+    Wrapper que executa o parser primário e, se for um PDF e retornar texto muito
+    curto (< 100 caracteres), faz fallback transparente para OCR local.
+    """
+    def __init__(self, primary: IDocumentParser, fallback_ocr: IDocumentParser) -> None:
+        self.primary = primary
+        self.fallback_ocr = fallback_ocr
+
+    def parse(self, file_path: str, instruction: str = "") -> str:
+        texto = self.primary.parse(file_path, instruction)
+        ext = os.path.splitext(file_path)[1].lower()
+        
+        if ext == ".pdf" and len(texto.strip()) < 100:
+            logger.warning(
+                "⚠️  Texto extraído muito curto (%d chars) em '%s'. Ativando fallback OCR...",
+                len(texto.strip()), os.path.basename(file_path)
+            )
+            try:
+                texto_ocr = self.fallback_ocr.parse(file_path, instruction)
+                if len(texto_ocr.strip()) > len(texto.strip()):
+                    return texto_ocr
+            except Exception as e:
+                logger.error("❌ Falha no fallback OCR para '%s': %s", file_path, e)
+                
+        return texto
 
 
 def _detect_pdf_scan(file_path: str, pages_to_check: int = 3) -> bool:
@@ -247,9 +290,10 @@ def _detect_pdf_scan(file_path: str, pages_to_check: int = 3) -> bool:
 
 
 _INSTALL_HINTS = {
-    "llamaparse":   "llama-parse", # Adicionado
+    "llamaparse":   "llama-parse",
     "pymupdf":      "pymupdf",
     "docling":      "docling",
     "marker":       "marker-pdf",
     "unstructured": "unstructured[pdf,docx]",
+    "rapidocr":     "rapidocr-onnxruntime",
 }

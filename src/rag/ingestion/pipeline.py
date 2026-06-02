@@ -230,3 +230,34 @@ class IngestionPipeline:
             chunker    = ChunkerFactory.for_doc_type(doc_type),
             embeddings = get_embeddings(),
         )
+
+
+DOCUMENT_CONFIG: dict[str, dict] = {}
+PDF_CONFIG = DOCUMENT_CONFIG
+
+
+class Ingestor:
+    """Compatibility shim for legacy Ingestor class."""
+    def _ingerir_ficheiro(self, caminho: str) -> int:
+        import os
+        from src.rag.ingestion import DOCUMENT_CONFIG
+        nome = os.path.basename(caminho)
+        cfg = DOCUMENT_CONFIG.get(nome, {})
+        
+        params = {
+            "size": cfg.get("chunk_size", 400),
+            "overlap": cfg.get("overlap", 60),
+            "strategy": cfg.get("strategy", "recursive"),
+            "doc_type": cfg.get("doc_type", "geral"),
+            "label": cfg.get("label", os.path.splitext(nome)[0].upper()),
+        }
+        
+        from src.application.tasks.ingestion_tasks import processar_documento
+        res = processar_documento(None, file_path=caminho, strategy_params=params)
+        if res.get("ok"):
+            return res.get("chunks", 0)
+        return 0
+
+    def diagnosticar(self) -> dict:
+        from src.infrastructure.redis_client import diagnosticar
+        return diagnosticar()

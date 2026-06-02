@@ -266,9 +266,10 @@ def busca_hibrida(
     k_vector:       int = 8,
     k_text:         int = 8,
     rrf_k:          int = 60,
+    metadata_filter: dict | None = None,
 ) -> list[dict]:
     """
-    Busca híbrida BM25 + Vector com RRF manual (SÍNCRONO).
+    Busca híbrida BM25 + Vector com RRF manual (SÍNCRONO) e suporte a filtros de metadados.
 
     Mantida para compatibilidade com:
       - calendar_tool.py, tool_edital.py, tool_contatos.py
@@ -280,14 +281,28 @@ def busca_hibrida(
     """
     r = get_redis()
 
-    # ── Busca vectorial ────────────────────────────────────────────────────────
-    emb_bytes = np.array(query_embedding, dtype=np.float32).tobytes()
-
+    # ── Construção dos filtros dinâmicos de metadados ─────────────────────────
+    filter_parts = []
     if source_filter:
         safe = source_filter.replace(".", "\\.").replace("-", "\\-")
-        vec_q_str = f"(@source:{{{safe}}})=>[KNN {k_vector} @embedding $vec AS vec_score]"
-    else:
-        vec_q_str = f"*=>[KNN {k_vector} @embedding $vec AS vec_score]"
+        filter_parts.append(f"@source:{{{safe}}}")
+
+    if metadata_filter:
+        for key, val in metadata_filter.items():
+            if val:
+                if isinstance(val, list):
+                    # Multi-tag match (ex: @campus:{sao_luis|todos})
+                    escaped_vals = [v.replace(".", "\\.").replace("-", "\\-").replace(" ", "\\ ") for v in val]
+                    safe_val = "|".join(escaped_vals)
+                else:
+                    safe_val = str(val).replace(".", "\\.").replace("-", "\\-").replace(" ", "\\ ")
+                filter_parts.append(f"@{key}:{{{safe_val}}}")
+
+    filter_prefix = f"({' '.join(filter_parts)})" if filter_parts else "*"
+
+    # ── Busca vectorial ────────────────────────────────────────────────────────
+    emb_bytes = np.array(query_embedding, dtype=np.float32).tobytes()
+    vec_q_str = f"{filter_prefix}=>[KNN {k_vector} @embedding $vec AS vec_score]"
 
     vec_query = (
         Query(vec_q_str)
@@ -306,9 +321,8 @@ def busca_hibrida(
 
     # ── Busca textual (BM25) ──────────────────────────────────────────────────
     safe_text = _escapar_query_redis(query_text)
-    if source_filter:
-        safe = source_filter.replace(".", "\\.").replace("-", "\\-")
-        txt_q_str = f"(@source:{{{safe}}}) ({safe_text})"
+    if filter_parts:
+        txt_q_str = f"({' '.join(filter_parts)}) ({safe_text})"
     else:
         txt_q_str = safe_text
 
@@ -476,3 +490,67 @@ async def release_lock(identifier: str) -> None:
         await asyncio.to_thread(r.delete, lock_key)
     except Exception as exc:
         logger.warning("⚠️  Falha ao tentar liberar lock para %s: %s", identifier, exc)
+
+
+def acquire_token_bucket(key: str, capacity: int = 15, refill_rate: float = 0.25, requested: int = 1) -> bool:
+    """
+    Algoritmo Token Bucket atômico executado via script Lua no Redis.
+    SÍNCRONO — compatível com workers Celery.
+    """
+    r = get_redis()
+    lua_script = """
+    local key = KEYS[1]
+    local capacity = tonumber(ARGV[1])
+    local refill_rate = tonumber(ARGV[2])
+    local requested = tonumber(ARGV[3])
+    local now = tonumber(ARGV[4])
+
+    local data = redis.call('HMGET', key, 'tokens', 'last_updated')
+    local tokens = tonumber(data[1])
+    local last_updated = tonumber(data[2])
+
+    if not tokens then
+        tokens = capacity
+        last_updated = now
+    else
+        local elapsed = math.max(0, now - last_updated)
+        tokens = math.min(capacity, tokens + elapsed * refill_rate)
+    end
+
+    if tokens >= requested then
+        tokens = tokens - requested
+        redis.call('HMSET', key, 'tokens', tokens, 'last_updated', now)
+        redis.call('EXPIRE', key, 86400)
+        return 1
+    else
+        return 0
+    end
+    """
+    import time
+    now = time.time()
+    try:
+        res = r.eval(lua_script, 1, key, capacity, refill_rate, requested, now)
+        return int(res) == 1
+    except Exception as exc:
+        logger.error("❌ Erro ao executar acquire_token_bucket para %s: %s", key, exc)
+        # Fallback seguro para não travar o fluxo caso o Redis esteja com problemas de eval
+        return True
+
+
+def get_document_hash(source: str) -> str | None:
+    """Retorna o hash SHA-256 do documento no Redis (SÍNCRONO)."""
+    try:
+        r = get_redis_text()
+        return r.hget("ingest:hashes", source)
+    except Exception as exc:
+        logger.warning("⚠️  Falha ao obter hash do documento %s: %s", source, exc)
+        return None
+
+
+def set_document_hash(source: str, sha256_hash: str) -> None:
+    """Salva o hash SHA-256 do documento no Redis (SÍNCRONO)."""
+    try:
+        r = get_redis_text()
+        r.hset("ingest:hashes", source, sha256_hash)
+    except Exception as exc:
+        logger.warning("⚠️  Falha ao salvar hash do documento %s: %s", source, exc)

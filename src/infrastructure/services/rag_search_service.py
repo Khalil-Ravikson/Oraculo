@@ -277,6 +277,7 @@ class RAGSearchService:
         rota: str = "GERAL",
         fatos: list[str] | None = None,
         historico: str = "",
+        metadata_filter: dict | None = None,
     ) -> ToolResult:
         """
         Busca híbrida avançada utilizando expansão paralela, fusão RRF e pipeline de fallback.
@@ -320,6 +321,7 @@ class RAGSearchService:
                         source_filter=source_filter,
                         k_vector=kv,
                         k_text=kt,
+                        metadata_filter=metadata_filter,
                     )
                 )
             
@@ -364,6 +366,7 @@ class RAGSearchService:
                     source_filter=source_filter,
                     k_vector=k_vector,
                     k_text=k_text,
+                    metadata_filter=metadata_filter,
                 )
                 
                 # Deduplica e ordena os resultados do step-back

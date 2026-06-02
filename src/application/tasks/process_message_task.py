@@ -279,7 +279,7 @@ async def _handle_message(**kwargs) -> None:
     from src.infrastructure.redis_client import get_redis_text
     from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
     from src.application.routing.message_router import MessageRouter, DispatchTarget
-    from src.application.routing.command_registry import CommandContext, dispatch_admin, dispatch_public
+    from src.application.routing.command_builder import CommandContext, dispatch_admin, dispatch_public
     from src.application.routing.registration_funnel import RegistrationFunnel
     from src.infrastructure.settings import settings 
 
@@ -411,3 +411,87 @@ def _is_admin(phone: str, redis_client) -> bool:
     from src.infrastructure.settings import settings
     admin_numbers = [n.strip() for n in settings.ADMIN_NUMBERS.split(",") if n.strip()]
     return phone in admin_numbers
+
+
+@celery_app.task(name="enviar_resposta_whatsapp", bind=True, max_retries=3)
+def enviar_resposta_whatsapp_task(self, synth_result: dict, delivery_ctx: dict) -> dict:
+    import asyncio
+    return asyncio.run(_enviar_resposta_whatsapp_async(self, synth_result, delivery_ctx))
+
+
+async def _enviar_resposta_whatsapp_async(task, synth_result: dict, delivery_ctx: dict) -> dict:
+    from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
+    from src.infrastructure.redis_client import get_redis_text
+    
+    plan_id = synth_result.get("plan_id") or delivery_ctx.get("plan_id")
+    chat_id = delivery_ctx.get("chat_id")
+    sender = delivery_ctx.get("sender_jid")
+    answer = synth_result.get("answer") or ""
+    status = synth_result.get("status") or "ok"
+    error = synth_result.get("error") or ""
+
+    r = get_redis_text()
+    
+    # 1. Marca plano como concluído no Redis
+    r.set(f"plan:status:{plan_id}", "completed")
+
+    if not answer:
+        logger.warning("⚠️  [DELIVERY] Resposta de síntese vazia para o plan=%s", plan_id)
+        return {"status": "empty", "plan_id": plan_id}
+
+    # 2. Adiciona avaliação se status ok
+    if status == "ok" and not error:
+        answer += "\n\n_Avalie: !1 (péssimo) a !5 (perfeito)_"
+
+    # 3. Envia mensagem via Gateway
+    gateway = EvolutionAdapter()
+    try:
+        await gateway.enviar_mensagem(chat_id, answer)
+        logger.info("✅ [DELIVERY] Resposta entregue com sucesso via WhatsApp para %s", chat_id)
+    except Exception as exc:
+        logger.error("❌ [DELIVERY] Falha ao entregar resposta: %s", exc)
+        raise task.retry(exc=exc, countdown=3)
+
+    # 4. Salva métricas
+    result_metric = type("R", (), {
+        "route": delivery_ctx.get("route", "GERAL"),
+        "crag_score": 0.0,
+        "tokens_used": 0,
+        "chunks_count": 0,
+        "total_ms": synth_result.get("latency_ms", 0),
+        "error": error,
+    })()
+    try:
+        _salvar_metrica(sender, result_metric)
+    except Exception:
+        pass
+
+    return {"status": "delivered", "plan_id": plan_id}
+
+
+@celery_app.task(name="enviar_aviso_latencia", bind=True)
+def enviar_aviso_latencia_task(self, chat_id: str, plan_id: str) -> dict:
+    import asyncio
+    return asyncio.run(_enviar_aviso_latencia_async(chat_id, plan_id))
+
+
+async def _enviar_aviso_latencia_async(chat_id: str, plan_id: str) -> dict:
+    from src.infrastructure.redis_client import get_redis_text
+    from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
+
+    r = get_redis_text()
+    status = r.get(f"plan:status:{plan_id}")
+    
+    if status == "completed" or (isinstance(status, bytes) and status.decode() == "completed"):
+        logger.info("ℹ️  [LATENCY WARNING] Plano %s concluído. Aviso cancelado.", plan_id)
+        return {"status": "skipped", "reason": "completed"}
+
+    logger.warning("⏳ [LATENCY WARNING] Plano %s pendente. Enviando aviso de latência...", plan_id)
+    gateway = EvolutionAdapter()
+    try:
+        await gateway.enviar_digitando(chat_id, duration_ms=2000)
+        await gateway.enviar_mensagem(chat_id, _WARNING_MSG)
+        return {"status": "sent", "plan_id": plan_id}
+    except Exception as exc:
+        logger.error("❌ [LATENCY WARNING] Falha ao enviar aviso: %s", exc)
+        return {"status": "error", "error": str(exc)}
