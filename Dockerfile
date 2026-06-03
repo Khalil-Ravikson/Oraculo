@@ -1,5 +1,5 @@
 # =============================================================================
-# Dockerfile — Oráculo UEMA (Multi-stage, BuildKit Cache, Rootless)
+# Dockerfile — Oráculo UEMA (Multi-stage, BuildKit Cache, UV, Rootless)
 # =============================================================================
 
 # Define a variável de ambiente global para o caminho do Playwright
@@ -9,53 +9,34 @@ ARG PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 FROM python:3.11-slim AS builder
 ARG PLAYWRIGHT_BROWSERS_PATH
 
-# Exporta a variável para as instruções do Builder
 ENV PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH}
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Instala uv para builds ultra rápidos
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uv/bin/uv
 
 WORKDIR /build
 
-# Cache do APT para o gerenciador de pacotes do Linux
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends curl
-
 COPY requirements.txt .
 
-RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip
+# Cria o virtualenv e instala dependências via uv com cache de downloads
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /uv/bin/uv venv /opt/venv && \
+    /uv/bin/uv pip install --default-timeout=120 -r requirements.txt
 
-# Cache do pip
-RUN --mount=type=cache,target=/root/.cache/pip \
-    /opt/venv/bin/pip install --default-timeout=120 -r requirements.txt
-
-# Agora o build vai passar direto por aqui usando o cache perfeitamente!
-RUN --mount=type=cache,target=/root/.cache/ms-playwright \
-    /opt/venv/bin/playwright install chromium && \
-    mkdir -p ${PLAYWRIGHT_BROWSERS_PATH} && \
-    cp -r /root/.cache/ms-playwright/. ${PLAYWRIGHT_BROWSERS_PATH}/
+# Instala o Chromium direto no diretório definitivo sem cópias redundantes
+RUN /opt/venv/bin/playwright install chromium
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime
 ARG PLAYWRIGHT_BROWSERS_PATH
 
-# Garante que o runtime conheça o caminho do navegador
+# Garante que o runtime conheça o caminho do navegador e do virtualenv
 ENV PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH}
-
-# 🔥 OTIMIZAÇÃO 3: Cache do APT no Runtime + Instalação de dependências do sistema do Playwright
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
-    curl \
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libxcb1 \
-    libx11-xcb1 \
-    # Caso falte alguma dependência do chromium, o comando abaixo resolve em build time:
-    && /opt/venv/bin/playwright install-deps chromium 2>/dev/null || true
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH="/app"
 
 # Cria utilizador sem privilégios
 RUN groupadd --gid 1001 oraculo && \
@@ -63,24 +44,27 @@ RUN groupadd --gid 1001 oraculo && \
 
 WORKDIR /app
 
-# Copia o venv do builder
+# Copia o venv e os binários do Chromium do builder
 COPY --from=builder /opt/venv /opt/venv
-
-# 🔥 CORREÇÃO CRUCIAL: Copia os binários do Chromium que foram gerados no builder
 COPY --from=builder ${PLAYWRIGHT_BROWSERS_PATH} ${PLAYWRIGHT_BROWSERS_PATH}
 
-ENV PATH="/opt/venv/bin:$PATH"
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH="/app"
+# Instala bibliotecas nativas essenciais e as dependências nativas do Chromium
+# Agora que o virtualenv está copiado, a instalação automatizada funciona 100%
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && /opt/venv/bin/playwright install-deps chromium \
+    && apt-get purge -y --auto-remove \
+    && rm -rf /var/lib/apt/lists/*
 
-# 🔥 OTIMIZAÇÃO 4: Ordem de COPY por frequência de alteração (Menos frequentes primeiro)
+# Cópia ordenada por frequência de alteração (mais frequente por último)
 COPY --chown=oraculo:oraculo alembic.ini ./
 COPY --chown=oraculo:oraculo migrations/ ./migrations/
 COPY --chown=oraculo:oraculo dados/      ./dados/
 COPY --chown=oraculo:oraculo templates/  ./templates/
 COPY --chown=oraculo:oraculo static/     ./static/
-# O código fonte (src) muda toda hora, fica por último para não quebrar o cache de cima
 COPY --chown=oraculo:oraculo src/        ./src/
 
 USER oraculo

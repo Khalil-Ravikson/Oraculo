@@ -1,4 +1,4 @@
-# docker-compose.yml — Oráculo UEMA v6.2 (Dev/Stable) 
+# docker-compose.yml — Oráculo UEMA v6.3 (Dev/Stable - Optimized)
 networks:
   oraculo_net:
     driver: bridge
@@ -12,10 +12,11 @@ volumes:
   grafana_data:
   prometheus_data:
 
+# ── Modelos Base (Âncoras YAML) ────────────────────────────────────────────────
 x-app-env: &app-env
   env_file: .env
   environment:
-    # Usando IPs fixos para blindar contra falhas de DNS do WSL
+    # IPs fixos para mitigar falhas de DNS do subsistema WSL
     REDIS_URL: "redis://172.18.0.50:6379/0"
     DATABASE_URL: "postgresql+asyncpg://user:${POSTGRES_PASSWORD}@172.18.0.40:5432/oraculo"
     LLAMA_CLOUD_API_KEY: "${LLAMA_CLOUD_API_KEY}"
@@ -35,6 +36,22 @@ x-build: &build
     context: .
     dockerfile: Dockerfile
     target: runtime
+
+# Modelo unificado para todos os workers do Celery (evita duplicação massiva de volumes e dependências)
+x-worker-base: &worker-base
+  <<: [*build, *restart, *logging, *app-env]
+  volumes:
+    - ./src:/app/src
+    - ./dados:/app/dados
+    # Isolamento de segurança: mapeia pasta temporária interna ao invés de expor o host /tmp
+    - ./dados/tmp:/tmp
+  networks:
+    - oraculo_net
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
 
 services:
   # ── Infraestrutura Oráculo ──
@@ -118,7 +135,7 @@ services:
     networks:
       - oraculo_net
 
-  # ── Aplicação Principal Oráculo ──
+  # ── Aplicação Principal e Migrações ──
   migration:
     <<: [*build, *app-env]
     container_name: oraculo_migration
@@ -128,6 +145,9 @@ services:
     restart: "no"
     volumes:
       - ./migrations:/app/migrations
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   api:
     <<: [*build, *restart, *logging, *app-env]
@@ -138,86 +158,48 @@ services:
     volumes:
       - ./src:/app/src
       - ./dados:/app/dados
-      - ./dados/tmp:/tmp/oraculo_cv
+      - ./dados/tmp:/tmp
       - ./migrations:/app/migrations
-      # Isto liga a pasta local 'src' à pasta 'src' dentro do container
-      - ./src:/app/src
-      # Isto liga a pasta 'templates' local à pasta do container
       - ./templates:/app/templates
-      # Isto liga a pasta 'static' local à pasta do container
       - ./static:/app/static
     networks:
       - oraculo_net
-    environment:
-      - PYTHONUNBUFFERED=1
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
+  # ── Workers Distribuidos Celery ──
   worker:
-    <<: [*build, *restart, *logging, *app-env]
+    <<: *worker-base
     container_name: oraculo_worker
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=default,admin,notificacoes"]
-    volumes:
-      - ./src:/app/src
-      - ./dados:/app/dados
-      - ./dados/tmp:/tmp/oraculo_cv
-    networks:
-      - oraculo_net
 
   worker_rag:
-    <<: [*build, *restart, *logging, *app-env]
+    <<: *worker-base
     container_name: oraculo_worker_rag
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker",
-              "--loglevel=info", "--concurrency=2", "--queues=rag_search"]
-    volumes:
-      - ./src:/app/src
-      - ./dados:/app/dados
-      - ./dados/tmp:/tmp/oraculo_cv
-    networks:
-      - oraculo_net
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=rag_search"]
 
   worker_synthesis:
-    <<: [*build, *restart, *logging, *app-env]
+    <<: *worker-base
     container_name: oraculo_worker_synthesis
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker",
-              "--loglevel=info", "--concurrency=2", "--queues=synthesis"]
-    volumes:
-      - ./src:/app/src
-      - ./dados:/app/dados
-      - ./dados/tmp:/tmp/oraculo_cv
-    networks:
-      - oraculo_net
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=synthesis"]
 
   worker_media:
-    <<: [*build, *restart, *logging, *app-env]
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker",
-              "--loglevel=info", "--concurrency=2", "--queues=media"]
-    volumes: ["./src:/app/src", "./dados:/app/dados", "/tmp:/tmp"]
-    networks: [oraculo_net]
+    <<: *worker-base
+    container_name: oraculo_worker_media
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=media"]
 
   worker_graph:
-    <<: [*build, *restart, *logging, *app-env]
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker",
-              "--loglevel=info", "--concurrency=1", "--queues=graph"]
-    volumes: ["./src:/app/src", "./dados:/app/dados"]
-    networks: [oraculo_net]
-
-
+    <<: *worker-base
+    container_name: oraculo_worker_graph
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=1", "--queues=graph"]
 
   beat:
-    <<: [*build, *restart, *logging, *app-env]
+    <<: *worker-base
     container_name: oraculo_beat
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "beat",
-              "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
-    volumes:
-      - ./src:/app/src
-      - ./dados/tmp:/tmp/oraculo_cv
-      - ./dados:/app/dados
-    networks:
-      - oraculo_net
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
 
   # ── EVOLUTION API v2.3.7 (Build Local do GitHub) ──
   evolution_api:
@@ -227,32 +209,26 @@ services:
     container_name: oraculo_evolution
     <<: [*restart, *logging]
     ports:
-      - "8081:8080" # O Dashboard e o Swagger ficam aqui no navegador Windows
+      - "8081:8080"
     networks:
       - oraculo_net
     environment:
-      # O SERVER_URL é como a API se vê no navegador
       - SERVER_URL=http://localhost:8081
       - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
       - TZ=America/Sao_Paulo
-
-      # Banco de Dados (Postgres do Oráculo)
       - DATABASE_ENABLED=true
       - DATABASE_PROVIDER=postgresql
-      # Usamos o IP cego ou o nome do serviço para garantir conexão interna
       - DATABASE_CONNECTION_URI=postgresql://user:${POSTGRES_PASSWORD}@172.18.0.40:5432/oraculo?schema=evolution
       - DATABASE_CONNECTION_CLIENT_NAME=evolution_api
       - DATABASE_SAVE_DATA_INSTANCE=true
-
-      # Cache (Redis do Oráculo)
       - CACHE_REDIS_ENABLED=true
       - CACHE_REDIS_URI=redis://172.18.0.50:6379/1
       - CACHE_REDIS_PREFIX_KEY=evolution
-      
-      # Webhook Global (Onde o teu bot escuta)
       - WEBHOOK_GLOBAL_URL=http://api:9000/webhook/evolution
       - WEBHOOK_GLOBAL_ENABLED=true
       - WEBHOOK_EVENTS_MESSAGES_UPSERT=true
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
