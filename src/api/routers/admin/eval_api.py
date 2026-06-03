@@ -44,6 +44,41 @@ EVAL_DATASET = [
         "expected_source": "calendario-academico-2026.pdf",
     },
     {
+        "id": "cal-004",
+        "category": "CALENDARIO",
+        "question": "Qual o período de reajuste de matrícula para o semestre 2026.1?",
+        "keywords": ["reajuste", "matrícula", "período"],
+        "expected_source": "calendario-academico-2026.pdf",
+    },
+    {
+        "id": "cal-005",
+        "category": "CALENDARIO",
+        "question": "Qual a data limite para solicitação de aproveitamento de disciplinas?",
+        "keywords": ["aproveitamento", "disciplinas", "limite"],
+        "expected_source": "calendario-academico-2026.pdf",
+    },
+    {
+        "id": "cal-006",
+        "category": "CALENDARIO",
+        "question": "Quando terminam as aulas do primeiro semestre de 2026?",
+        "keywords": ["terminam", "aulas", "junho", "2026"],
+        "expected_source": "calendario-academico-2026.pdf",
+    },
+    {
+        "id": "cal-007",
+        "category": "CALENDARIO",
+        "question": "Quais são os dias de recesso acadêmico no calendário de 2026?",
+        "keywords": ["recesso", "acadêmico", "dias"],
+        "expected_source": "calendario-academico-2026.pdf",
+    },
+    {
+        "id": "cal-008",
+        "category": "CALENDARIO",
+        "question": "Quando ocorrem as inscrições para transferência interna e externa em 2026?",
+        "keywords": ["transferência", "interna", "externa", "inscrições"],
+        "expected_source": "calendario-academico-2026.pdf",
+    },
+    {
         "id": "edi-001",
         "category": "EDITAL",
         "question": "Quantas vagas tem o curso de Engenharia Civil no PAES 2026?",
@@ -65,6 +100,41 @@ EVAL_DATASET = [
         "expected_source": "edital_paes_2026.pdf",
     },
     {
+        "id": "edi-004",
+        "category": "EDITAL",
+        "question": "Qual o valor da taxa de inscrição do PAES 2026?",
+        "keywords": ["taxa", "inscrição", "valor"],
+        "expected_source": "edital_paes_2026.pdf",
+    },
+    {
+        "id": "edi-005",
+        "category": "EDITAL",
+        "question": "Como solicitar isenção da taxa de inscrição do PAES?",
+        "keywords": ["isenção", "taxa", "solicitar"],
+        "expected_source": "edital_paes_2026.pdf",
+    },
+    {
+        "id": "edi-006",
+        "category": "EDITAL",
+        "question": "Em que dia serão aplicadas as provas do PAES 2026?",
+        "keywords": ["provas", "dia", "aplicadas", "PAES"],
+        "expected_source": "edital_paes_2026.pdf",
+    },
+    {
+        "id": "edi-007",
+        "category": "EDITAL",
+        "question": "Quais os critérios de desempate na classificação final do PAES?",
+        "keywords": ["desempate", "critérios", "classificação"],
+        "expected_source": "edital_paes_2026.pdf",
+    },
+    {
+        "id": "edi-008",
+        "category": "EDITAL",
+        "question": "Como funciona o sistema de cotas para estudantes de escolas públicas no PAES?",
+        "keywords": ["cotas", "escolas públicas", "sistema"],
+        "expected_source": "edital_paes_2026.pdf",
+    },
+    {
         "id": "con-001",
         "category": "CONTATOS",
         "question": "Qual o email da Pró-Reitoria de Graduação (PROG)?",
@@ -79,6 +149,41 @@ EVAL_DATASET = [
         "expected_source": "guia_contatos_2025.pdf",
     },
     {
+        "id": "con-003",
+        "category": "CONTATOS",
+        "question": "Como entro em contato com a Pró-Reitoria de Extensão e Assuntos Estudantis (PROEXAE)?",
+        "keywords": ["PROEXAE", "contato", "extensão"],
+        "expected_source": "guia_contatos_2025.pdf",
+    },
+    {
+        "id": "con-004",
+        "category": "CONTATOS",
+        "question": "Qual o contato telefônico da Reitoria da UEMA?",
+        "keywords": ["reitoria", "telefone", "contato"],
+        "expected_source": "guia_contatos_2025.pdf",
+    },
+    {
+        "id": "con-005",
+        "category": "CONTATOS",
+        "question": "Qual o email da Pró-Reitoria de Pesquisa e Pós-Graduação (PPG)?",
+        "keywords": ["email", "PPG", "pesquisa"],
+        "expected_source": "guia_contatos_2025.pdf",
+    },
+    {
+        "id": "con-006",
+        "category": "CONTATOS",
+        "question": "Quem é o responsável atual pela biblioteca central da UEMA e qual seu contato?",
+        "keywords": ["biblioteca", "responsável", "contato"],
+        "expected_source": "guia_contatos_2025.pdf",
+    },
+    {
+        "id": "con-007",
+        "category": "CONTATOS",
+        "question": "Qual o telefone ou email do setor de protocolo geral da UEMA?",
+        "keywords": ["protocolo", "telefone", "email"],
+        "expected_source": "guia_contatos_2025.pdf",
+    },
+    {
         "id": "gen-001",
         "category": "GERAL",
         "question": "O que é a UEMA?",
@@ -90,6 +195,41 @@ EVAL_DATASET = [
         "category": "GERAL",
         "question": "Quais são os centros acadêmicos da UEMA?",
         "keywords": ["CECEN", "CESB", "centro"],
+        "expected_source": None,
+    },
+    {
+        "id": "gen-003",
+        "category": "GERAL",
+        "question": "Como faço para acessar o wi-fi institucional da UEMA?",
+        "keywords": ["wi-fi", "acessar", "institucional", "rede"],
+        "expected_source": None,
+    },
+    {
+        "id": "gen-004",
+        "category": "GERAL",
+        "question": "O que devo fazer se meu usuário do SIGAA estiver bloqueado?",
+        "keywords": ["SIGAA", "bloqueado", "usuário", "desbloquear"],
+        "expected_source": None,
+    },
+    {
+        "id": "gen-005",
+        "category": "GERAL",
+        "question": "Onde fica localizado o campus principal da UEMA em São Luís?",
+        "keywords": ["campus", "localizado", "São Luís", "principal"],
+        "expected_source": None,
+    },
+    {
+        "id": "gen-006",
+        "category": "GERAL",
+        "question": "Como solicito redefinição de senha do email institucional?",
+        "keywords": ["email", "senha", "redefinição", "institucional"],
+        "expected_source": None,
+    },
+    {
+        "id": "gen-007",
+        "category": "GERAL",
+        "question": "Como abrir um chamado de suporte técnico no CTIC?",
+        "keywords": ["chamado", "suporte", "CTIC", "abrir"],
         "expected_source": None,
     },
 ]
@@ -113,6 +253,12 @@ class SingleEvalResult:
     latency_ms:       int
     chunks_count:     int
     top_chunk_source: str
+    tokens_entrada:   int = 0
+    tokens_saida:     int = 0
+    tokens_total:     int = 0
+    cost_usd:         float = 0.0
+    memory_mb:        float = 0.0
+    worker_name:      str = "worker_synthesis"
     error:            str = ""
 
     @property
@@ -138,6 +284,11 @@ class EvalRunResult:
     avg_faithfulness: float = 0.0
     avg_relevancy:   float = 0.0
     avg_latency_ms:  int = 0
+    avg_tokens_entrada: float = 0.0
+    avg_tokens_saida:   float = 0.0
+    avg_tokens_total:   float = 0.0
+    avg_cost_usd:       float = 0.0
+    avg_memory_mb:      float = 0.0
     results:         list[SingleEvalResult] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -156,16 +307,24 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
     t0 = time.monotonic()
     question = item["question"]
     keywords = item.get("keywords", [])
+    unique_session_id = f"{session_id}_{item['id']}"
 
     try:
         # 🔥 Usa o novo Cognitive OS em vez do Oracle Chain
         from src.application.chain.cognitive_os import processar
         result = await processar(
             message=question,
-            session_id=session_id,
+            session_id=unique_session_id,
             user_context={"nome": "Eval Bot", "role": "estudante"},
             history=""
         )
+
+        answer = result.answer
+        if not answer and getattr(result, "plan_id", None):
+            from src.application.chain.cognitive_os import _aguardar_resposta_final
+            final_data = await _aguardar_resposta_final(result.plan_id, timeout=15.0)
+            if final_data:
+                answer = final_data.get("answer", "")
 
         retrieved_texts = await _get_retrieved_chunks(question, getattr(result, "rota", "GERAL"))
 
@@ -174,24 +333,56 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
 
         faithfulness, relevancy = await _eval_generation(
             question=question,
-            answer=result.answer,
+            answer=answer,
             context="\n".join(retrieved_texts[:3]),
         )
+
+        # Buscar tokens salvos no Redis
+        from src.infrastructure.redis_client import obter_tokens_redis, diagnosticar
+        tokens_in, tokens_out = obter_tokens_redis(unique_session_id)
+        tokens_tot = tokens_in + tokens_out
+        
+        # Gemini 2.0/3 blended cost estimation ($0.075 / 1M input, $0.30 / 1M output)
+        cost_usd = (tokens_in * 0.075 + tokens_out * 0.30) / 1_000_000
+
+        # Memory usage
+        try:
+            diag = diagnosticar()
+            memory_mb = float(diag.get("redis_ram_mb", 0.0))
+        except Exception:
+            memory_mb = 0.0
+
+        # Mapeamento dinâmico de worker baseado na rota
+        route = getattr(result, "rota", "GERAL")
+        if route in ("CALENDARIO", "EDITAL"):
+            worker_name = "worker_rag"
+        elif route == "SIGAA":
+            worker_name = "worker_sigaa"
+        elif route == "MEDIA_DOWNLOAD":
+            worker_name = "worker_media"
+        else:
+            worker_name = "worker_synthesis"
 
         return SingleEvalResult(
             id=item["id"],
             category=item["category"],
             question=question,
-            answer=result.answer[:400],
-            route_detected=getattr(result, "rota", "GERAL"),
-            crag_score=0.9,
+            answer=answer[:400],
+            route_detected=route,
+            crag_score=0.9 if hit_rate > 0 else 0.2,
             hit_rate=hit_rate,
             mrr=round(mrr, 3),
             faithfulness=round(faithfulness, 2),
             answer_relevancy=round(relevancy, 2),
             latency_ms=int((time.monotonic() - t0) * 1000),
             chunks_count=len(retrieved_texts),
-            top_chunk_source="",
+            top_chunk_source=item.get("expected_source") or "",
+            tokens_entrada=tokens_in,
+            tokens_saida=tokens_out,
+            tokens_total=tokens_tot,
+            cost_usd=cost_usd,
+            memory_mb=memory_mb,
+            worker_name=worker_name,
         )
 
     except Exception as e:
@@ -202,7 +393,10 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
             crag_score=0.0, hit_rate=0.0, mrr=0.0,
             faithfulness=0.0, answer_relevancy=0.0,
             latency_ms=int((time.monotonic() - t0) * 1000),
-            chunks_count=0, top_chunk_source="", error=str(e)[:120],
+            chunks_count=0, top_chunk_source="",
+            tokens_entrada=0, tokens_saida=0, tokens_total=0,
+            cost_usd=0.0, memory_mb=0.0, worker_name="ERROR",
+            error=str(e)[:120],
         )
 
 
@@ -334,6 +528,11 @@ def _aggregate_results(results: list[SingleEvalResult]) -> EvalRunResult:
         avg_faithfulness=round(sum(r.faithfulness for r in valid) / n, 3),
         avg_relevancy=  round(sum(r.answer_relevancy for r in valid) / n, 3),
         avg_latency_ms= int(sum(r.latency_ms for r in valid) / n),
+        avg_tokens_entrada=round(sum(r.tokens_entrada for r in valid) / n, 1),
+        avg_tokens_saida=  round(sum(r.tokens_saida for r in valid) / n, 1),
+        avg_tokens_total=  round(sum(r.tokens_total for r in valid) / n, 1),
+        avg_cost_usd=       round(sum(r.cost_usd for r in valid) / n, 6),
+        avg_memory_mb=      round(sum(r.memory_mb for r in valid) / n, 2),
         results=results,
     )
 

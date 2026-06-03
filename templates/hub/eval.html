@@ -1,0 +1,1078 @@
+{% extends "hub/_base.html" %}
+{% block title %}Avaliação RAG — Oráculo UEMA{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/eval.css">
+<style>
+  :root {
+    --bg-glass: rgba(13, 17, 23, 0.7);
+    --border-glass: rgba(30, 45, 61, 0.6);
+    --card-bg: rgba(17, 24, 34, 0.6);
+    --glow-color: rgba(0, 229, 160, 0.2);
+  }
+
+  body {
+    background: radial-gradient(circle at 50% 0%, #0d1624 0%, #080b0f 100%);
+    overflow-y: auto !important; /* Permite scroll vertical para a dashboard inteira */
+  }
+
+  .glass-panel {
+    background: var(--bg-glass);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border-glass);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  }
+
+  .dashboard-container {
+    max-width: 1300px;
+    margin: 20px auto;
+    padding: 0 20px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* ── Header ── */
+  .eval-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 24px;
+    margin-bottom: 10px;
+  }
+  
+  .header-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  /* ── Metrics Grid ── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+  }
+
+  .stat-card {
+    position: relative;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+
+  .stat-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+    box-shadow: 0 0 15px var(--glow-color);
+  }
+
+  .stat-card-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .stat-card-val {
+    font-size: 28px;
+    font-weight: 800;
+    line-height: 1.1;
+    color: var(--text);
+  }
+
+  /* ── Cost Configuration Panel ── */
+  .cost-config-drawer {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 100;
+    width: 280px;
+    margin-top: 10px;
+    padding: 16px;
+    background: #111822;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+  }
+
+  .cost-config-drawer.visible {
+    display: block;
+    animation: fadeIn 0.15s ease-out;
+  }
+
+  .form-group {
+    margin-bottom: 12px;
+  }
+
+  .form-group label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  .form-group input {
+    width: 100%;
+    background: #080b0f;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .presets-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .btn-preset {
+    flex: 1;
+    padding: 4px;
+    background: var(--border);
+    border: none;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 9px;
+    cursor: pointer;
+    border-radius: 3px;
+  }
+
+  .btn-preset:hover {
+    background: var(--muted);
+  }
+
+  /* ── Charts Section ── */
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+
+  @media (max-width: 900px) {
+    .charts-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .chart-container {
+    padding: 20px;
+    height: 320px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .chart-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 15px;
+  }
+
+  .chart-canvas-wrapper {
+    flex: 1;
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ── Tabs & Subsections ── */
+  .eval-tabs {
+    display: flex;
+    gap: 12px;
+    border-bottom: 1px solid var(--border-glass);
+    margin-bottom: 10px;
+  }
+
+  .eval-tab {
+    padding: 12px 24px;
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+    user-select: none;
+  }
+
+  .eval-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  /* ── Ingestion Helper Box ── */
+  .info-banner {
+    display: flex;
+    gap: 16px;
+    padding: 20px;
+    background: rgba(0, 229, 160, 0.05);
+    border: 1px solid rgba(0, 229, 160, 0.2);
+    border-radius: 8px;
+    margin-bottom: 10px;
+  }
+
+  .info-icon {
+    font-size: 24px;
+  }
+
+  .info-body {
+    flex: 1;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .info-body h4 {
+    font-family: var(--mono);
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+
+  .metadata-badge-desc {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 12px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    margin-top: 10px;
+    line-height: 1.5;
+  }
+
+  /* ── Progress Box ── */
+  .progress-card {
+    padding: 16px 20px;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    border-color: var(--amber);
+  }
+
+  .progress-bar-container {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--amber);
+    transition: width 0.3s;
+  }
+
+  /* ── Data Table ── */
+  .table-container {
+    overflow-x: auto;
+  }
+
+  .eval-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-align: left;
+  }
+
+  .eval-table th {
+    background: rgba(17, 24, 34, 0.8);
+    color: var(--muted);
+    padding: 12px 16px;
+    font-weight: 700;
+    border-bottom: 1px solid var(--border-glass);
+    text-transform: uppercase;
+  }
+
+  .eval-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(30, 45, 61, 0.4);
+    vertical-align: middle;
+  }
+
+  .eval-table tbody tr {
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .eval-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .badge-route {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: bold;
+  }
+
+  .badge-route.correct { background: rgba(0, 229, 160, 0.15); color: var(--accent); }
+  .badge-route.incorrect { background: rgba(255, 64, 96, 0.15); color: var(--red); }
+
+  .score-val {
+    font-weight: bold;
+  }
+  .score-val.high { color: var(--accent); }
+  .score-val.medium { color: var(--amber); }
+  .score-val.low { color: var(--red); }
+
+  /* Expanded detail row */
+  .detail-row {
+    background: #090c10;
+    display: none;
+  }
+
+  .detail-row.expanded {
+    display: table-row;
+  }
+
+  .detail-content {
+    padding: 16px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    font-family: var(--mono);
+  }
+
+  .detail-section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .detail-lbl {
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+  }
+
+  .detail-val {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre-wrap;
+    background: rgba(255,255,255,0.01);
+    border: 1px solid rgba(255,255,255,0.03);
+    padding: 8px 12px;
+    border-radius: 6px;
+  }
+
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+
+  <!-- ── Header ── -->
+  <div class="glass-panel eval-header">
+    <div>
+      <h1 style="font-family: var(--sans); font-size: 22px; font-weight: 800; color: var(--accent);">🔬 ORÁCULO RAG EVAL</h1>
+      <p style="font-family: var(--mono); font-size: 11px; color: var(--muted);">Métricas avançadas e análise de consistência de prompts</p>
+    </div>
+    <div class="header-actions">
+      <div class="header-pill">Modelo: <span style="color:var(--accent)">Gemini 3.1 Pro/Flash</span></div>
+      <button class="btn btn-primary" id="btn-iniciar-eval">▶ Rodar Avaliação (30 Casos)</button>
+    </div>
+  </div>
+
+  <!-- ── Progress Bar Card ── -->
+  <div class="glass-panel progress-card" id="progress-card">
+    <div style="display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px;">
+      <span style="color:var(--amber)" id="progress-label">Avaliando...</span>
+      <span id="progress-num">0 / 30</span>
+    </div>
+    <div class="progress-bar-container">
+      <div class="progress-bar-fill" id="progress-fill"></div>
+    </div>
+    <div style="font-family:var(--mono); font-size:10px; color:var(--muted);" id="progress-question"></div>
+  </div>
+
+  <!-- ── Tabs ── -->
+  <div class="eval-tabs">
+    <div class="eval-tab active" data-target="tab-dashboard">Dashboard de Métricas</div>
+    <div class="eval-tab" data-target="tab-casos">Casos de Teste (30)</div>
+    <div class="eval-tab" data-target="tab-metadados">Metadados & Ingestão</div>
+  </div>
+
+  <!-- ── TAB: DASHBOARD ── -->
+  <div class="tab-section" id="tab-dashboard">
+    <!-- Stats Grid -->
+    <div class="stats-grid">
+      <div class="glass-panel stat-card">
+        <div class="stat-card-title">Hit Rate Médio</div>
+        <div class="stat-card-val col-accent" id="s-hit-rate">0.000</div>
+        <div class="stat-sub">Precisão de chunks recuperados</div>
+      </div>
+      <div class="glass-panel stat-card">
+        <div class="stat-card-title">Faithfulness Médio</div>
+        <div class="stat-card-val col-blue" id="s-faithfulness">0.000</div>
+        <div class="stat-sub">Alucinação (grounded no contexto)</div>
+      </div>
+      <div class="glass-panel stat-card">
+        <div class="stat-card-title">Relevância Média</div>
+        <div class="stat-card-val col-purple" id="s-relevancy">0.000</div>
+        <div class="stat-sub">Grau de resposta à pergunta</div>
+      </div>
+      <div class="glass-panel stat-card">
+        <div class="stat-card-title">Latência Média</div>
+        <div class="stat-card-val col-amber" id="s-latency">0 ms</div>
+        <div class="stat-sub">Tempo de resposta da API</div>
+      </div>
+      <div class="glass-panel stat-card" style="overflow: visible;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="stat-card-title">Custo Acumulado</div>
+          <span style="cursor:pointer; font-size:12px; color:var(--accent);" id="btn-cost-settings">⚙️</span>
+        </div>
+        <div class="stat-card-val col-red" id="s-cost">$0.00000</div>
+        <div class="stat-sub" id="lbl-cost-pricing">Gemini Flash Default</div>
+        
+        <!-- Cost Config Panel -->
+        <div class="cost-config-drawer" id="cost-config-drawer">
+          <h4 style="font-family:var(--sans); font-size:12px; color:var(--accent); margin-bottom:10px;">Ajustar Custos LLM</h4>
+          <div class="form-group">
+            <label>Input Token ($/1M)</label>
+            <input type="number" step="0.001" id="cfg-cost-input" value="0.075">
+          </div>
+          <div class="form-group">
+            <label>Output Token ($/1M)</label>
+            <input type="number" step="0.001" id="cfg-cost-output" value="0.30">
+          </div>
+          <div class="presets-row">
+            <button class="btn-preset" onclick="setPresetPricing(0.075, 0.30, 'Gemini Flash 2.5')">Flash</button>
+            <button class="btn-preset" onclick="setPresetPricing(1.25, 5.00, 'Gemini Pro 1.5')">Pro</button>
+            <button class="btn-preset" onclick="setPresetPricing(10.00, 30.00, 'Custom Premium')">Custom</button>
+          </div>
+          <button class="btn btn-primary" style="width:100%; margin-top:12px; padding:6px; font-size:10px;" id="btn-apply-cost">Aplicar & Recalcular</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts Grid -->
+    <div class="charts-grid" style="margin-top:20px;">
+      <div class="glass-panel chart-container">
+        <div class="chart-title">▸ Histograma de Tempo de Resposta (MS)</div>
+        <div class="chart-canvas-wrapper">
+          <canvas id="chart-latency"></canvas>
+        </div>
+      </div>
+      <div class="glass-panel chart-container">
+        <div class="chart-title">▸ Distribuição de Rotas do Router Semântico</div>
+        <div class="chart-canvas-wrapper">
+          <canvas id="chart-routes"></canvas>
+        </div>
+      </div>
+      <div class="glass-panel chart-container">
+        <div class="chart-title">▸ Execução por Workers (Celery / Redis)</div>
+        <div class="chart-canvas-wrapper">
+          <canvas id="chart-workers"></canvas>
+        </div>
+      </div>
+      <div class="glass-panel chart-container">
+        <div class="chart-title">▸ Comparativo de Métricas por Categoria</div>
+        <div class="chart-canvas-wrapper">
+          <canvas id="chart-metrics-categories"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB: CASOS DE TESTE ── -->
+  <div class="tab-section" id="tab-casos" style="display:none;">
+    <div class="glass-panel table-container" style="padding:10px;">
+      <table class="eval-table" id="eval-results-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Pergunta</th>
+            <th>Rota Esperada</th>
+            <th>Rota Detectada</th>
+            <th>Hit Rate</th>
+            <th>MRR</th>
+            <th>Faithfulness</th>
+            <th>Relevancy</th>
+            <th>Latência</th>
+            <th>Custo</th>
+          </tr>
+        </thead>
+        <tbody id="eval-results-tbody">
+          <!-- Dinâmico via JS -->
+          <tr>
+            <td colspan="10" class="empty-state">Clique em "Rodar Avaliação" para coletar os resultados.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── TAB: METADADOS & INGESTÃO ── -->
+  <div class="tab-section" id="tab-metadados" style="display:none;">
+    <div class="glass-panel info-banner">
+      <span class="info-icon">🦙</span>
+      <div class="info-body">
+        <h4>Como Organizar os Metadados das Ingestões (Taxonomia UEMA)</h4>
+        <p>
+          Para obter a máxima precisão RAG e evitar contaminação de contexto, cada chunk armazenado no Redis deve conter metadados taxonômicos indexados. Organize as tags no momento da ingestão (via LlamaParse ou scripts de carga):
+        </p>
+        <div class="metadata-badge-desc">
+          <strong>1. eixo:</strong> Classifica o tema principal (ex: <code>Institucional</code>, <code>Ensino</code>, <code>Pesquisa</code>, <code>Extensao</code>, <code>Sistemas</code>).<br>
+          <strong>2. setor:</strong> Define a pró-reitoria ou diretoria dona do dado (ex: <code>PROG</code>, <code>PROEXAE</code>, <code>PPG</code>, <code>CTIC</code>, <code>Reitoria</code>, <code>Geral</code>).<br>
+          <strong>3. tipo_doc:</strong> Tipo de arquivo (ex: <code>Edital</code>, <code>Calendario</code>, <code>Resolucao</code>, <code>Manual</code>, <code>Contatos</code>).<br>
+          <strong>4. ano:</strong> Ano letivo do documento (ex: <code>2025</code>, <code>2026</code>). Essencial para barrar dados antigos de calendários obsoletos.<br>
+          <strong>5. campus:</strong> O campus aplicável (ex: <code>Sao_Luis</code>, <code>Caxias</code>, <code>Imperatriz</code>, <code>Todos</code>).
+        </div>
+        <p style="margin-top: 12px;">
+          Durante a busca, o <code>QueryTransformService</code> lê o histórico do chat (ex: <em>"onde fica?"</em>) e reescreve a query anexando filtros automáticos baseados nessa taxonomia (ex: <code>@ano:{2026} @tipo_doc:{Calendario}</code>).
+        </p>
+      </div>
+    </div>
+
+    <div class="glass-panel" style="padding: 24px;">
+      <h3 style="font-family: var(--sans); font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 12px;">Ingestão Automática via LlamaParse</h3>
+      <p style="font-size: 12px; line-height: 1.6; color: var(--muted); margin-bottom: 20px;">
+        O <strong>LlamaParse</strong> converte PDFs complexos em Markdown estruturado, ideal para extrair tabelas de calendários acadêmicos e editais de vestibulares. Os arquivos colocados em <code>dados/tmp/martech_eval_llm_document.pdf</code> e no Calendário podem ser processados com o pipeline local.
+      </p>
+
+      <div style="background:#090c10; padding:16px; border-radius:6px; border:1px solid var(--border); font-family:var(--mono); font-size:11px; color:#a2b4c7; line-height:1.5;">
+        <span style="color:#00ff9d"># Exemplo de comando Python para Ingestão via LlamaParse:</span><br>
+        from src.rag.ingestion.pipeline import IngestionPipeline<br>
+        from src.infrastructure.settings import settings<br>
+        <br>
+        <span style="color:#e8a040"># Configura a API Key no .env</span><br>
+        settings.LLAMA_CLOUD_API_KEY = "sua_chave_aqui"<br>
+        <br>
+        pipeline = IngestionPipeline.build_auto(<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;file_path="dados/tmp/martech_eval_llm_document.pdf",<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;doc_type="edital"<br>
+        )<br>
+        <span style="color:#e8a040"># Executa síncrono ou assíncrono</span><br>
+        result = await pipeline.run_async(<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;file_path="dados/tmp/martech_eval_llm_document.pdf",<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;doc_type="edital",<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;label="MARTECH EVAL"<br>
+        )<br>
+        print(f"Sucesso: {result.success} | Chunks salvos: {result.chunks_saved}")
+      </div>
+      
+      <div style="margin-top:20px; display:flex; gap:12px;">
+        <button class="btn btn-outline" onclick="alert('Funcionalidade disponível apenas com API Key do Llama Cloud configurada no servidor.')">Executar Ingestão LlamaParse de Teste</button>
+        <button class="btn btn-outline" onclick="alert('Scraping da Wiki do CTIC agendado via Worker default.')">Scrapear Wiki CTIC</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  // ── Estado Local do Dashboard ──
+  const evalState = {
+    results: [],
+    summary: {},
+    charts: {},
+    inputCostPer1M: 0.075,  // Valor customizado de custo de entrada
+    outputCostPer1M: 0.30,  // Valor customizado de custo de saída
+    sseSource: null
+  };
+
+  // ── Setup de Abas ──
+  document.querySelectorAll('.eval-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.eval-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      
+      const targetId = tab.dataset.target;
+      document.querySelectorAll('.tab-section').forEach(sec => sec.style.display = 'none');
+      document.getElementById(targetId).style.display = 'block';
+    });
+  });
+
+  // ── Toggle de Custo ──
+  const btnCostSettings = document.getElementById('btn-cost-settings');
+  const costConfigDrawer = document.getElementById('cost-config-drawer');
+  btnCostSettings.addEventListener('click', (e) => {
+    e.stopPropagation();
+    costConfigDrawer.classList.toggle('visible');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!costConfigDrawer.contains(e.target) && e.target !== btnCostSettings) {
+      costConfigDrawer.classList.remove('visible');
+    }
+  });
+
+  function setPresetPricing(inp, out, label) {
+    document.getElementById('cfg-cost-input').value = inp;
+    document.getElementById('cfg-cost-output').value = out;
+    document.getElementById('lbl-cost-pricing').textContent = label;
+  }
+
+  document.getElementById('btn-apply-cost').addEventListener('click', () => {
+    evalState.inputCostPer1M = parseFloat(document.getElementById('cfg-cost-input').value) || 0;
+    evalState.outputCostPer1M = parseFloat(document.getElementById('cfg-cost-output').value) || 0;
+    costConfigDrawer.classList.remove('visible');
+    recalculateCosts();
+  });
+
+  // ── Recalcular Custos em Tempo Real ──
+  function recalculateCosts() {
+    let totalCost = 0;
+    evalState.results.forEach(res => {
+      // Recalcula custo por pergunta
+      const qCost = (res.tokens_entrada * evalState.inputCostPer1M + res.tokens_saida * evalState.outputCostPer1M) / 1000000;
+      res.cost_usd = qCost;
+      totalCost += qCost;
+
+      // Atualiza o custo na tabela
+      const tdCost = document.getElementById(`td-cost-${res.id}`);
+      if (tdCost) {
+        tdCost.textContent = `$${qCost.toFixed(5)}`;
+      }
+    });
+
+    // Atualiza o card principal
+    document.getElementById('s-cost').textContent = `$${totalCost.toFixed(5)}`;
+    
+    // Atualiza os gráficos
+    updateCategoryChart();
+  }
+
+  // ── Executar Avaliação Completa ──
+  const btnIniciar = document.getElementById('btn-iniciar-eval');
+  const progressCard = document.getElementById('progress-card');
+  const progressFill = document.getElementById('progress-fill');
+  const progressLabel = document.getElementById('progress-label');
+  const progressNum = document.getElementById('progress-num');
+  const progressQuestion = document.getElementById('progress-question');
+
+  btnIniciar.addEventListener('click', async () => {
+    btnIniciar.disabled = true;
+    progressCard.style.display = 'flex';
+    progressFill.style.width = '0%';
+    progressNum.textContent = '0 / 30';
+    progressLabel.textContent = 'Iniciando avaliação...';
+    
+    // Limpa a tabela
+    const tbody = document.getElementById('eval-results-tbody');
+    tbody.innerHTML = '';
+    evalState.results = [];
+
+    // Dispara a rota do background
+    try {
+      const response = await fetch('/hub/eval/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        alert(data.error || 'Erro ao iniciar');
+        btnIniciar.disabled = false;
+        return;
+      }
+      
+      // Conecta ao Stream SSE
+      connectStream();
+
+    } catch (err) {
+      alert('Erro de conexão: ' + err.message);
+      btnIniciar.disabled = false;
+    }
+  });
+
+  // ── Conexão Server-Sent Events (SSE) ──
+  function connectStream() {
+    if (evalState.sseSource) {
+      evalState.sseSource.close();
+    }
+
+    const source = new EventSource('/hub/eval/stream');
+    evalState.sseSource = source;
+
+    source.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      if (data.type === 'ping') return;
+
+      if (data.type === 'start') {
+        progressLabel.textContent = 'Executando avaliação RAG...';
+        progressNum.textContent = `0 / ${data.total}`;
+      }
+      
+      else if (data.type === 'progress') {
+        progressNum.textContent = `${data.current} / ${data.total}`;
+        progressFill.style.width = `${(data.current / data.total) * 100}%`;
+        progressQuestion.textContent = `Pergunta: "${data.question}"`;
+      }
+      
+      else if (data.type === 'result') {
+        // Adiciona o resultado localmente
+        const resultItem = {
+          id: data.id,
+          category: data.category || 'GERAL',
+          question: data.question,
+          answer: data.answer || 'Sem resposta',
+          route_detected: data.route_detected || 'GERAL',
+          hit_rate: data.hit_rate || 0,
+          mrr: data.mrr || 0,
+          crag: data.crag || 0,
+          faithfulness: data.faithfulness || 0,
+          relevancy: data.relevancy || 0,
+          latency_ms: data.latency_ms || 0,
+          tokens_entrada: data.tokens_entrada || 0,
+          tokens_saida: data.tokens_saida || 0,
+          tokens_total: data.tokens_total || 0,
+          cost_usd: data.cost_usd || 0.0,
+          memory_mb: data.memory_mb || 0.0,
+          worker_name: data.worker_name || 'worker_synthesis',
+          error: data.error || ''
+        };
+
+        // Calcula o custo com base nos parâmetros atuais do conversor
+        const qCost = (resultItem.tokens_entrada * evalState.inputCostPer1M + resultItem.tokens_saida * evalState.outputCostPer1M) / 1000000;
+        resultItem.cost_usd = qCost;
+
+        evalState.results.push(resultItem);
+        appendResultToTable(resultItem);
+        updateLiveCharts();
+      }
+      
+      else if (data.type === 'done') {
+        progressLabel.textContent = 'Avaliação Concluída! 🎉';
+        progressFill.style.width = '100%';
+        btnIniciar.disabled = false;
+        source.close();
+
+        // Atualiza os cards de sumário
+        document.getElementById('s-hit-rate').textContent = data.avg_hit.toFixed(3);
+        document.getElementById('s-faithfulness').textContent = data.avg_faith.toFixed(3);
+        document.getElementById('s-relevancy').textContent = data.avg_relev.toFixed(3);
+        document.getElementById('s-latency').textContent = `${data.avg_lat_ms} ms`;
+        
+        recalculateCosts(); // Executa o recalculo final para alinhar os custos
+      }
+    };
+
+    source.onerror = () => {
+      progressLabel.textContent = 'Conexão perdida. Tentando reconectar... ⚠️';
+      source.close();
+      btnIniciar.disabled = false;
+    };
+  }
+
+  // ── Renderiza Tabela Dinamicamente ──
+  function appendResultToTable(res) {
+    const tbody = document.getElementById('eval-results-tbody');
+    
+    // Remove o placeholder inicial
+    if (evalState.results.length === 1) {
+      tbody.innerHTML = '';
+    }
+
+    const row = document.createElement('tr');
+    row.id = `row-${res.id}`;
+    row.onclick = () => toggleRowExpansion(res.id);
+
+    const isRouteCorrect = res.category.toUpperCase() === res.route_detected.toUpperCase();
+    const hitClass = res.hit_rate >= 0.8 ? 'high' : res.hit_rate >= 0.4 ? 'medium' : 'low';
+    const faithClass = res.faithfulness >= 0.8 ? 'high' : res.faithfulness >= 0.5 ? 'medium' : 'low';
+    const relevClass = res.relevancy >= 0.8 ? 'high' : res.relevancy >= 0.5 ? 'medium' : 'low';
+
+    row.innerHTML = `
+      <td>${res.id}</td>
+      <td style="max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${res.question}</td>
+      <td><span class="badge-route correct">${res.category}</span></td>
+      <td><span class="badge-route ${isRouteCorrect ? 'correct' : 'incorrect'}">${res.route_detected}</span></td>
+      <td class="score-val ${hitClass}">${res.hit_rate.toFixed(2)}</td>
+      <td>${res.mrr.toFixed(2)}</td>
+      <td class="score-val ${faithClass}">${res.faithfulness.toFixed(2)}</td>
+      <td class="score-val ${relevClass}">${res.relevancy.toFixed(2)}</td>
+      <td>${res.latency_ms} ms</td>
+      <td id="td-cost-${res.id}">$${res.cost_usd.toFixed(5)}</td>
+    `;
+
+    // Linha de Detalhes Oculta
+    const detailRow = document.createElement('tr');
+    detailRow.id = `detail-row-${res.id}`;
+    detailRow.className = 'detail-row';
+    detailRow.innerHTML = `
+      <td colspan="10">
+        <div class="detail-content">
+          <div class="detail-section">
+            <span class="detail-lbl">Pergunta Inteira</span>
+            <div class="detail-val">${res.question}</div>
+          </div>
+          <div class="detail-section">
+            <span class="detail-lbl">Resposta da LLM (Gemini)</span>
+            <div class="detail-val" style="color: #00ff9d;">${res.answer}</div>
+          </div>
+          <div class="detail-section">
+            <span class="detail-lbl">Metadata do Worker</span>
+            <div style="display:flex; gap:16px; font-size:11px; font-family:var(--mono);">
+              <span>Worker: <strong style="color:var(--accent);">${res.worker_name}</strong></span>
+              <span>Tokens Entrada: <strong>${res.tokens_entrada}</strong></span>
+              <span>Tokens Saída: <strong>${res.tokens_saida}</strong></span>
+              <span>Tokens Total: <strong>${res.tokens_total}</strong></span>
+              <span>Memória Utilizada: <strong>${res.memory_mb.toFixed(1)} MB</strong></span>
+            </div>
+          </div>
+        </div>
+      </td>
+    `;
+
+    tbody.appendChild(row);
+    tbody.appendChild(detailRow);
+  }
+
+  function toggleRowExpansion(id) {
+    const detail = document.getElementById(`detail-row-${id}`);
+    if (detail) {
+      detail.classList.toggle('expanded');
+    }
+  }
+
+  // ── Inicialização de Gráficos (Chart.js) ──
+  function initCharts() {
+    // 1. Latency Distribution
+    evalState.charts.latency = new Chart(document.getElementById('chart-latency').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Latência por Pergunta (ms)',
+          data: [],
+          backgroundColor: 'rgba(255, 183, 0, 0.4)',
+          borderColor: 'var(--amber)',
+          borderWidth: 1.5
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8fa0b5' } },
+          x: { grid: { display: false }, ticks: { color: '#8fa0b5' } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+
+    // 2. Routes Distribution
+    evalState.charts.routes = new Chart(document.getElementById('chart-routes').getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: [],
+        datasets: [{
+          data: [],
+          backgroundColor: [
+            'rgba(0, 229, 160, 0.6)',
+            'rgba(74, 240, 255, 0.6)',
+            'rgba(176, 110, 255, 0.6)',
+            'rgba(255, 183, 0, 0.6)',
+            'rgba(255, 64, 96, 0.6)'
+          ],
+          borderColor: '#111822',
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { color: '#c9d6e3', font: { family: 'Space Mono', size: 10 } } }
+        }
+      }
+    });
+
+    // 3. Workers execution count
+    evalState.charts.workers = new Chart(document.getElementById('chart-workers').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: ['worker_rag', 'worker_synthesis', 'worker_media', 'worker_sigaa'],
+        datasets: [{
+          label: 'Chamadas do Worker',
+          data: [0, 0, 0, 0],
+          backgroundColor: 'rgba(0, 229, 160, 0.4)',
+          borderColor: 'var(--accent)',
+          borderWidth: 1.5
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8fa0b5' } },
+          y: { grid: { display: false }, ticks: { color: '#8fa0b5' } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+
+    // 4. Averages per category
+    evalState.charts.categories = new Chart(document.getElementById('chart-metrics-categories').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: ['CALENDARIO', 'EDITAL', 'CONTATOS', 'GERAL'],
+        datasets: [
+          {
+            label: 'Custo Médio ($)',
+            data: [0, 0, 0, 0],
+            backgroundColor: 'rgba(255, 64, 96, 0.4)',
+            borderColor: 'var(--red)',
+            borderWidth: 1.5,
+            yAxisID: 'yCost'
+          },
+          {
+            label: 'Relevância Média',
+            data: [0, 0, 0, 0],
+            backgroundColor: 'rgba(74, 240, 255, 0.4)',
+            borderColor: 'var(--blue)',
+            borderWidth: 1.5,
+            yAxisID: 'yScore'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          yScore: {
+            type: 'linear',
+            position: 'left',
+            min: 0,
+            max: 1,
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: '#8fa0b5' }
+          },
+          yCost: {
+            type: 'linear',
+            position: 'right',
+            grid: { display: false },
+            ticks: { color: 'var(--red)' }
+          },
+          x: { ticks: { color: '#8fa0b5' } }
+        },
+        plugins: {
+          legend: { labels: { color: '#c9d6e3', font: { family: 'Space Mono', size: 9 } } }
+        }
+      }
+    });
+  }
+
+  // ── Atualiza Gráficos ──
+  function updateLiveCharts() {
+    const results = evalState.results;
+
+    // Update Latency histogram data
+    evalState.charts.latency.data.labels = results.map(r => r.id);
+    evalState.charts.latency.data.datasets[0].data = results.map(r => r.latency_ms);
+    evalState.charts.latency.update();
+
+    // Update Routes doughnut data
+    const routesCount = {};
+    results.forEach(r => {
+      routesCount[r.route_detected] = (routesCount[r.route_detected] || 0) + 1;
+    });
+    evalState.charts.routes.data.labels = Object.keys(routesCount);
+    evalState.charts.routes.data.datasets[0].data = Object.values(routesCount);
+    evalState.charts.routes.update();
+
+    // Update Workers execution data
+    const workerCounts = { worker_rag: 0, worker_synthesis: 0, worker_media: 0, worker_sigaa: 0 };
+    results.forEach(r => {
+      if (workerCounts[r.worker_name] !== undefined) {
+        workerCounts[r.worker_name]++;
+      }
+    });
+    evalState.charts.workers.data.datasets[0].data = [
+      workerCounts.worker_rag,
+      workerCounts.worker_synthesis,
+      workerCounts.worker_media,
+      workerCounts.worker_sigaa
+    ];
+    evalState.charts.workers.update();
+
+    updateCategoryChart();
+  }
+
+  function updateCategoryChart() {
+    const results = evalState.results;
+    const cats = ['CALENDARIO', 'EDITAL', 'CONTATOS', 'GERAL'];
+    
+    const catStats = {
+      CALENDARIO: { cost: 0, relevancy: 0, count: 0 },
+      EDITAL: { cost: 0, relevancy: 0, count: 0 },
+      CONTATOS: { cost: 0, relevancy: 0, count: 0 },
+      GERAL: { cost: 0, relevancy: 0, count: 0 }
+    };
+
+    results.forEach(r => {
+      const c = r.category.toUpperCase();
+      if (catStats[c]) {
+        catStats[c].cost += r.cost_usd;
+        catStats[c].relevancy += r.relevancy;
+        catStats[c].count++;
+      }
+    });
+
+    const avgCosts = cats.map(c => catStats[c].count > 0 ? catStats[c].cost / catStats[c].count : 0);
+    const avgRelevancies = cats.map(c => catStats[c].count > 0 ? catStats[c].relevancy / catStats[c].count : 0);
+
+    evalState.charts.categories.data.datasets[0].data = avgCosts;
+    evalState.charts.categories.data.datasets[1].data = avgRelevancies;
+    evalState.charts.categories.update();
+  }
+
+  // ── Carregar Dados Anteriores da Página ao Abrir ──
+  async function loadInitialResults() {
+    try {
+      const response = await fetch('/hub/eval/results');
+      const data = await response.json();
+      if (data.results && data.results.length > 0) {
+        const lastRun = data.results[0];
+        
+        // Atualiza os cards
+        document.getElementById('s-hit-rate').textContent = lastRun.avg_hit_rate.toFixed(3);
+        document.getElementById('s-faithfulness').textContent = lastRun.avg_faithfulness.toFixed(3);
+        document.getElementById('s-relevancy').textContent = lastRun.avg_relevancy.toFixed(3);
+        document.getElementById('s-latency').textContent = `${lastRun.avg_latency_ms} ms`;
+        
+        // Preenche tabela local
+        const tbody = document.getElementById('eval-results-tbody');
+        tbody.innerHTML = '';
+        evalState.results = lastRun.results.map(r => ({
+          ...r,
+          category: r.category || 'GERAL',
+          cost_usd: r.cost_usd || 0
+        }));
+
+        evalState.results.forEach(res => {
+          appendResultToTable(res);
+        });
+
+        recalculateCosts(); // Inicializa os custos com base no valor default
+        updateLiveCharts();
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar resultados iniciais: ', err);
+    }
+  }
+
+  // Inicializa a página
+  initCharts();
+  loadInitialResults();
+
+</script>
+{% endblock %}

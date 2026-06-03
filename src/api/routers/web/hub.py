@@ -333,6 +333,20 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
                     "Oi! Em que posso ajudá-lo(a) hoje?",
                     "Olá! Pode perguntar sobre calendário, editais, contatos ou suporte. 🎓",
                 ])
+                # Salva turno de saudação imediata no simulador
+                try:
+                    from src.memory.container import create_memory_service
+                    mem_svc = create_memory_service()
+                    mem_svc.persistir_turno(
+                        session_id=thread_id,
+                        user_id=thread_id,
+                        pergunta=msg,
+                        resposta=answer,
+                        rota=decision.rota
+                    )
+                except Exception:
+                    pass
+
                 yield _sse_step("planner", "skip", "Fast-Path (Inline)")
                 yield _sse_step("dispatch", "skip", "Bypass Celery")
                 yield _sse_step("synthesis", "ok", "Resposta instantânea")
@@ -363,6 +377,20 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
                 answer = "🎥 **Mídia detectada!**\n\nIdentifiquei um link suportado.\nDeseja iniciar o download deste arquivo agora?"
                 btns = [{"label": "Sim, baixar", "value": "sim"}, {"label": "Não", "value": "nao"}]
 
+                # Salva turno de mídia imediato no simulador
+                try:
+                    from src.memory.container import create_memory_service
+                    mem_svc = create_memory_service()
+                    mem_svc.persistir_turno(
+                        session_id=thread_id,
+                        user_id=thread_id,
+                        pergunta=msg,
+                        resposta=answer,
+                        rota=decision.rota
+                    )
+                except Exception:
+                    pass
+
                 yield _sse_step("planner", "skip", "Fast-Path HITL")
                 yield _sse_step("dispatch", "skip", "Bypass Celery")
                 yield _sse_step("synthesis", "ok", "Ação Manual Requerida")
@@ -378,12 +406,19 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
             # ── 2. Planner ────────────────────────────────
             yield _sse_step("planner", "running", "Gerando plano DAG…")
             t0 = _t.monotonic()
+            
+            # Carrega memória do usuário para planejamento
+            from src.memory.container import create_memory_service
+            mem_svc = create_memory_service()
+            mem_ctx = mem_svc.carregar_contexto(user_id=thread_id, session_id=thread_id, query=msg)
+
             from src.application.chain.planner import criar_plano
             plan = await criar_plano(
                 query=msg, session_id=thread_id, rota=decision.rota,
                 dag_hint=decision.dag_hint,
                 user_context={"role": "admin", "nome": "Admin"},
-                history="", fatos=[],
+                history=mem_ctx.historico.texto_formatado if mem_ctx.historico else "",
+                fatos=[f.texto for f in mem_ctx.fatos] if mem_ctx.fatos else [],
             )
             workers_str = " → ".join(s["worker"] for s in plan.steps)
             yield _sse_step("planner", "ok", workers_str,
@@ -414,6 +449,20 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
                 action_buttons = final_data.get("action_buttons", [])
                 status = final_data.get("status", "ok")
                 yield _sse_step("synthesis", "ok", f"{len(answer)} chars gerados", synth_ms)
+                
+                # Persiste turno de resposta assíncrona gerada
+                if status == "ok" and answer:
+                    try:
+                        mem_svc.persistir_turno(
+                            session_id=thread_id,
+                            user_id=thread_id,
+                            pergunta=msg,
+                            resposta=answer,
+                            rota=decision.rota
+                        )
+                        mem_svc.extrair_fatos_background(user_id=thread_id, session_id=thread_id)
+                    except Exception as e:
+                        logger.warning("⚠️ Falha ao salvar turno assíncrono no hub: %s", e)
 
             total_ms = int((_t.monotonic() - t_total) * 1000)
 
@@ -579,6 +628,18 @@ async def config_page(request: Request):
     return templates.TemplateResponse(
         request=request, name="hub/config.html",
         context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/eval", response_class=HTMLResponse)
+async def eval_page(request: Request):
+    """Serve a página HTML do Dashboard de Avaliação."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/eval.html",
+        context={"request": request, "username": payload.sub, "modelo": settings.GEMINI_MODEL},
     )
 # ─────────────────────────────────────────────────────────────────────────────
 # Endpoints
@@ -1060,13 +1121,22 @@ async def _run_eval_background(dataset: list[dict]) -> None:
         await _eval_progress_queue.put(json.dumps({
             "type":       "result",
             "id":         result.id,
-            "question":   result.question[:60],
+            "category":   result.category,
+            "question":   result.question,
+            "answer":     result.answer,
+            "route_detected": result.route_detected,
             "hit_rate":   result.hit_rate,
             "mrr":        result.mrr,
             "crag":       result.crag_score,
             "faithfulness": result.faithfulness,
             "relevancy":  result.answer_relevancy,
             "latency_ms": result.latency_ms,
+            "tokens_entrada": result.tokens_entrada,
+            "tokens_saida":   result.tokens_saida,
+            "tokens_total":   result.tokens_total,
+            "cost_usd":       result.cost_usd,
+            "memory_mb":      result.memory_mb,
+            "worker_name":    result.worker_name,
             "error":      result.error,
         }))
 
@@ -1086,6 +1156,11 @@ async def _run_eval_background(dataset: list[dict]) -> None:
         "avg_faith":  run_result.avg_faithfulness,
         "avg_relev":  run_result.avg_relevancy,
         "avg_lat_ms": run_result.avg_latency_ms,
+        "avg_tokens_in":  run_result.avg_tokens_entrada,
+        "avg_tokens_out": run_result.avg_tokens_saida,
+        "avg_tokens_tot": run_result.avg_tokens_total,
+        "avg_cost":       run_result.avg_cost_usd,
+        "avg_memory":     run_result.avg_memory_mb,
     }))
 
     _eval_running = False

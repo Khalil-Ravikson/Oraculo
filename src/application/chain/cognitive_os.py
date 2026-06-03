@@ -283,6 +283,7 @@ async def _despachar_workers(plan) -> None:
         "chat_id": plan.context["user_context"].get("chat_id") or plan.session_id,
         "sender_jid": plan.session_id,
         "route": plan.rota,
+        "query": plan.context.get("query", ""),
     }
 
     # Cenário A: Fluxo RAG clássico (RAG(s) -> Síntese -> Delivery)

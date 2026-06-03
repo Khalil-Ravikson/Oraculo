@@ -105,17 +105,26 @@ class RoutingDecision(BaseModel):
     motivo: str = Field(description="Justificativa breve da decisão (máx 60 caracteres)")
 
 # ── Prompt zero-shot para Flash ────────────────────────────────────────────────
-_SYSTEM_ROUTER = """Você é um classificador de intenções para o Oráculo UEMA.
-Classifique a mensagem em EXATAMENTE uma destas rotas:
-- CALENDARIO: datas, prazos, matrícula, semestre, feriados, início/fim de aulas
-- EDITAL: PAES, vagas, cotas (AC, BR-PPI, PcD), vestibular, inscrição
-- CONTATOS: emails, telefones, setores (PROG, CTIC, CECEN, reitoria, coordenação)
-- WIKI: SIGAA, senha, wifi, suporte TI, sistemas, laboratórios
-- CRUD: alterar/atualizar dados pessoais do próprio usuário
-- GREETING: saudação pura sem pergunta (oi, obrigado, ok)
-- GERAL: fora do escopo UEMA ou ambíguo
+_SYSTEM_ROUTER = """<system_instruction>
+Você é um classificador semântico de alta precisão para o Oráculo UEMA.
+Sua única responsabilidade é analisar a mensagem de entrada e classificá-la em EXATAMENTE uma das rotas válidas.
 
-Responda APENAS com JSON: {"rota": "ROTA", "confianca": 0.0_a_1.0, "motivo": "max 60 chars"}"""
+<rotas_validas>
+- CALENDARIO: Dúvidas sobre datas acadêmicas, início/fim de aulas, recessos, prazos e matrículas (calouros ou veteranos).
+- EDITAL: Dúvidas sobre o PAES, editais de vestibular, número de vagas, cotas (AC, BR-PPI, PcD, etc.), documentos exigidos ou isenção de taxa.
+- CONTATOS: Pedidos de telefone, e-mail, ramal ou contatos de setores da UEMA (ex: CTIC, PROG, reitoria, secretarias de cursos).
+- WIKI: Informações sobre uso do SIGAA (recuperar senha, erro de acesso), rede Wi-Fi, laboratórios ou infraestrutura de sistemas.
+- CRUD: Pedidos do usuário para atualizar ou alterar seus próprios dados pessoais de cadastro (ex: "quero mudar meu telefone", "alterar curso").
+- GREETING: Saudações puras (ex: "olá", "bom dia"), agradecimentos (ex: "obrigado", "valeu"), ou perguntas sobre sua própria identidade e capacidades (ex: "como você pode me ajudar?", "quem é você?", "o que você faz?").
+- GERAL: Perguntas fora do escopo oficial da UEMA, conversas informais ou mensagens totalmente ambíguas que não se encaixam em nenhuma outra rota.
+</rotas_validas>
+
+<regras_de_classificacao>
+1. Se a mensagem for mista contendo uma saudação e uma pergunta factual (ex: "Oi, boa tarde! Qual a data de matrícula?"), desconsidere a saudação e classifique estritamente pela pergunta factual (neste caso, "CALENDARIO").
+2. Se o usuário estiver perguntando sobre suas funcionalidades ("o que você pode fazer?", "me ajuda"), classifique como "GREETING" para que ele receba a resposta de apresentação.
+3. Responda estritamente com o JSON estruturado conforme o esquema Pydantic, sem formatações adicionais ou blocos markdown.
+</regras_de_classificacao>
+</system_instruction>"""
 
 
 @dataclass
@@ -232,14 +241,14 @@ async def rotear(
         logger.debug("Falha no roteamento por KNN dinâmico: %s", e)
 
     # ── Layer 5: Flash (LLM) ──────────────────────
-    decision = await _classificar_com_flash(query, ctx)
+    decision = await _classificar_com_flash(query, ctx, session_id)
     ms = int((time.monotonic() - t0) * 1000)
     _LATENCY.observe(ms)
     decision.latencia_ms = ms
     return decision
 
 
-async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
+async def _classificar_com_flash(query: str, ctx: dict, session_id: str | None = None) -> RouterDecision:
     """Usa Gemini Flash para classificação zero-shot."""
     from src.infrastructure.settings import settings
     import google.genai as genai
@@ -267,6 +276,9 @@ async def _classificar_com_flash(query: str, ctx: dict) -> RouterDecision:
         if usage:
             _FLASH_TOKENS.labels(direction="input").inc(usage.prompt_token_count or 0)
             _FLASH_TOKENS.labels(direction="output").inc(usage.candidates_token_count or 0)
+            if session_id:
+                from src.infrastructure.redis_client import registrar_tokens_redis
+                registrar_tokens_redis(session_id, usage.prompt_token_count or 0, usage.candidates_token_count or 0)
 
         # Parsing seguro do JSON
         texto = response.text.strip()

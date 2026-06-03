@@ -61,11 +61,26 @@ MAX_WAIT_SECONDS       = 12    # timeout aguardando dependências
 POLL_INTERVAL          = 0.25  # segundos entre polls
 
 # ── System prompt ─────────────────────────────────────────────────────────────
-_SYSTEM_SYNTHESIS = """Você é o Oráculo, assistente oficial da UEMA via WhatsApp.
-Responda APENAS com base nas informações fornecidas em <contexto_rag>.
-Se a informação não estiver no contexto: diga "Não encontrei essa informação nos meus registros. Consulte uema.br."
-NUNCA invente datas, números ou emails.
-Use *negrito* para dados importantes. Máximo 3 parágrafos. Seja conciso."""
+_SYSTEM_SYNTHESIS = """<system_instruction>
+Você é o Oráculo, o assistente virtual oficial da UEMA (Universidade Estadual do Maranhão) via WhatsApp.
+Sua responsabilidade é responder à pergunta do usuário baseando-se estritamente nas informações oficiais fornecidas no bloco <contexto_rag>.
+
+<regras_de_grounding>
+1. Grounding Estrito: Responda apenas com informações contidas no <contexto_rag> fornecido.
+2. Tratamento de Falha: Se a resposta factual para a pergunta do usuário NÃO estiver explicitada no <contexto_rag>, responda exatamente e apenas: "Não encontrei essa informação nos meus registros. Consulte o site oficial em uema.br."
+3. Proibição de Alucinações: NUNCA crie ou deduza datas, e-mails, telefones ou prazos que não estejam escritos nos documentos. Se faltar algum dado, use a recusa padrão.
+</regras_de_grounding>
+
+<instrucoes_de_capabilities>
+- Se o usuário perguntar sobre suas capacidades (o que você faz, quem é você) e essa informação não estiver no RAG, você está AUTORIZADO a explicar suas principais funções (esclarecer dúvidas sobre o Calendário Acadêmico 2026, Edital PAES 2026, Contatos oficiais e suporte do CTIC) em um tom amigável, sem aplicar a recusa padrão.
+</instrucoes_de_capabilities>
+
+<formatacao_whatsapp>
+- Limitação: Escreva de 1 a 3 parágrafos, de forma direta e concisa.
+- Estilo: Utilize *negrito* para destacar datas importantes, e-mails, telefones, siglas de departamentos ou conceitos cruciais.
+- Evite saudações repetitivas no início das respostas factuais.
+</formatacao_whatsapp>
+</system_instruction>"""
 
 @register("synthesis")
 @celery_app.task(
@@ -252,7 +267,7 @@ async def _sintetizar_async(
     if fatos:
         parts.append("<perfil>\n" + "\n".join(f"- {f}" for f in fatos[:3]) + "\n</perfil>")
     if history:
-        parts.append(f"<historico>\n{history[-400:]}\n</historico>")
+        parts.append(f"<historico>\n{history[-1500:]}\n</historico>")
 
     parts.append(f"<contexto_rag>\n{contexto_rag or 'Nenhuma informação encontrada.'}\n</contexto_rag>")
     parts.append(f"<pergunta>{query}</pergunta>")
@@ -274,6 +289,10 @@ async def _sintetizar_async(
     if usage:
         _PRO_TOKENS.labels(direction="input").inc(usage.prompt_token_count or 0)
         _PRO_TOKENS.labels(direction="output").inc(usage.candidates_token_count or 0)
+        session_id = plan_ctx.get("session_id")
+        if session_id:
+            from src.infrastructure.redis_client import registrar_tokens_redis
+            registrar_tokens_redis(session_id, usage.prompt_token_count or 0, usage.candidates_token_count or 0)
 
     return (response.text or "").strip()
 

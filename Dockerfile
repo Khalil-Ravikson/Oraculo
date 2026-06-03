@@ -22,7 +22,7 @@ COPY requirements.txt .
 # Cria o virtualenv e instala dependências via uv com cache de downloads
 RUN --mount=type=cache,target=/root/.cache/uv \
     /uv/bin/uv venv /opt/venv && \
-    /uv/bin/uv pip install --default-timeout=120 -r requirements.txt
+    /uv/bin/uv pip install -r requirements.txt
 
 # Instala o Chromium direto no diretório definitivo sem cópias redundantes
 RUN /opt/venv/bin/playwright install chromium

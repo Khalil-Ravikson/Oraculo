@@ -125,6 +125,11 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
             "role":      identity.get("role", "estudante"),
         }
 
+        # ── Carrega contexto da memória ────────────────────────────────────────
+        from src.memory.container import create_memory_service
+        mem_svc = create_memory_service()
+        mem_ctx = mem_svc.carregar_contexto(user_id=phone, session_id=phone, query=message)
+        
         # ── Executa a chain (COGNITIVE OS) ─────────────────────────────────────
         from src.application.chain.cognitive_os import processar as cognitive_processar
         
@@ -134,7 +139,8 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
             message=message,
             session_id=phone,
             user_context=user_context,
-            history=""
+            history=mem_ctx.historico.texto_formatado if mem_ctx.historico else "",
+            fatos=[f.texto for f in mem_ctx.fatos] if mem_ctx.fatos else []
         )
         
         # Adaptador (Mock) para manter a compatibilidade com a função _salvar_metrica
@@ -162,6 +168,18 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
                 "✅ [TASK] Resposta enviada | phone=%s | %dms | route=%s",
                 phone[-6:], ms, result.route
             )
+            # Salva turno de resposta síncrona (fast-path)
+            try:
+                mem_svc.persistir_turno(
+                    session_id=phone,
+                    user_id=phone,
+                    pergunta=message,
+                    resposta=result.answer,
+                    rota=result.route
+                )
+                mem_svc.extrair_fatos_background(user_id=phone, session_id=phone)
+            except Exception as e:
+                logger.warning("⚠️  Falha ao salvar turno síncrono na memória: %s", e)
         else:
             logger.warning("⚠️  [TASK] Sistema retornou resposta vazia para %s", phone[-6:])
             success = True   # não falha — pode ser HITL pendente
@@ -357,13 +375,19 @@ async def _handle_message(**kwargs) -> None:
         except Exception as e:
             logger.warning("⚠️  enviar_digitando falhou: %s", e)
 
+        # ── Carrega contexto da memória ────────────────────────────────────────
+        from src.memory.container import create_memory_service
+        mem_svc = create_memory_service()
+        mem_ctx = mem_svc.carregar_contexto(user_id=sender, session_id=sender, query=text)
+
         # ── CognitiveOS: ───────────────────────────────────────────────────────
         from src.application.chain.cognitive_os import processar as cognitive_processar
         result_os = await cognitive_processar(
             message=text,
             session_id=sender,
             user_context=user_context,
-            history="",   
+            history=mem_ctx.historico.texto_formatado if mem_ctx.historico else "",
+            fatos=[f.texto for f in mem_ctx.fatos] if mem_ctx.fatos else []   
         )
         
         # Adaptador (Mock) para manter a compatibilidade
@@ -385,6 +409,18 @@ async def _handle_message(**kwargs) -> None:
         if answer:
             await gateway.enviar_mensagem(chat_id, answer)
             logger.info("✅ [CELERY WORKER] Resposta da IA enviada com sucesso para o grupo!")
+            # Salva turno de resposta síncrona (fast-path de grupo)
+            try:
+                mem_svc.persistir_turno(
+                    session_id=sender,
+                    user_id=sender,
+                    pergunta=text,
+                    resposta=result.answer,
+                    rota=result.route
+                )
+                mem_svc.extrair_fatos_background(user_id=sender, session_id=sender)
+            except Exception as e:
+                logger.warning("⚠️  Falha ao salvar turno síncrono (grupo) na memória: %s", e)
 
         try:
             _salvar_metrica(sender, result)
@@ -448,6 +484,24 @@ async def _enviar_resposta_whatsapp_async(task, synth_result: dict, delivery_ctx
     try:
         await gateway.enviar_mensagem(chat_id, answer)
         logger.info("✅ [DELIVERY] Resposta entregue com sucesso via WhatsApp para %s", chat_id)
+        
+        # Salva turno de resposta assíncrona
+        try:
+            from src.memory.container import create_memory_service
+            mem_svc = create_memory_service()
+            query = delivery_ctx.get("query") or ""
+            user_id = sender or chat_id
+            if query and answer and status == "ok":
+                mem_svc.persistir_turno(
+                    session_id=user_id,
+                    user_id=user_id,
+                    pergunta=query,
+                    resposta=synth_result.get("answer") or answer, # evita o sufixo de avaliação no histórico
+                    rota=delivery_ctx.get("route", "GERAL")
+                )
+                mem_svc.extrair_fatos_background(user_id=user_id, session_id=user_id)
+        except Exception as e:
+            logger.warning("⚠️  Falha ao salvar turno assíncrono na memória: %s", e)
     except Exception as exc:
         logger.error("❌ [DELIVERY] Falha ao entregar resposta: %s", exc)
         raise task.retry(exc=exc, countdown=3)

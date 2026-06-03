@@ -32,6 +32,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
+from pydantic import BaseModel, Field
 
 from prometheus_client import Counter, Histogram
 
@@ -50,27 +51,50 @@ _PLANNER_LATENCY = Histogram(
 )
 
 # ── Prompt do Planner ─────────────────────────────────────────────────────────
-_SYSTEM_PLANNER = """Você é o Planner do Oráculo UEMA. Sua única função é decompor uma tarefa em um plano de execução estruturado (DAG).
+_SYSTEM_PLANNER = """<system_instruction>
+Você é o Planner (Agente de Planejamento) do Oráculo UEMA.
+Sua única responsabilidade é decompor uma intenção de usuário em um plano de execução estruturado (DAG de tarefas).
 
-WORKERS DISPONÍVEIS:
-- "rag_search": busca híbrida no Redis Vector Store. Args: {doc_type: str, k: int, query_override: str?}
-- "synthesis": gera resposta final com Gemini Pro. Args: {max_tokens: int, tone: str?}
-- "crud_confirm": solicita confirmação HITL antes de executar CRUD. Args: {action: str, description: str}
-- "greeting": responde saudações sem RAG. Args: {}
+<workers_disponiveis>
+- "rag_search": Busca híbrida de informações no Redis Vector Store. Args: {doc_type: str, k: int}
+  - "doc_type" válidos: "calendario", "edital", "contatos", "wiki_ctic", "geral" (use "geral" como padrão).
+  - "k": quantidade de documentos para retornar (use de 5 a 10).
+- "synthesis": Gera a resposta final em linguagem natural sintetizando os resultados. Args: {max_tokens: int, tone: str?}
+  - "max_tokens": tamanho máximo da resposta (padrão: 512).
+  - "tone": tom da resposta (opcional: "gentil", "formal").
+- "crud_confirm": Solicita confirmação manual (HITL) para alteração de dados cadastrais. Args: {action: str, description: str}
+- "greeting": Responde saudações, agradecimentos ou meta-perguntas de capacidades imediatamente. Args: {}
+</workers_disponiveis>
 
-REGRAS:
-1. "synthesis" SEMPRE depende de "rag_search" (quando rag_search estiver no plano).
-2. Não inventar workers. Use apenas os listados.
-3. Para GREETING: apenas step "greeting", sem synthesis.
-4. Para CRUD: apenas step "crud_confirm".
-5. Para GERAL com dúvida complexa: considere 2 steps de rag_search paralelos com doc_types diferentes.
+<regras_de_planejamento>
+1. Dependências: O worker "synthesis" deve SEMPRE ter em "depends_on" o identificador do step "rag_search" correspondente (ex: se "rag_search" é "s1", "synthesis" deve ser "s2" com depends_on=["s1"]).
+2. Restrição: Não invente outros workers. Use estritamente a lista acima.
+3. Rota GREETING: Gere apenas um step com worker "greeting" (sem synthesis subsequente).
+4. Rota CRUD: Gere apenas um step com worker "crud_confirm".
+5. Consultas RAG Clássicas: Crie um plano com dois steps sequenciais: s1 ("rag_search") e s2 ("synthesis", dependendo de "s1").
+6. Responda estritamente com um objeto JSON válido, sem cercas de código markdown (```json) e sem comentários.
+</regras_de_planejamento>
+</system_instruction>"""
 
-Responda APENAS com JSON válido (sem markdown, sem comentários):
-{
-  "steps": [
-    {"id": "s1", "worker": "nome_worker", "args": {...}, "depends_on": []}
-  ]
-}"""
+
+class StepArgsSchema(BaseModel):
+    doc_type: str | None = Field(default=None, description="Tipo de documento (ex: 'calendario', 'edital')")
+    k: int | None = Field(default=None, description="Quantidade de chunks para retornar")
+    max_tokens: int | None = Field(default=None, description="Quantidade maxima de tokens na sintese")
+    tone: str | None = Field(default=None, description="Tom da resposta (ex: 'gentil', 'formal')")
+    action: str | None = Field(default=None, description="Acao a ser executada no CRUD")
+    description: str | None = Field(default=None, description="Descricao amigavel da operacao CRUD")
+
+
+class PlanStepSchema(BaseModel):
+    id: str = Field(description="Identificador unico do passo (ex: 's1', 's2')")
+    worker: str = Field(description="Nome do worker (ex: 'rag_search', 'synthesis', 'crud_confirm', 'greeting')")
+    args: StepArgsSchema = Field(default_factory=StepArgsSchema, description="Argumentos especificos passados para o worker")
+    depends_on: list[str] = Field(default_factory=list, description="Lista de IDs de passos dos quais este depende")
+
+
+class ExecutionPlanSchema(BaseModel):
+    steps: list[PlanStepSchema] = Field(description="Lista de passos do plano em formato DAG")
 
 
 @dataclass
@@ -176,8 +200,8 @@ async def _planejar_com_pro(
     prompt = f"""Rota detectada: {rota}
 Dica do router: {json.dumps(dag_hint)}
 Contexto do aluno: {json.dumps({k: user_context.get(k) for k in ("curso","centro","role") if user_context.get(k)})}
-Fatos conhecidos: {"; ".join(fatos[:3]) if fatos else "nenhum"}
-Histórico (últimas 2 trocas): {history[-300:] if history else "nenhum"}
+Fatos conhecidos: {"; ".join(fatos[:5]) if fatos else "nenhum"}
+Histórico (últimas 2 trocas): {history[-1500:] if history else "nenhum"}
 Pergunta atual: "{query[:400]}"
 
 Gere o plano de execução:"""
@@ -191,6 +215,7 @@ Gere o plano de execução:"""
             temperature=0.0,
             max_output_tokens=300,
             response_mime_type="application/json",
+            response_schema=ExecutionPlanSchema,
         ),
     )
 
@@ -198,8 +223,17 @@ Gere o plano de execução:"""
     if usage:
         _PRO_TOKENS.labels(direction="input").inc(usage.prompt_token_count or 0)
         _PRO_TOKENS.labels(direction="output").inc(usage.candidates_token_count or 0)
+        if session_id:
+            from src.infrastructure.redis_client import registrar_tokens_redis
+            registrar_tokens_redis(session_id, usage.prompt_token_count or 0, usage.candidates_token_count or 0)
 
-    data = json.loads(response.text or "{}")
+    texto = (response.text or "").strip()
+    if texto.startswith("```json"):
+        texto = texto[7:-3].strip()
+    elif texto.startswith("```"):
+        texto = texto[3:-3].strip()
+
+    data = json.loads(texto or "{}")
     steps = data.get("steps", [])
 
     # Validação mínima

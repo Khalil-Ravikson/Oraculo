@@ -554,3 +554,28 @@ def set_document_hash(source: str, sha256_hash: str) -> None:
         r.hset("ingest:hashes", source, sha256_hash)
     except Exception as exc:
         logger.warning("⚠️  Falha ao salvar hash do documento %s: %s", source, exc)
+
+
+def registrar_tokens_redis(session_id: str, input_tokens: int, output_tokens: int) -> None:
+    """Registra de forma incremental o uso de tokens para uma sessão (SÍNCRONO)."""
+    try:
+        r = get_redis_text()
+        key = f"eval:tokens:{session_id}"
+        r.hincrby(key, "input", input_tokens)
+        r.hincrby(key, "output", output_tokens)
+        r.expire(key, 3600)  # 1 hora de TTL é suficiente para avaliações
+    except Exception as exc:
+        logger.warning("⚠️  Falha ao registrar tokens no Redis para %s: %s", session_id, exc)
+
+
+def obter_tokens_redis(session_id: str) -> tuple[int, int]:
+    """Obtém os tokens acumulados (entrada, saída) para uma sessão (SÍNCRONO)."""
+    try:
+        r = get_redis_text()
+        key = f"eval:tokens:{session_id}"
+        data = r.hgetall(key)
+        if data:
+            return int(data.get("input", 0)), int(data.get("output", 0))
+    except Exception:
+        pass
+    return 0, 0

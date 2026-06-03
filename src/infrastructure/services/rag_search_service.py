@@ -129,10 +129,17 @@ class QueryTransformService:
         historico: str = "",
     ) -> str:
         """Reescrita contextual via Gemini Flash para queries vagas ou com pronomes."""
-        q_lower = query.lower()
-        tem_pronome = any(p in q_lower for p in ["isso", "ele", "ela", "aquilo", "esse"])
-        e_vaga = len(query.split()) <= 4
-        if not (tem_pronome or (e_vaga and rota == "GERAL")):
+        q_lower = query.lower().strip()
+        palavras = q_lower.split()
+        
+        # Flexibiliza a detecção de pronomes ou query vaga que precisa de contexto
+        tem_pronome = any(p in q_lower for p in ["isso", "ele", "ela", "aquilo", "esse", "este", "esta", "onde", "quando", "como", "qual", "quais", "cade", "cadê"])
+        e_vaga = len(palavras) <= 5
+        
+        if not (tem_pronome or (e_vaga and rota in ("GERAL", "CALENDARIO", "EDITAL", "WIKI"))):
+            return query
+
+        if not historico:
             return query
 
         try:
@@ -140,27 +147,37 @@ class QueryTransformService:
             import google.genai as genai
             from google.genai import types
 
-            historico_trecho = historico[-200:] if historico else ""
+            # Pega uma fatia generosa do histórico (até 1500 chars) para garantir contexto real
+            historico_trecho = historico[-1500:]
+            
             prompt = (
-                f"Histórico:\n{historico_trecho}\n\n"
-                f"Reescreva como query técnica para busca em documentos da UEMA "
-                f"(máx 15 palavras, sem pronomes, sem artigos):\n{query}"
+                f"<system_instruction>\n"
+                f"Você é um especialista em reescrita de buscas para RAG da UEMA.\n"
+                f"Analise o histórico recente da conversa e reescreva a última pergunta do usuário como uma query técnica direta, sem pronomes ou artigos, otimizada para pesquisa no banco de dados vetorial.\n"
+                f"Responda APENAS com a query reescrita, sem markdown, sem explicações.\n"
+                f"</system_instruction>\n\n"
+                f"<historico>\n{historico_trecho}\n</historico>\n\n"
+                f"<pergunta_usuario>{query}</pergunta_usuario>\n\n"
+                f"Query Reescrita:"
             )
+            
             client = genai.Client(api_key=settings.GEMINI_API_KEY)
             response = await client.aio.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model=settings.GEMINI_MODEL,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.0,
-                    max_output_tokens=50,
+                    max_output_tokens=60,
                 ),
             )
             reescrita = (response.text or "").strip()
-            if len(reescrita) >= 5:
+            # Remove aspas se o modelo adicionar
+            reescrita = reescrita.replace('"', '').replace("'", "")
+            if len(reescrita) >= 3:
                 logger.debug("🔄 Query transform: '%s' → '%s'", query[:50], reescrita[:50])
                 return reescrita
         except Exception as e:
-            logger.debug("QueryTransform Flash falhou: %s", e)
+            logger.warning("⚠️ QueryTransform Flash falhou: %s", e)
         return query
 
     async def transformar(

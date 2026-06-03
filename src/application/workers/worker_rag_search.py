@@ -59,8 +59,9 @@ async def _executar(task, event: dict) -> dict:
     k_text     = int(event.get("k_text", 8))
     query      = event.get("query", "")
     rota       = event.get("rota", "GERAL")
-    fatos      = event.get("fatos", [])
-    historico  = event.get("historico", "")
+    plan_ctx   = event.get("plan_context", {})
+    fatos      = event.get("fatos") or plan_ctx.get("fatos", [])
+    historico  = event.get("historico") or plan_ctx.get("history", "")
 
     logger.info("🔍 [RAG WORKER] plan=%s step=%s doc=%s", plan_id[:8], step_id, doc_type)
 
