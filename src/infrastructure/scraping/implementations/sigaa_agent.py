@@ -200,7 +200,10 @@ class SIGAAAgent:
 
     async def _wait_for_jsf_lifecycle(self, page):
         """Aguarda a rede ficar ociosa e aguarda o processamento do ViewState do JSF."""
-        await page.wait_for_load_state("networkidle")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass  # Ignora timeouts em conexões ativas lentas (ex: fontes ou analytics)
         await asyncio.sleep(0.5)
 
     async def _save_screenshot(self, page, name: str) -> str:
