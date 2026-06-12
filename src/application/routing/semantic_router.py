@@ -73,7 +73,7 @@ _RE_GREETING = re.compile(
 _RE_YTB = re.compile(r'(https?://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)[\w\-]+)', re.I)
 _RE_INSTA = re.compile(r'(https?://(?:www\.)?instagram\.com/(?:p|reel)/[\w\-]+)', re.I)
 _RE_SIGAA = re.compile(
-    r'(sigaa|biblioteca|acervo|livro|obra|marc|inscrever|inscrição|processo seletivo|edital sigaa|concurso uema)',
+    r'(sigaa|biblioteca|acervo|livro|obra|marc|inscrever|inscrição|processo seletivo|edital sigaa|concurso uema|nota|média|cr\b|ira\b|histórico|turmas|grade|matéria|integraliza|grade curricular|estrutura curricular|sala|professor|complementar)',
     re.I
 )
 
@@ -100,7 +100,7 @@ def _heuristica_basica(query: str) -> str | None:
 
 class RoutingDecision(BaseModel):
     """Esquema Pydantic para validação estruturada da decisão de roteamento pelo Gemini."""
-    rota: str = Field(description="A rota: CALENDARIO, EDITAL, CONTATOS, WIKI, CRUD, GREETING, ou GERAL")
+    rota: str = Field(description="A rota: CALENDARIO, EDITAL, CONTATOS, WIKI, CRUD, GREETING, SIGAA, ou GERAL")
     confianca: float = Field(description="Nível de certeza da decisão (0.0 a 1.0)")
     motivo: str = Field(description="Justificativa breve da decisão (máx 60 caracteres)")
 
@@ -110,12 +110,13 @@ Você é um classificador semântico de alta precisão para o Oráculo UEMA.
 Sua única responsabilidade é analisar a mensagem de entrada e classificá-la em EXATAMENTE uma das rotas válidas.
 
 <rotas_validas>
-- CALENDARIO: Dúvidas sobre datas acadêmicas, início/fim de aulas, recessos, prazos e matrículas (calouros ou veteranos).
+- CALENDARIO: Dúvidas gerais sobre datas acadêmicas do calendário geral da UEMA, início/fim de aulas, recessos, prazos e matrículas.
 - EDITAL: Dúvidas sobre o PAES, editais de vestibular, número de vagas, cotas (AC, BR-PPI, PcD, etc.), documentos exigidos ou isenção de taxa.
 - CONTATOS: Pedidos de telefone, e-mail, ramal ou contatos de setores da UEMA (ex: CTIC, PROG, reitoria, secretarias de cursos).
 - WIKI: Informações sobre uso do SIGAA (recuperar senha, erro de acesso), rede Wi-Fi, laboratórios ou infraestrutura de sistemas.
 - CRUD: Pedidos do usuário para atualizar ou alterar seus próprios dados pessoais de cadastro (ex: "quero mudar meu telefone", "alterar curso").
 - GREETING: Saudações puras (ex: "olá", "bom dia"), agradecimentos (ex: "obrigado", "valeu"), ou perguntas sobre sua própria identidade e capacidades (ex: "como você pode me ajudar?", "quem é você?", "o que você faz?").
+- SIGAA: Consultas a dados acadêmicos pessoais do discente no SIGAA, incluindo notas, média, histórico escolar, coeficiente de rendimento (CR), índice de rendimento acadêmico (IRA), turmas do semestre, salas de aula, horários, professores, carga horária e estrutura curricular.
 - GERAL: Perguntas fora do escopo oficial da UEMA, conversas informais ou mensagens totalmente ambíguas que não se encaixam em nenhuma outra rota.
 </rotas_validas>
 

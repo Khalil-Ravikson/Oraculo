@@ -1,0 +1,1425 @@
+
+
+
+
+
+
+	
+	
+		<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+   "http://www.w3.org/TR/html4/loose.dtd">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html class="background" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<script type="text/javascript" src="/sigaa/faces/myFacesExtensionResource/org.apache.myfaces.renderkit.html.util.MyFacesResourceLoader/17811039/navmenu.jscookmenu.HtmlJSCookMenuRenderer/JSCookMenu.js"><!--
+
+//--></script>
+<script type="text/javascript" src="/sigaa/faces/myFacesExtensionResource/org.apache.myfaces.renderkit.html.util.MyFacesResourceLoader/17811039/navmenu.jscookmenu.HtmlJSCookMenuRenderer/MyFacesHack.js"><!--
+
+//--></script>
+<script type="text/javascript"><!--
+var myThemeOfficeBase='/sigaa/faces/myFacesExtensionResource/org.apache.myfaces.renderkit.html.util.MyFacesResourceLoader/17811039/navmenu.jscookmenu.HtmlJSCookMenuRenderer/ThemeOffice/';
+//--></script>
+<script type="text/javascript" src="/sigaa/faces/myFacesExtensionResource/org.apache.myfaces.renderkit.html.util.MyFacesResourceLoader/17811039/navmenu.jscookmenu.HtmlJSCookMenuRenderer/ThemeOffice/theme.js"><!--
+
+//--></script>
+<link rel="stylesheet" href="/sigaa/css/jscookmenu/ThemeOffice/theme.css" type="text/css" />
+<meta HTTP-EQUIV="Pragma" CONTENT="no-cache">
+
+
+<title>SIGUEMA Acad&#234;mico - Sistema Integrado de Gest&#227;o de Atividades Acad&#234;micas</title>
+<link class="component" href="/sigaa/a4j/s/3_3_3.Finalorg/richfaces/renderkit/html/css/basic_classes.xcss/DATB/eAF7sqpgb-jyGdIAFrMEaw__.jsf" rel="stylesheet" type="text/css" /><link class="component" href="/sigaa/a4j/s/3_3_3.Finalorg/richfaces/renderkit/html/css/extended_classes.xcss/DATB/eAF7sqpgb-jyGdIAFrMEaw__.jsf" media="rich-extended-skinning" rel="stylesheet" type="text/css" /><script type="text/javascript">window.RICH_FACES_EXTENDED_SKINNING_ON=true;</script><script src="/sigaa/a4j/g/3_3_3.Finalorg/richfaces/renderkit/html/scripts/skinning.js.jsf" type="text/javascript"></script><link rel="shortcut icon" href="/sigaa/img/sigaa.ico" />
+
+<script type="text/javascript" src="/shared/jsBundles/jawr_loader.js"></script>
+<script type="text/javascript">
+                JAWR.loader.style('/bundles/css/sigaa_base.css', 'all');
+        		JAWR.loader.style('/css/ufrn_print.css', 'print');
+
+        		JAWR.loader.script('/bundles/js/sigaa_base.js');
+</script>
+<link rel="stylesheet" type="text/css" media="all" href="/sigaa/cssBundles/gzip_N1698484273/bundles/css/sigaa.css" />
+
+
+<link rel="alternate stylesheet" type="text/css" media="screen" title="mono" href="/sigaa/css/mono.css" />
+<link rel="alternate stylesheet" type="text/css" media="screen" title="contraste" href="/sigaa/css/contraste.css" />
+
+<!-- FontAwesome -->
+<link rel="stylesheet" type="text/css" href="/shared/beta/css/font-awesome.css" media="screen" />
+
+<!-- Painel Gen&#233;rico para telas Modal -->
+<script type="text/javascript" src="/shared/javascript/paineis/painel_generico.js"></script>
+
+<script src="/sigaa/javascript/styleswitch.js" type="text/javascript" ></script>
+
+
+
+<script type="text/javascript">
+			var mensagem;
+			var initMensagem = function() {
+				mensagem = new Mensagem();
+			}
+			YAHOO.util.Event.addListener(window,'load', initMensagem);
+			
+			function isIE(){
+			
+						return false;
+				
+			}
+		</script>
+<!-- Fim dos imports para abrir chamado -->
+<!-- Hotjar Tracking Code for www.uema.br --> 
+<script> 
+	(function(h,o,t,j,a,r){ 
+		h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+		h._hjSettings={hjid:504347,hjsv:6};
+		a=o.getElementsByTagName('head')[0];
+		r=o.createElement('script');r.async=1; 
+		r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv; 
+		a.appendChild(r); 
+		})(window,document,'https://static.hotjar.com/c/hotjar-','.js?sv='); 
+</script>
+</head>
+
+<body>
+
+
+
+
+
+	<div id="container">
+	<div id="cabecalho">
+	<div id="info-sistema">
+	<h1><span>UEMA - SIGUEMA Acad&#234;mico -</span></h1>
+	<h3>Sistema Integrado de Gest&#227;o de Atividades Acad&#234;micas</h3>
+	<div class="dir">
+	
+		
+		<style>
+#info-sistema span.sair-sistema,
+	#info-sistema #tempoSessao{
+	display: inline;
+	right: inherit;
+	position: relative;
+	top: 0;
+	padding-right: inherit;
+}
+
+#info-sistema div.dir{
+	top:0;
+	right:0;
+	text-align: right;
+	width: auto;
+	position: absolute;
+	margin:0;
+	padding: 0;
+	height:16px;
+	display: inline;
+	padding-right:5px;
+	color: #FFF;
+}
+#info-sistema span.acessibilidade{
+	padding: 0 5px;
+	border: solid #D99C44;
+	border-width: 0 1px 0 0;
+	margin: 0 5px;
+	padding: 0 5px;
+}
+	#info-sistema span.acessibilidade a{
+		font-size: 1.1em;
+		font-weight: bolder;
+		color: #FFF;
+		margin-left: 2px;
+		letter-spacing: 0.1px;
+		word-spacing: 0.1px;
+	}
+	#info-sistema span.acessibilidade a.fonteMenor strong{
+		font-size: 0.9em;
+	}
+	.rich-tabpanel-content {
+		font-size: inherit;
+	}	
+</style>
+<span class="acessibilidade">
+	<a class="fonteMaior" title="Aumentar a texto" alt="Aumentar a texto" href="#">
+		<strong>A</strong>+
+	</a>
+	<a class="fonteMenor" title="Diminuir o texto" alt="Diminuir o texto" href="#">
+		<strong>A</strong>-
+	</a>
+</span>
+<script type="text/javascript" src="/shared/javascript/jquery/jquery-1.4.4.min.js"></script>
+<script src="/sigaa/javascript/jquery.fontsize.js" type="text/javascript" ></script>
+<script type="text/javascript" >
+	redimensionarFonte('.acessibilidade', '#conteudo', 11, 11, 14);
+</script>
+		<span id="tempoSessao"></span>
+		<span class="sair-sistema"> <a href="/sigaa/logar.do?dispatch=logOff">SAIR</a> </span>
+	
+	</div>
+	</div>
+	 
+
+	<div id="painel-usuario"
+		>
+	
+		<!-- Inicio customiza&#231;&#227;o UEMA - Tarefa 73523 -->
+		
+		<!-- Fim customiza&#231;&#227;o UEMA - Tarefa 73523 -->
+		<div id="menu-usuario">
+		<ul>
+			<!-- In&#237;cio Customiza&#231;&#227;o SIGAA-15418 - UEMA - OS_17 -->
+			
+			<!-- Fim Customiza&#231;&#227;o SIGAA-15418 - UEMA - OS_17 -->
+				<li class="modulos">
+					<span id="modulos"> <a href="#" id="show-modulos">
+					M&#243;dulos </a> </span>
+				</li>
+			
+				
+					
+					<li class="caixa-postal">
+					
+						
+										
+							<a href=/sigaa/abrirCaixaPostal.jsf?sistema=2> 
+								
+								Caixa Postal					
+								
+								 
+							</a>
+						
+					
+					</li>
+				
+			<!-- In&#237;cio Customiza&#231;&#227;o SIGAA-15418 - UEMA - OS_17 -->
+			
+			<!-- Fim Customiza&#231;&#227;o SIGAA-15418 - UEMA - OS_17 -->
+			<li class="chamado">
+			
+				
+					<a href="javascript://nop/" onclick="alert('Caro aluno, em caso de d&#250;vidas em rela&#231;&#227;o ao uso do SIGUEMA Acad&#234;mico, recorra &#224; coordena&#231;&#227;o do seu curso.\nEm caso de erro, envie uma mensagem para nti@uema.br (n&#227;o esquecendo de informar seu n&#250;mero de matr&#237;cula).');">Abrir Chamado</a>
+				
+				
+			
+			</li>
+			
+				<!-- In&#237;cio Customiza&#231;&#227;o SIGAA-15418 - UEMA - OS_17 -->
+				
+					 
+						<li class="menus">
+							<a href="/sigaa/verPortalDiscente.do">Menu Discente</a>
+						</li>
+					 
+				
+				<!-- Fim Customiza&#231;&#227;o SIGAA-15418 - UEMA - OS_17 -->
+			
+			
+			
+				<li class="dados-pessoais"><a href="#"
+					onclick="window.open('/sigaa/alterar_dados.jsf','','width=670,height=430, top=100, left=100, scrollbars' )">Alterar
+				senha</a></li>
+			
+			<li class="ajuda">
+			<a href="https://www.info.ufrn.br/wikisistemas/doku.php" target="_blank">
+			Ajuda </a></li>
+		</ul>
+		</div>
+		<!-- Inicio customiza&#231;&#227;o UEMA - Tarefa 73523 -->
+		
+		<!-- Fim customiza&#231;&#227;o UEMA - Tarefa 73523 -->
+
+		<div id="info-usuario">
+
+		<p class="periodo-atual">
+					Semestre atual: <strong>2026.1</strong>
+		</p>
+
+		<p class="usuario">
+			<span title="KHALIL RAVIKSON A. DO CARMO">KHALIL RAVIKSON A. DO CARMO</span>
+			
+			
+		</p>
+
+		<p class="unidade">
+			CENTRO DE CI&#202;NCIAS TECNOL&#211;GICAS
+			 (11.14.06)
+			
+		</p>
+
+		</div>
+	
+	<div id="menu-principal"></div>
+	</div>
+	</div>
+	
+
+	<div id="conteudo">
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
+
+
+<link rel="stylesheet" type="text/css" media="all" href="/sigaa/cssBundles/gzip_1640272741/css/portal_docente.css" />
+
+<link rel="stylesheet" type="text/css" media="all" href="/sigaa/cssBundles/gzip_545415450/css/agenda.css" />
+
+<script type="text/javascript">
+	JAWR.loader.script('/javascript/paineis/noticias.js');
+    JAWR.loader.script('/bundles/js/jquery.js');
+</script>
+<script type="text/javascript" src="/shared/javascript/jquery/jquery-1.4.4.min.js"></script>
+<script src="/sigaa/javascript/rotator.js" type="text/javascript" ></script>
+<style>
+#cboxLoadedContent iframe {
+	background-color:#FFFFFF;
+}
+</style>
+
+
+
+
+
+<link rel="stylesheet" type="text/css" href="/sigaa/primefaces_resource/1.1/skins/sam/skin.css" />
+
+	
+	<div id="portal-docente">
+		
+		
+		
+			
+			
+			
+				
+
+
+
+
+
+
+
+<div id="menu-dropdown">
+<div class="wrapper">
+
+
+<form id="menu:form_menu_discente" name="menu:form_menu_discente" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="menu:form_menu_discente" value="menu:form_menu_discente" />
+
+
+<input type="hidden" name="id" value="230918"/>
+<input type="hidden" name="jscook_action"/>
+
+<script type="text/javascript">var menu_form_menu_discente_j_id_jsp_1383391995_101_menu =
+[['<img src="/sigaa/img/icones/ensino_menu.gif"/>', 'Ensino', null, 'menu:form_menu_discente', null,['<img src="/sigaa/img/celular_icone.gif"/>', 'Consultar Minhas Notas', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ relatorioNotasAluno.gerarRelatorio }', 'menu:form_menu_discente', null],
+[null, 'Consultar &#205;ndice Acad&#234;mico', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ indiceAcademicoMBean.selecionaDiscente }', 'menu:form_menu_discente', null],
+['<img src="/sigaa/img/celular_icone.gif"/>', 'Emitir confirma&#231;&#227;o de Matr&#237;cula', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ portalDiscente.atestadoMatricula }', 'menu:form_menu_discente', null],
+[null, 'Emitir Hist&#243;rico', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ portalDiscente.historico }', 'menu:form_menu_discente', null],
+[null, 'Emitir Hist&#243;rico Parcial', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ portalDiscente.historicoParcial }', 'menu:form_menu_discente', null],
+[null, 'Emitir Hist&#243;rico de Conclus&#227;o', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ portalDiscente.historicoConclusao }', 'menu:form_menu_discente', null],
+[null, 'Emitir Certid&#227;o de Cola&#231;&#227;o de Grau', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ certidaoColacaoGrauMBean.gerarCertificadoPortalDiscente }', 'menu:form_menu_discente', null],
+[null, 'Emitir Declara&#231;&#227;o de V&#237;nculo', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ declaracaoVinculo.emitirDeclaracao}', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Avalia&#231;&#227;o da Gradua&#231;&#227;o', null, 'menu:form_menu_discente', null,[null, 'Preencher a Avalia&#231;&#227;o da Gradua&#231;&#227;o', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ calendarioAvaliacaoInstitucionalBean.listar }', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Rever a Avalia&#231;&#227;o Anterior', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ avaliacaoInstitucionalAnterior.listaAnterior }', 'menu:form_menu_discente', null]],
+[null, 'Matr&#237;cula On-Line', null, 'menu:form_menu_discente', null,,
+[null, 'Realizar Matr&#237;cula', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ matriculaGraduacao.telaInstrucoes}', 'menu:form_menu_discente', null],
+[null, 'Realizar Matr&#237;cula em Turma de F&#233;rias', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ confirmacaoMatriculaFeriasBean.iniciar}', 'menu:form_menu_discente', null],
+[null, 'Realizar Solicita&#231;&#227;o de Matr&#237;cula de N&#250;cleo Comum', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ matriculaExtraordinaria.iniciar}', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Ver Comprovante de Matr&#237;cula', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ matriculaGraduacao.verComprovanteSolicitacoes}', 'menu:form_menu_discente', null],
+[null, 'Ver Comprovante de Matr&#237;cula para Turmas de F&#233;rias', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ portalDiscente.atestadoMatriculaTurmaFerias}', 'menu:form_menu_discente', null],
+[null, 'Ver Orienta&#231;&#245;es de Matr&#237;cula', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ matriculaGraduacao.acompanharSolicitacoes}', 'menu:form_menu_discente', null],
+[null, 'Ver Resultado do Processamento', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ matriculaGraduacao.verComprovanteSolicitacoes}', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Meu Plano de Matr&#237;culas', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ planoMatriculaBean.gerar }', 'menu:form_menu_discente', null]],
+[null, 'Solicitar Turmas Espec&#237;ficas', null, 'menu:form_menu_discente', null,,
+[null, 'Solicitar Turma Espec&#237;fica', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoEnsinoIndividual.iniciarEnsinoIndividualizado }', 'menu:form_menu_discente', null],
+[null, 'Visualizar Solicita&#231;&#245;es Enviadas', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoEnsinoIndividual.listarEnsinoIndividual }', 'menu:form_menu_discente', null],
+[null, 'Emitir Comprovante de Solicita&#231;&#245;es', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoEnsinoIndividual.emitirComprovanteEnsinoIndividual }', 'menu:form_menu_discente', null]],
+[null, 'Trancamento de Matr&#237;cula', null, 'menu:form_menu_discente', null,[null, 'Trancar', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ trancamentoMatricula.popularSolicitacao }', 'menu:form_menu_discente', null],
+[null, 'Exibir Andamento do Trancamento', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ trancamentoMatricula.iniciarMeusTrancamentos }', 'menu:form_menu_discente', null]],
+[null, 'Trancamento de Curso', null, 'menu:form_menu_discente', null,[null, 'Iniciar Solicita&#231;&#227;o de Trancamento de Curso', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ trancamentoPrograma.iniciarTrancamentoRegular }', 'menu:form_menu_discente', null],
+[null, 'Solicitar Trancamento &#224; Posteriori', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ trancamentoPrograma.iniciarTrancamentoPosteriori }', 'menu:form_menu_discente', null],
+[null, 'Exibir Solicita&#231;&#245;es de Trancamento', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ trancamentoPrograma.exibirMinhasSolicitacoes }', 'menu:form_menu_discente', null]],
+_cmSplit,[null, 'Registro de Atividade Complementar', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoRegistroAtividadeAutonomaMBean.listar }', 'menu:form_menu_discente', null],
+[null, 'Registro de Atividades Acad&#234;micas de Extens&#227;o', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoRegistroAtividadeExtensaoMBean.listar }', 'menu:form_menu_discente', null],
+[null, 'Segunda Chamada', null, 'menu:form_menu_discente', null,[null, 'Solicitar Segunda Chamada', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoReposicaoProva.iniciar }', 'menu:form_menu_discente', null],
+[null, 'Exibir Solicita&#231;&#245;es', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoReposicaoProva.listarSolicitacoes }', 'menu:form_menu_discente', null]],
+_cmSplit,[null, 'Produ&#231;&#245;es Acad&#234;micas', null, 'menu:form_menu_discente', null,,
+['<img src="/sigaa/img/graduacao/coordenador/documento.png"/>', 'Termo de Autoriza&#231;&#227;o', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ termoAutorizacaoPublicacaoMBean.iniciarEmissaoDiscente }', 'menu:form_menu_discente', null]],
+[null, 'Consultar Turmas do Pr&#243;x. Semestre', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoTurma.iniciarListaSolicitacoesCursoDiscente }', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Atividades de Campo', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ inscricaoAtividadeCampo.iniciarInscricao }', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Calend&#225;rio Acad&#234;mico', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{calendario.iniciarBusca}', 'menu:form_menu_discente', null],
+[null, 'Consultas Gerais', null, 'menu:form_menu_discente', null,[null, 'Consultar Curso', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ curso.popularBuscaGeral }', 'menu:form_menu_discente', null],
+[null, 'Consultar Componente Curricular', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ componenteCurricular.popularBuscaDiscente }', 'menu:form_menu_discente', null],
+[null, 'Consultar Estrutura Curricular', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ curriculo.popularBuscaGeral }', 'menu:form_menu_discente', null],
+[null, 'Consultar Turma', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ buscaTurmaBean.iniciarBuscaPortalDiscente }', 'menu:form_menu_discente', null],
+[null, 'Consultar Unidades Acad&#234;micas', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ unidade.popularBuscaGeral }', 'menu:form_menu_discente', null]]],
+['<img src="/sigaa/img/icones/pesquisa_menu.gif"/>', 'Pesquisa', null, 'menu:form_menu_discente', null,[null, 'Projeto de Pesquisa', null, 'menu:form_menu_discente', null,[null, 'Consultar Projetos', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{menuDiscente.redirecionar};/pesquisa/projetoPesquisa/buscarProjetos.do?dispatch=consulta&popular=true', 'menu:form_menu_discente', null],
+[null, 'Projetos que Participo', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{membroProjeto.listarMeusProjetoPesquisa}', 'menu:form_menu_discente', null]],
+_cmSplit,[null, 'Plano de Trabalho', null, 'menu:form_menu_discente', null,[null, 'Meus Planos de Trabalho', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{menuDiscente.redirecionar};/sigaa/pesquisa/planoTrabalho/wizard.do?dispatch=listarPorDiscente', 'menu:form_menu_discente', null]],
+[null, 'Relat&#243;rios de Inicia&#231;&#227;o Cient&#237;fica', null, 'menu:form_menu_discente', null,[null, 'Relat&#243;rios de Desempenho', null, 'menu:form_menu_discente', null,[null, 'Consultar', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{relatorioBolsaDesempenho.listarRelatorios}', 'menu:form_menu_discente', null]],
+[null, 'Relat&#243;rios Parciais', null, 'menu:form_menu_discente', null,[null, 'Enviar', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{menuDiscente.redirecionar};/pesquisa/relatorioBolsaParcial.do?dispatch=listarPlanos', 'menu:form_menu_discente', null],
+[null, 'Consultar', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{menuDiscente.redirecionar};/pesquisa/relatorioBolsaParcial.do?dispatch=listarRelatorios', 'menu:form_menu_discente', null]],
+[null, 'Relat&#243;rios Finais', null, 'menu:form_menu_discente', null,[null, 'Enviar', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{menuDiscente.redirecionar};/pesquisa/relatorioBolsaFinal.do?dispatch=listarPlanos', 'menu:form_menu_discente', null],
+[null, 'Consultar', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{menuDiscente.redirecionar};/pesquisa/relatorioBolsaFinal.do?dispatch=listarRelatorios', 'menu:form_menu_discente', null]]],
+[null, 'Certificados e Declara&#231;&#245;es', null, 'menu:form_menu_discente', null,[null, 'Declara&#231;&#227;o de Bolsista em Plano de Trabalho', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{declaracoesPesquisa.listarDeclararoesPlanoTrabalhoBolsista}', 'menu:form_menu_discente', null]],
+[null, 'SEMIC', null, 'menu:form_menu_discente', null,[null, 'Submeter resumo', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{menuDiscente.redirecionar};/pesquisa/resumoCongresso.do?dispatch=popularInicioEnvio', 'menu:form_menu_discente', null],
+[null, 'Meus resumos', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{menuDiscente.redirecionar};/pesquisa/resumoCongresso.do?dispatch=listarResumosAutor', 'menu:form_menu_discente', null],
+[null, 'Justificar Aus&#234;ncia', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{justificativaCIC.preCadastrar}', 'menu:form_menu_discente', null],
+[null, 'Certificado de Avaliador', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{avaliadorCIC.listarCertificados}', 'menu:form_menu_discente', null]],
+[null, 'Mini Congresso de Inicia&#231;&#227;o Cient&#237;fica', null, 'menu:form_menu_discente', null,[null, 'Submeter Resumo', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{miniCongressoIniciacaoCientifica.listarPlanos}', 'menu:form_menu_discente', null],
+[null, 'Meus resumos', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{menuDiscente.redirecionar};/pesquisa/resumoCongresso.do?dispatch=listarResumosAutor&isMiniCongresso=true', 'menu:form_menu_discente', null]]],
+['<img src="/sigaa/img/icones/extensao_menu.gif"/>', 'Extens&#227;o', null, 'menu:form_menu_discente', null,[null, 'Consultar A&#231;&#245;es', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{atividadeExtensao.preLocalizar}', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Meus Planos de Trabalho', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ planoTrabalhoExtensao.carregarPlanosTrabalhoDiscenteLogado }', 'menu:form_menu_discente', null],
+[null, 'Minhas A&#231;&#245;es como Membro da Equipe', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ atividadeExtensao.carregarAcoesDiscenteLogado }', 'menu:form_menu_discente', null],
+[null, 'Meus Relat&#243;rios', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ relatorioBolsistaExtensao.iniciarCadastroRelatorio }', 'menu:form_menu_discente', null],
+[null, 'Certificados e Declara&#231;&#245;es', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{documentosAutenticadosExtensao.participacoesDiscenteUsuarioLogado}', 'menu:form_menu_discente', null],
+[null, 'Visualizar Resultados das inscri&#231;&#245;es', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{selecaoDiscenteExtensao.iniciarVisualizarResultados}', 'menu:form_menu_discente', null],
+[null, 'Inscri&#231;&#227;o On-line em A&#231;&#245;es de Extens&#227;o', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{inscricaoParticipanteAtividadeMBean.acessarInscricoesExtensao}', 'menu:form_menu_discente', null]],
+['<img src="/sigaa/img/icones/monitoria_menu.gif"/>', 'Monitoria', null, 'menu:form_menu_discente', null,[null, 'Consultar Projetos', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{coordMonitoria.situacaoProjeto}', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Meus Projetos de Monitoria', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{menuDiscente.redirecionar};/monitoria/DiscenteMonitoria/meus_projetos.jsf', 'menu:form_menu_discente', null],
+[null, 'Meus Relat&#243;rios', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ relatorioMonitor.listar }', 'menu:form_menu_discente', null],
+[null, 'Meus Certificados', null, 'menu:form_menu_discente', null,[null, 'Certificados de Projetos', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{documentosAutenticadosMonitoria.participacoesDiscenteUsuarioLogado}', 'menu:form_menu_discente', null]],
+[null, 'Atividades do M&#234;s / Frequ&#234;ncia', null, 'menu:form_menu_discente', null,[null, 'Cadastrar', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{menuDiscente.redirecionar};/monitoria/DiscenteMonitoria/meus_projetos.jsf', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Consultar', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{atividadeMonitor.listarAtividades}', 'menu:form_menu_discente', null]],
+[null, 'Inscrever-se em Sele&#231;&#227;o de Monitoria', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{agregadorBolsas.iniciarBuscar}', 'menu:form_menu_discente', null],
+[null, 'Visualizar Resultado da Sele&#231;&#227;o', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{discenteMonitoria.popularVisualizarResultados}', 'menu:form_menu_discente', null]],
+['<img src="/sigaa/img/icones/biblioteca_menu.gif"/>', 'Biblioteca', null, 'menu:form_menu_discente', null,['<img src="/sigaa/img/biblioteca/novo_usuario.gif"/>', 'Cadastrar para Utilizar os Servi&#231;os da Biblioteca', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{cadastroUsuarioBibliotecaMBean.iniciarAutoCadastro}', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Pesquisar Material no Acervo', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ pesquisaInternaBibliotecaMBean.iniciarBusca }', 'menu:form_menu_discente', null],
+[null, 'Pesquisar Artigo no Acervo', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ pesquisaInternaArtigosBibliotecaMBean.iniciarBuscaArtigo }', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Empr&#233;stimos', null, 'menu:form_menu_discente', null,[null, 'Visualizar Empr&#233;stimos Ativos', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{meusEmprestimosBibliotecaMBean.iniciarVisualizarEmprestimosAtivos}', 'menu:form_menu_discente', null],
+[null, 'Renovar Meus Empr&#233;stimos', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{meusEmprestimosBibliotecaMBean.iniciarVisualizarEmprestimosRenovaveis}', 'menu:form_menu_discente', null],
+[null, 'Meu Hist&#243;rico de Empr&#233;stimos', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{emiteHistoricoEmprestimosMBean.iniciaUsuarioLogado}', 'menu:form_menu_discente', null],
+[null, 'Imprimir GRU para pagamentos de multas', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{emitirGRUPagamentoMultasBibliotecaMBean.listarMinhasMultasAtivas}', 'menu:form_menu_discente', null]],
+_cmSplit,[null, 'Dissemina&#231;&#227;o Seletiva da Informa&#231;&#227;o', null, 'menu:form_menu_discente', null,[null, 'Cadastrar Interesse', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{configuraPerfilInteresseUsuarioBibliotecaMBean.iniciar}', 'menu:form_menu_discente', null]],
+[null, 'Informa&#231;&#245;es ao Usu&#225;rio', null, 'menu:form_menu_discente', null,[null, 'Visualizar meus V&#237;nculos no Sistema', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{verificaVinculosUsuarioBibliotecaMBean.iniciarVerificacaoMeusVinculos}', 'menu:form_menu_discente', null],
+[null, 'Visualizar as Pol&#237;ticas de Empr&#233;stimo', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{visualizarPoliticasDeEmprestimoMBean.iniciarVisualizacao}', 'menu:form_menu_discente', null]],
+[null, 'Servi&#231;os ao Usu&#225;rio', null, 'menu:form_menu_discente', null,[null, 'Agendamentos', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{solicitacaoAgendamentoMBean.verMinhasSolicitacoes}', 'menu:form_menu_discente', null],
+[null, 'Normaliza&#231;&#227;o', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoServicoDocumentoMBean.verMinhasSolicitacoes }', 'menu:form_menu_discente', null],
+[null, 'Solicitar Empr&#233;stimo entre Bibliotecas', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoEmprestimoEntreBibliotecasMBean.visualizarSolicitacoes }', 'menu:form_menu_discente', null]],
+[null, 'Reposit&#243;rio Institucional', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{termoAutorizacaoPublicacaoMBean.redirectEnderecoBaseExternaProducoesAcademicas}', 'menu:form_menu_discente', null],
+[null, 'Compras de Livro', null, 'menu:form_menu_discente', null,[null, 'Solicitar Compra de Livros', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{ menuDiscente.redirecionar };/entrarSistema.do?sistema=sipac&url=listaReqBiblioteca.do?acao=474', 'menu:form_menu_discente', null],
+[null, 'Acompanhar Solicita&#231;&#245;es de Compra de Livros', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{ menuDiscente.redirecionar };/entrarSistema.do?sistema=sipac&url=manipulaReqBiblioteca.do?acao=480', 'menu:form_menu_discente', null]]],
+['<img src="/sigaa/img/bolsas.png"/>', 'Bolsas', null, 'menu:form_menu_discente', null,[null, 'Aderir ao Cadastro &#218;nico', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ adesaoCadastroUnico.apresentacaoCadastroUnico }', 'menu:form_menu_discente', null],
+_cmSplit,[null, 'Oportunidades de Bolsa', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ agregadorBolsas.iniciarBuscar }', 'menu:form_menu_discente', null],
+[null, 'Acompanhar Meus Registros de Interesse', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{interessadoBolsa.acompanharInscricoes}', 'menu:form_menu_discente', null],
+[null, 'Minhas Bolsas na Institui&#231;&#227;o', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ relatorioBolsasDiscenteBean.listarBolsasInstituicao }', 'menu:form_menu_discente', null],
+[null, 'Declara&#231;&#227;o de Bolsa', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ relatorioBolsasDiscenteBean.abrirDeclaracaoBolsaPermanencia }', 'menu:form_menu_discente', null],
+[null, 'Solicita&#231;&#227;o de Bolsas', null, 'menu:form_menu_discente', null,[null, 'Solicita&#231;&#227;o de Bolsa Aux&#237;lio', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ bolsaAuxilioMBean.iniciarSolicitacaoBolsaAuxilio }', 'menu:form_menu_discente', null],
+[null, 'Acompanhar Solicita&#231;&#227;o de Bolsa Aux&#237;lio', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ bolsaAuxilioMBean.acompanharSituacaoBolsaAuxilio }', 'menu:form_menu_discente', null]]],
+['<img src="/sigaa/img/icones/amb_virt.png"/>', 'Ambientes Virtuais', null, 'menu:form_menu_discente', null,[null, 'Comunidades Virtuais', null, 'menu:form_menu_discente', null,[null, 'Buscar Comunidades Virtuais', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{ buscarComunidadeVirtualMBean.criar };0', 'menu:form_menu_discente', null],
+[null, 'Minhas Comunidades', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ buscarComunidadeVirtualMBean.exibirTodasComunidadesDocente }', 'menu:form_menu_discente', null]]],
+['<img src="/sigaa/img/menu/outros.png"/>', 'Outros', null, 'menu:form_menu_discente', null,[null, 'Avisar Aus&#234;ncia do Professor', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ avisoFalta.iniciar }', 'menu:form_menu_discente', null],
+[null, 'Coordena&#231;&#227;o de Curso', null, 'menu:form_menu_discente', null,[null, 'Atendimento ao Aluno', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ atendimentoAluno.novaPergunta }', 'menu:form_menu_discente', null],
+[null, 'F&#243;rum de Cursos', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ forum.listarForunsCurso }', 'menu:form_menu_discente', null],
+[null, 'P&#225;gina do Curso', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]https://sis.sig.uema.br/sigaa/public/curso/portal.jsf?id=441969&lc=pt_BR', 'menu:form_menu_discente', null]],
+[null, 'N&#250;cleo de Acessibilidade', null, 'menu:form_menu_discente', null,[null, 'Solicitar Apoio ao NAU', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoApoioNee.preCadastrar }', 'menu:form_menu_discente', null],
+['<img src="/sigaa/img/email_go.png"/>', 'Entrar em Contato', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ solicitacaoApoioNee.initEntrarContatoCaene}', 'menu:form_menu_discente', null]],
+[null, 'Aux&#237;lio Financeiro', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{ menuDiscente.redirecionar };/entrarSistema.do?sistema=sipac&url=portal_aluno/index.jsf?voltar=/sigaa/verPortalDiscente', 'menu:form_menu_discente', null],
+[null, 'Escrit&#243;rio de Ideias', null, 'menu:form_menu_discente', null,[null, 'Cadastrar Ideia', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{ menuDiscente.redirecionar };/entrarSistema.do?sistema=sigrh&url=/cadastrarIdeiaDiscente.jsf', 'menu:form_menu_discente', null],
+[null, 'Listar/Alterar Ideia', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:L]#{ menuDiscente.redirecionar };/entrarSistema.do?sistema=sigrh&url=/listarIdeiasDiscente.jsf', 'menu:form_menu_discente', null]],
+_cmSplit,['<img src="/sigaa/img/celular_icone.gif"/>', 'Criar senha de acesso por Celular', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ senhaMobileMBean.iniciar }', 'menu:form_menu_discente', null],
+[null, 'Consultar Processos do Aluno', 'menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ consultaProcesso.iniciar }', 'menu:form_menu_discente', null]]];</script><div id="menu_form_menu_discente_j_id_jsp_1383391995_101_menu"></div>
+<script type="text/javascript">	if(window.cmDraw!=undefined) { cmDraw ('menu_form_menu_discente_j_id_jsp_1383391995_101_menu', menu_form_menu_discente_j_id_jsp_1383391995_101_menu, 'hbr', cmThemeOffice, 'ThemeOffice');}</script><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+
+</div>
+</div>
+
+			
+			
+			
+		
+		
+		<div id="perfil-docente">
+			<div class="pessoal-docente">
+				<div class="foto">
+					
+						<img src="/sigaa/verFoto?idArquivo=856325&key=5513454ee3c2fbaaba297abfe3bb61f8" style="width: 100px; height: 125px"/>
+					
+					
+				</div>
+				<ul>
+					<li>
+					
+						
+						
+							<a	href="/sigaa/abrirCaixaPostal.jsf?sistema=2" >
+								Mensagens
+							</a>
+						
+						
+					</li>
+					<li>
+						<a class="perfil" href="perfil.jsf">
+							Atualizar Foto e Perfil
+						</a>
+					</li>
+					<li>
+						
+<form id="j_id_jsp_1383391995_271" name="j_id_jsp_1383391995_271" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="j_id_jsp_1383391995_271" value="j_id_jsp_1383391995_271" />
+
+<script type="text/javascript" language="Javascript">function dpf(f) {var adp = f.adp;if (adp != null) {for (var i = 0;i < adp.length;i++) {f.removeChild(adp[i]);}}};function apf(f, pvp) {var adp = new Array();f.adp = adp;var i = 0;for (k in pvp) {var p = document.createElement("input");p.type = "hidden";p.name = k;p.value = pvp[k];f.appendChild(p);adp[i++] = p;}};function jsfcljs(f, pvp, t) {apf(f, pvp);var ft = f.target;if (t) {f.target = t;}f.submit();f.target = ft;dpf(f);};</script>
+<a id="j_id_jsp_1383391995_271:meusDadosPessoais" href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('j_id_jsp_1383391995_271'),{'j_id_jsp_1383391995_271:meusDadosPessoais':'j_id_jsp_1383391995_271:meusDadosPessoais'},'');}return false">Meus Dados Pessoais</a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+					</li>
+					
+				</ul>
+				<div class="clear"> </div>
+			</div>
+			<p class="info-docente">
+			
+				<span class="nome"> <small><b>KHALIL RAVIKSON ALCANTARA DO CARMO</b></small> </span>
+
+				
+					Me chamo Khalil Ravikson, aluno do curso de Engenharia da computa&#231;&#227;o, atualmente no 7 per&#237;odo e participante do projeto de redes de sensores.
+				
+			</p>
+			
+			<div id="agenda-docente" style="text-align: center">
+			
+				
+				
+				
+<form id="form_links" name="form_links" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_links" value="form_links" />
+<input id="form_links:forumCursos" type="image" src="/sigaa/img/portal-de-cursos.png" name="form_links:forumCursos" />
+					 &nbsp;
+				
+					
+					 
+					
+					<a id="form_links:buscarComunidadeVirtual" href="#" title="Buscar Comunidades Virtuais" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_links'),{'form_links:buscarComunidadeVirtual':'form_links:buscarComunidadeVirtual'},'');}return false"><img src="/sigaa/img/cv.gif" alt="Comunidade Virtual" height="44" style="border:1px solid #CCC; margin-left:9px;" width="85" /></a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+			</div>
+			
+			
+				<p style="text-align: center; font-size: x-small">
+				
+				<a href="http://www.uema.br/imagens-noticias/files/Normas-Gerais-do-Ensino-de-Graduacao-UEMA.pdf" target="_blank">
+				
+				Regulamento dos Cursos de Gradua&#231;&#227;o
+				</a>
+				</p>
+			
+			<br>
+			
+			
+			
+				
+							
+			
+				
+				
+					<p style="text-align: center; font-size: x-small">
+					
+					<a href="https://www.uema.br/wp-content/uploads/2025/01/Calendario-Academico-atualizado.pdf" target="_blank">					
+					
+					Calend&#225;rio Acad&#234;mico de Gradua&#231;&#227;o
+					</a>
+					</p>				
+				
+			
+
+			
+			<div id="agenda-docente">
+				<h4> Dados Institucionais </h4>
+				<table>
+					<tr>
+						<td> Matr&#237;cula: </td>
+						<td> 20200036520 </td>
+					</tr>
+					
+					<tr>
+						<td valign="top"> Curso: </td>
+						<td> ENGENHARIA DE COMPUTA&#199;&#195;O BACHARELADO/CCT - S&#195;O LU&#205;S - BACHARELADO -
+						MTN </td>
+					</tr>
+					
+					
+					<tr>
+						<td> N&#237;vel: </td>
+						<td> GRADUA&#199;&#195;O </td>
+					</tr>
+					<tr>
+						<td> Status: </td>
+						<td> ATIVO </td>
+					</tr>
+					<tr>
+						<td> E-Mail: </td>
+						<td>
+							khalilrvk2017@gmail...
+						</td>
+					</tr>
+					<tr>
+						<td> Entrada: </td>
+						<td> 2020.1</td>
+					</tr>
+					
+					
+					
+					
+					
+					
+					
+					
+						<tr>
+							<td colspan="2">&nbsp;</td>
+						</tr>
+						<tr>
+							<td colspan="2" style="text-align: center; font-style: italic">&#205;ndices Acad&#234;micos</td>
+						</tr>
+						<tr>
+							<td colspan="2">
+								<table width="100%">
+									<tr>
+										
+											
+												</tr>
+												<tr>
+											
+											<td><acronym title="Coeficiente de Rendimento">CR:</acronym></td>
+											<td align="right"><div style="margin-right:15px;">6.963</div></td>
+										
+									</tr>
+									<tr>	
+										<td colspan="4" align="center">
+<form id="j_id_jsp_1383391995_278" name="j_id_jsp_1383391995_278" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="j_id_jsp_1383391995_278" value="j_id_jsp_1383391995_278" />
+<a id="j_id_jsp_1383391995_278:detalharIndiceAcademico" href="#" style="font-size:9px; margin-right:12px;" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('j_id_jsp_1383391995_278'),{'j_id_jsp_1383391995_278:detalharIndiceAcademico':'j_id_jsp_1383391995_278:detalharIndiceAcademico'},'');}return false">Detalhar</a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form></td>
+									</tr>
+								</table>
+							</td>
+						</tr>
+						
+					
+					
+					<tr>
+						<td colspan="2">
+							
+							
+								<br>
+								<i><center>
+								Integraliza&#231;&#245;es:</center></i>
+								<br>
+								<table>
+									<tr>
+										<td> CH. Obrigat&#243;ria Pendente </td>
+										<td align="right"> 780 </td>
+									</tr>
+									<tr>
+										<td> CH. Optativa Pendente </td>
+										<td align="right"> 0 </td>
+									</tr>
+									<tr>
+										<td> CH. Total Curr&#237;culo </td>
+										<td align="right"> 3915 </td>
+									</tr>
+									
+									<tr>
+										<td colspan="2" style="border-width: 1px; border-color: black; border-style: thin; background: white;">
+											<div style="border: thin; border-color: black; width: 80.07662835249042%; background: silver; text-align: center;" >
+												&nbsp;
+											</div>
+										</td>
+									</tr>
+									<tr>
+										<td colspan="2" align="center">
+													80% Integralizado
+										</td>
+									</tr>
+
+								</table>
+
+							
+						</td>
+					</tr>
+				</table>
+
+
+			</div>
+		</div>
+		
+		<div id="main-docente">
+
+			 
+
+			
+			
+			
+			<script type="text/javascript">
+			var fcontent=new Array()
+			
+			</script>
+			<div id="noticias-portal">
+				
+				
+				<p class="noticia destaque"> <br/>N&#227;o h&#225; not&#237;cias cadastradas.</p>
+				
+			</div>
+
+	
+		
+			
+			
+								
+			
+			
+			<div id="turmas-portal" class="simple-panel">
+				<h4> Turmas do Semestre   </h4>
+				
+				
+					
+					
+	
+					
+					<table class="subFormulario" style="font-size: x-small;">
+						<thead>
+							<tr>
+								<th style="background: #DEDFE3; width: 90%;">&#218;ltimas Atualiza&#231;&#245;es</th>
+								<th style="background: #DEDFE3;" nowrap="nowrap">
+									<a class="rotator-prev" href="#"><<</a> 
+									<a class="rotator-pause" href="#">Parar</a> 
+									<a class="rotator-continue" href="#">Continuar</a> 
+									<a class="rotator-next" href="#">>></a>
+								</th>
+							</tr>
+						</thead>
+						<tr>
+							<td>
+								
+<form id="formAtualizacoesTurmas" name="formAtualizacoesTurmas" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="formAtualizacoesTurmas" value="formAtualizacoesTurmas" />
+
+									<div id="atualizacoes-turma" style="position: relative; padding-bottom: 7%; display: block;">
+										
+											<div class="rotator">
+												
+													<table>
+														<tr>
+															<td>
+																29/05/2026 - 
+																<a href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('formAtualizacoesTurmas'),{'formAtualizacoesTurmas:j_id_jsp_1383391995_292':'formAtualizacoesTurmas:j_id_jsp_1383391995_292','idTurma':'172281'},'');}return false">VARI&Aacute;VEIS COMPLEXAS</a>							
+															</td>
+														</tr>
+														<tr>
+															<td>Tarefa alterada.</td>
+														</tr>
+													</table>
+												
+													<table>
+														<tr>
+															<td>
+																29/05/2026 - 
+																<a href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('formAtualizacoesTurmas'),{'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_1':'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_1','idTurma':'172281'},'');}return false">VARI&Aacute;VEIS COMPLEXAS</a>							
+															</td>
+														</tr>
+														<tr>
+															<td>Nova tarefa: Avalia&#231;&#227;o 2</td>
+														</tr>
+													</table>
+												
+													<table>
+														<tr>
+															<td>
+																22/04/2026 - 
+																<a href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('formAtualizacoesTurmas'),{'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_2':'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_2','idTurma':'172281'},'');}return false">VARI&Aacute;VEIS COMPLEXAS</a>							
+															</td>
+														</tr>
+														<tr>
+															<td>Nova tarefa: Atividade 1</td>
+														</tr>
+													</table>
+												
+													<table>
+														<tr>
+															<td>
+																10/04/2026 - 
+																<a href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('formAtualizacoesTurmas'),{'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_3':'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_3','idTurma':'172281'},'');}return false">VARI&Aacute;VEIS COMPLEXAS</a>							
+															</td>
+														</tr>
+														<tr>
+															<td>Tarefa alterada.</td>
+														</tr>
+													</table>
+												
+													<table>
+														<tr>
+															<td>
+																08/04/2026 - 
+																<a href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('formAtualizacoesTurmas'),{'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_4':'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_4','idTurma':'172281'},'');}return false">VARI&Aacute;VEIS COMPLEXAS</a>							
+															</td>
+														</tr>
+														<tr>
+															<td>Tarefa alterada.</td>
+														</tr>
+													</table>
+												
+													<table>
+														<tr>
+															<td>
+																07/04/2026 - 
+																<a href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('formAtualizacoesTurmas'),{'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_5':'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_5','idTurma':'172281'},'');}return false">VARI&Aacute;VEIS COMPLEXAS</a>							
+															</td>
+														</tr>
+														<tr>
+															<td>Nova tarefa: Exerc&#237;cio 1</td>
+														</tr>
+													</table>
+												
+													<table>
+														<tr>
+															<td>
+																01/04/2026 - 
+																<a href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('formAtualizacoesTurmas'),{'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_6':'formAtualizacoesTurmas:j_id_jsp_1383391995_292j_id_6','idTurma':'171206'},'');}return false">ELETR&Ocirc;NICA ANAL&Oacute;GICA</a>							
+															</td>
+														</tr>
+														<tr>
+															<td>Nova tarefa: LEDS</td>
+														</tr>
+													</table>
+												
+											</div>
+										
+										
+									</div>
+								<input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+							</td>
+						</tr>
+					</table>
+					<table style="margin-top: 1%;">
+						<thead>
+						<tr>
+							
+							<th width="50%">Componente Curricular</th>
+							<th style="text-align:left">Local</th>
+							<th width="15%">Hor&#225;rio</th>
+							<th></th>
+							<th colspan="2" style="width:40px;">Chat</th>
+							<th colspan="2" style="width:40px;">Web Conf.</th>
+						</tr>
+						</thead>
+						<tbody>
+						
+							<tr class="odd">
+								<td class="descricao">
+									
+<form id="form_acessarTurmaVirtual" name="form_acessarTurmaVirtual" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_acessarTurmaVirtual" value="form_acessarTurmaVirtual" />
+
+										<input type="hidden" value="171206" name="idTurma" />
+										<a id="form_acessarTurmaVirtual:turmaVirtual" href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_acessarTurmaVirtual'),{'form_acessarTurmaVirtual:turmaVirtual':'form_acessarTurmaVirtual:turmaVirtual'},'');}return false">ELETR&Ocirc;NICA ANAL&Oacute;GICA</a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td class="info" style="text-align:left">Engenharia de Computa&#231;&#227;o / CCT</td>
+								<td class="info"><center>24T12
+									
+									</center>
+								</td>
+								<td>
+									
+								</td>
+								<td nowrap="nowrap" style="width:50px;">
+									
+<form id="form_docente" name="form_docente" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_docente" value="form_docente" />
+<img src="/sigaa/img/flag_green.png" title="Chat em Andamento - 0 pessoa(s). Docente no chat" /><img src="/sigaa/img/flag_grey.png" title="Nenhum usu&aacute;rio no chat. Docente Online" />
+										
+										
+										
+										&nbsp;
+										<a id="form_docente:acessarChatTurma" href="#" onclick="var a=function(){window.open('/sigaa/entrarChat.do?idchat=171206&amp;idusuario=15247200&amp;chatName=ELETR&Ocirc;NICA ANAL&Oacute;GICA&amp;origem=portalDiscente', 'chat_171206', 'height=485,width=685,location=0,resizable=1');};var b=function(){if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_docente'),{'form_docente:acessarChatTurma':'form_docente:acessarChatTurma','id':'171206'},'');}return false};return (a()==false) ? false : b();"><img src="/sigaa/img/comments.png" alt="Acessar Chat da turma" title="Acessar Chat da turma - 0 usu&aacute;rio(s)" /></a>&nbsp;
+									<input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td>0</td>
+								<td align="center">
+									
+<form id="form_webconf" name="form_webconf" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_webconf" value="form_webconf" />
+<a id="form_webconf:acessarMeetingTurma" href="#" style="text-align: center;" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_webconf'),{'form_webconf:acessarMeetingTurma':'form_webconf:acessarMeetingTurma','idTurma':'171206'},'_blank');}return false"><img src="/sigaa/img/icones/menu_sigaa/pap.png" alt="Web Confer&ecirc;ncia" height="16" style="align: center;" title="Web Confer&ecirc;ncia" width="16" /></a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+							</tr>
+							<tr>
+								<td colspan="5" id="linha_171206" style="display: none;"></td>
+							</tr>
+						
+							<tr class="">
+								<td class="descricao">
+									
+<form id="form_acessarTurmaVirtualj_id_1" name="form_acessarTurmaVirtualj_id_1" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_acessarTurmaVirtualj_id_1" value="form_acessarTurmaVirtualj_id_1" />
+
+										<input type="hidden" value="170654" name="idTurma" />
+										<a id="form_acessarTurmaVirtualj_id_1:turmaVirtual" href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_acessarTurmaVirtualj_id_1'),{'form_acessarTurmaVirtualj_id_1:turmaVirtual':'form_acessarTurmaVirtualj_id_1:turmaVirtual'},'');}return false">EST&Aacute;GIO II</a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td class="info" style="text-align:left">Engenharia de Computa&#231;&#227;o / CCT</td>
+								<td class="info"><center>
+									
+									</center>
+								</td>
+								<td>
+									
+								</td>
+								<td nowrap="nowrap" style="width:50px;">
+									
+<form id="form_docentej_id_1" name="form_docentej_id_1" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_docentej_id_1" value="form_docentej_id_1" />
+<img src="/sigaa/img/flag_green.png" title="Chat em Andamento - 0 pessoa(s). Docente no chat" /><img src="/sigaa/img/flag_grey.png" title="Nenhum usu&aacute;rio no chat. Docente Online" />
+										
+										
+										
+										&nbsp;
+										<a id="form_docentej_id_1:acessarChatTurma" href="#" onclick="var a=function(){window.open('/sigaa/entrarChat.do?idchat=170654&amp;idusuario=15247200&amp;chatName=EST&Aacute;GIO II&amp;origem=portalDiscente', 'chat_170654', 'height=485,width=685,location=0,resizable=1');};var b=function(){if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_docentej_id_1'),{'form_docentej_id_1:acessarChatTurma':'form_docentej_id_1:acessarChatTurma','id':'170654'},'');}return false};return (a()==false) ? false : b();"><img src="/sigaa/img/comments.png" alt="Acessar Chat da turma" title="Acessar Chat da turma - 0 usu&aacute;rio(s)" /></a>&nbsp;
+									<input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td>0</td>
+								<td align="center">
+									
+<form id="form_webconfj_id_1" name="form_webconfj_id_1" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_webconfj_id_1" value="form_webconfj_id_1" />
+<a id="form_webconfj_id_1:acessarMeetingTurma" href="#" style="text-align: center;" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_webconfj_id_1'),{'form_webconfj_id_1:acessarMeetingTurma':'form_webconfj_id_1:acessarMeetingTurma','idTurma':'170654'},'_blank');}return false"><img src="/sigaa/img/icones/menu_sigaa/pap.png" alt="Web Confer&ecirc;ncia" height="16" style="align: center;" title="Web Confer&ecirc;ncia" width="16" /></a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+							</tr>
+							<tr>
+								<td colspan="5" id="linha_170654" style="display: none;"></td>
+							</tr>
+						
+							<tr class="odd">
+								<td class="descricao">
+									
+<form id="form_acessarTurmaVirtualj_id_2" name="form_acessarTurmaVirtualj_id_2" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_acessarTurmaVirtualj_id_2" value="form_acessarTurmaVirtualj_id_2" />
+
+										<input type="hidden" value="171427" name="idTurma" />
+										<a id="form_acessarTurmaVirtualj_id_2:turmaVirtual" href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_acessarTurmaVirtualj_id_2'),{'form_acessarTurmaVirtualj_id_2:turmaVirtual':'form_acessarTurmaVirtualj_id_2:turmaVirtual'},'');}return false">INFRAESTRUTURA DE CABEAMENTOS EL&Eacute;TRICA E L&Oacute;GICO</a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td class="info" style="text-align:left">Engenharia da Computa&#231;&#231;&#227;o/CCT</td>
+								<td class="info"><center>2T34 4T56
+									
+									</center>
+								</td>
+								<td>
+									
+								</td>
+								<td nowrap="nowrap" style="width:50px;">
+									
+<form id="form_docentej_id_2" name="form_docentej_id_2" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_docentej_id_2" value="form_docentej_id_2" />
+<img src="/sigaa/img/flag_grey.png" title="Nenhum usu&aacute;rio no chat. Docente Offline" />
+										
+										
+										
+										&nbsp;
+										<a id="form_docentej_id_2:acessarChatTurma" href="#" onclick="var a=function(){window.open('/sigaa/entrarChat.do?idchat=171427&amp;idusuario=15247200&amp;chatName=INFRAESTRUTURA DE CABEAMENTOS EL&Eacute;TRICA E L&Oacute;GICO&amp;origem=portalDiscente', 'chat_171427', 'height=485,width=685,location=0,resizable=1');};var b=function(){if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_docentej_id_2'),{'form_docentej_id_2:acessarChatTurma':'form_docentej_id_2:acessarChatTurma','id':'171427'},'');}return false};return (a()==false) ? false : b();"><img src="/sigaa/img/comments.png" alt="Acessar Chat da turma" title="Acessar Chat da turma - 0 usu&aacute;rio(s)" /></a>&nbsp;
+									<input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td>0</td>
+								<td align="center">
+									
+<form id="form_webconfj_id_2" name="form_webconfj_id_2" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_webconfj_id_2" value="form_webconfj_id_2" />
+<a id="form_webconfj_id_2:acessarMeetingTurma" href="#" style="text-align: center;" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_webconfj_id_2'),{'form_webconfj_id_2:acessarMeetingTurma':'form_webconfj_id_2:acessarMeetingTurma','idTurma':'171427'},'_blank');}return false"><img src="/sigaa/img/icones/menu_sigaa/pap.png" alt="Web Confer&ecirc;ncia" height="16" style="align: center;" title="Web Confer&ecirc;ncia" width="16" /></a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+							</tr>
+							<tr>
+								<td colspan="5" id="linha_171427" style="display: none;"></td>
+							</tr>
+						
+							<tr class="">
+								<td class="descricao">
+									
+<form id="form_acessarTurmaVirtualj_id_3" name="form_acessarTurmaVirtualj_id_3" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_acessarTurmaVirtualj_id_3" value="form_acessarTurmaVirtualj_id_3" />
+
+										<input type="hidden" value="170657" name="idTurma" />
+										<a id="form_acessarTurmaVirtualj_id_3:turmaVirtual" href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_acessarTurmaVirtualj_id_3'),{'form_acessarTurmaVirtualj_id_3:turmaVirtual':'form_acessarTurmaVirtualj_id_3:turmaVirtual'},'');}return false">PROJETO DE TRABALHO DE CONCLUS&Atilde;O DE CURSO</a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td class="info" style="text-align:left">Engenharia de Computa&#231;&#227;o / CCT</td>
+								<td class="info"><center>
+									
+									</center>
+								</td>
+								<td>
+									
+								</td>
+								<td nowrap="nowrap" style="width:50px;">
+									
+<form id="form_docentej_id_3" name="form_docentej_id_3" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_docentej_id_3" value="form_docentej_id_3" />
+<img src="/sigaa/img/flag_green.png" title="Chat em Andamento - 0 pessoa(s). Docente no chat" /><img src="/sigaa/img/flag_grey.png" title="Nenhum usu&aacute;rio no chat. Docente Online" />
+										
+										
+										
+										&nbsp;
+										<a id="form_docentej_id_3:acessarChatTurma" href="#" onclick="var a=function(){window.open('/sigaa/entrarChat.do?idchat=170657&amp;idusuario=15247200&amp;chatName=PROJETO DE TRABALHO DE CONCLUS&Atilde;O DE CURSO&amp;origem=portalDiscente', 'chat_170657', 'height=485,width=685,location=0,resizable=1');};var b=function(){if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_docentej_id_3'),{'form_docentej_id_3:acessarChatTurma':'form_docentej_id_3:acessarChatTurma','id':'170657'},'');}return false};return (a()==false) ? false : b();"><img src="/sigaa/img/comments.png" alt="Acessar Chat da turma" title="Acessar Chat da turma - 0 usu&aacute;rio(s)" /></a>&nbsp;
+									<input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td>0</td>
+								<td align="center">
+									
+<form id="form_webconfj_id_3" name="form_webconfj_id_3" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_webconfj_id_3" value="form_webconfj_id_3" />
+<a id="form_webconfj_id_3:acessarMeetingTurma" href="#" style="text-align: center;" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_webconfj_id_3'),{'form_webconfj_id_3:acessarMeetingTurma':'form_webconfj_id_3:acessarMeetingTurma','idTurma':'170657'},'_blank');}return false"><img src="/sigaa/img/icones/menu_sigaa/pap.png" alt="Web Confer&ecirc;ncia" height="16" style="align: center;" title="Web Confer&ecirc;ncia" width="16" /></a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+							</tr>
+							<tr>
+								<td colspan="5" id="linha_170657" style="display: none;"></td>
+							</tr>
+						
+							<tr class="odd">
+								<td class="descricao">
+									
+<form id="form_acessarTurmaVirtualj_id_4" name="form_acessarTurmaVirtualj_id_4" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_acessarTurmaVirtualj_id_4" value="form_acessarTurmaVirtualj_id_4" />
+
+										<input type="hidden" value="172289" name="idTurma" />
+										<a id="form_acessarTurmaVirtualj_id_4:turmaVirtual" href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_acessarTurmaVirtualj_id_4'),{'form_acessarTurmaVirtualj_id_4:turmaVirtual':'form_acessarTurmaVirtualj_id_4:turmaVirtual'},'');}return false">SISTEMAS INTELIGENTES</a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td class="info" style="text-align:left">Engenharia de Computa&#231;&#227;o / CCT</td>
+								<td class="info"><center>56N12
+									
+									</center>
+								</td>
+								<td>
+									
+								</td>
+								<td nowrap="nowrap" style="width:50px;">
+									
+<form id="form_docentej_id_4" name="form_docentej_id_4" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_docentej_id_4" value="form_docentej_id_4" />
+<img src="/sigaa/img/flag_grey.png" title="Nenhum usu&aacute;rio no chat. Docente Offline" />
+										
+										
+										
+										&nbsp;
+										<a id="form_docentej_id_4:acessarChatTurma" href="#" onclick="var a=function(){window.open('/sigaa/entrarChat.do?idchat=172289&amp;idusuario=15247200&amp;chatName=SISTEMAS INTELIGENTES&amp;origem=portalDiscente', 'chat_172289', 'height=485,width=685,location=0,resizable=1');};var b=function(){if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_docentej_id_4'),{'form_docentej_id_4:acessarChatTurma':'form_docentej_id_4:acessarChatTurma','id':'172289'},'');}return false};return (a()==false) ? false : b();"><img src="/sigaa/img/comments.png" alt="Acessar Chat da turma" title="Acessar Chat da turma - 0 usu&aacute;rio(s)" /></a>&nbsp;
+									<input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td>0</td>
+								<td align="center">
+									
+<form id="form_webconfj_id_4" name="form_webconfj_id_4" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_webconfj_id_4" value="form_webconfj_id_4" />
+<a id="form_webconfj_id_4:acessarMeetingTurma" href="#" style="text-align: center;" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_webconfj_id_4'),{'form_webconfj_id_4:acessarMeetingTurma':'form_webconfj_id_4:acessarMeetingTurma','idTurma':'172289'},'_blank');}return false"><img src="/sigaa/img/icones/menu_sigaa/pap.png" alt="Web Confer&ecirc;ncia" height="16" style="align: center;" title="Web Confer&ecirc;ncia" width="16" /></a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+							</tr>
+							<tr>
+								<td colspan="5" id="linha_172289" style="display: none;"></td>
+							</tr>
+						
+							<tr class="">
+								<td class="descricao">
+									
+<form id="form_acessarTurmaVirtualj_id_5" name="form_acessarTurmaVirtualj_id_5" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_acessarTurmaVirtualj_id_5" value="form_acessarTurmaVirtualj_id_5" />
+
+										<input type="hidden" value="172281" name="idTurma" />
+										<a id="form_acessarTurmaVirtualj_id_5:turmaVirtual" href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_acessarTurmaVirtualj_id_5'),{'form_acessarTurmaVirtualj_id_5:turmaVirtual':'form_acessarTurmaVirtualj_id_5:turmaVirtual'},'');}return false">VARI&Aacute;VEIS COMPLEXAS</a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td class="info" style="text-align:left">Engenharia de Computa&#231;&#227;o / CCT</td>
+								<td class="info"><center>46M12
+									
+									</center>
+								</td>
+								<td>
+									
+								</td>
+								<td nowrap="nowrap" style="width:50px;">
+									
+<form id="form_docentej_id_5" name="form_docentej_id_5" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_docentej_id_5" value="form_docentej_id_5" />
+<img src="/sigaa/img/flag_grey.png" title="Nenhum usu&aacute;rio no chat. Docente Offline" />
+										
+										
+										
+										&nbsp;
+										<a id="form_docentej_id_5:acessarChatTurma" href="#" onclick="var a=function(){window.open('/sigaa/entrarChat.do?idchat=172281&amp;idusuario=15247200&amp;chatName=VARI&Aacute;VEIS COMPLEXAS&amp;origem=portalDiscente', 'chat_172281', 'height=485,width=685,location=0,resizable=1');};var b=function(){if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_docentej_id_5'),{'form_docentej_id_5:acessarChatTurma':'form_docentej_id_5:acessarChatTurma','id':'172281'},'');}return false};return (a()==false) ? false : b();"><img src="/sigaa/img/comments.png" alt="Acessar Chat da turma" title="Acessar Chat da turma - 0 usu&aacute;rio(s)" /></a>&nbsp;
+									<input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+								<td>0</td>
+								<td align="center">
+									
+<form id="form_webconfj_id_5" name="form_webconfj_id_5" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="form_webconfj_id_5" value="form_webconfj_id_5" />
+<a id="form_webconfj_id_5:acessarMeetingTurma" href="#" style="text-align: center;" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('form_webconfj_id_5'),{'form_webconfj_id_5:acessarMeetingTurma':'form_webconfj_id_5:acessarMeetingTurma','idTurma':'172281'},'_blank');}return false"><img src="/sigaa/img/icones/menu_sigaa/pap.png" alt="Web Confer&ecirc;ncia" height="16" style="align: center;" title="Web Confer&ecirc;ncia" width="16" /></a><input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+								</td>
+							</tr>
+							<tr>
+								<td colspan="5" id="linha_172281" style="display: none;"></td>
+							</tr>
+						
+						</tbody>
+					</table>
+					<span class="mais" style="text-align: left;">
+					
+					</span>
+					
+
+				
+				<span class="mais">
+					<a href="/sigaa/portais/discente/turmas.jsf">Ver turmas anteriores</a>
+				</span>
+				
+				
+			</div>
+
+			
+			
+			
+			
+			<div id="participantes" class="simple-panel">
+				<h4> Comunidades Virtuais que participa atualmente </h4>
+				
+				
+				
+				
+				
+			</div>
+			<!-- IN&#205;CIO CUSTOMIZA&#199;&#195;O ESPEC&#205;FICA UEMA - TAREFA 125079 -->
+			
+				
+<form id="formAtividades" name="formAtividades" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="formAtividades" value="formAtividades" />
+
+					<div id="avaliacao-portal" class="simple-panel">
+						<h4> Minhas atividades  </h4>
+							
+							
+							
+							
+								
+				
+								
+									<p class="vazio">
+										N&#227;o h&#225; atividades cadastradas para os pr&#243;ximos 15 dias ou decorridos 7 dias.
+									</p>
+								
+							
+							
+					</div>
+				<input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+			
+			<!-- FIM CUSTOMIZA&#199;&#195;O ESPEC&#205;FICA UEMA - TAREFA 125079 -->
+
+	 
+	<div id="forum-portal" class="simple-panel">
+		
+		
+		
+
+			
+				<h4>F&#211;RUM DO CURSO DE ENGENHARIA DA COMPUTA&#199;&#195;O </h4>
+			
+			
+
+		
+<form id="j_id_jsp_1383391995_343" name="j_id_jsp_1383391995_343" method="post" action="/sigaa/portais/discente/discente.jsf" enctype="application/x-www-form-urlencoded">
+<input type="hidden" name="j_id_jsp_1383391995_343" value="j_id_jsp_1383391995_343" />
+
+		<div class="descricaoOperacao">
+			Caro Aluno, este f&#243;rum &#233; destinado para discuss&#245;es relacionadas ao seu curso. Todos os alunos 
+			do curso e a coordena&#231;&#227;o tem acesso a ele.
+		</div>
+		
+		
+		<center>
+			<a id="j_id_jsp_1383391995_343:novoTopicoForum" href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('j_id_jsp_1383391995_343'),{'j_id_jsp_1383391995_343:novoTopicoForum':'j_id_jsp_1383391995_343:novoTopicoForum'},'');}return false">Cadastrar novo t&oacute;pico para este f&oacute;rum</a>
+			&nbsp;&nbsp;
+			<a id="j_id_jsp_1383391995_343:listarTopicosForum" href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('j_id_jsp_1383391995_343'),{'j_id_jsp_1383391995_343:listarTopicosForum':'j_id_jsp_1383391995_343:listarTopicosForum'},'');}return false">Visualizar todos os t&oacute;picos para este f&oacute;rum</a>
+		</center>
+		<br/>
+		
+		
+
+		
+
+			<table class="listagem">
+				<thead>
+					<tr>
+						<th>T&#237;tulo</th>
+						<th>Autor</th>
+						<th style="text-align: center">Respostas</th>
+						<th style="text-align: center">Data</th>
+						<th></th>
+						<th></th>
+						<th></th>
+					</tr>
+				</thead>
+
+				<tbody>
+
+					
+						<tr class="linhaPar" >
+
+							<td width="50%">
+							<a id="j_id_jsp_1383391995_343:mostrarForumMensagemCurso" href="#" onclick="if(typeof jsfcljs == 'function'){jsfcljs(document.getElementById('j_id_jsp_1383391995_343'),{'j_id_jsp_1383391995_343:mostrarForumMensagemCurso':'j_id_jsp_1383391995_343:mostrarForumMensagemCurso','idForumMensagem':'13432154','id':'80554'},'');}return false">Links &uacute;teis para baixar livros e peri&oacute;dicos acad&ecirc;micos</a>
+							</td>
+
+							<!-- <td>Links &#250;teis para baixar livros e peri&#243;dicos acad&#234;micos</td> -->
+							<td><acronym title="ALEXSANDRO LUCENA MOTA"> 81427336334 </acronym></td>
+							<td style="text-align: center">5</td>
+							<td style="text-align: center">
+								
+									04/08/2024 14:31:04
+								 
+								
+							</td>
+							<td>
+								<img src="/sigaa/img/flag_grey.png" title="T&oacute;pico n&atilde;o seguido" />
+								
+							</td>
+						</tr>
+					
+				</tbody>
+			</table>
+		
+	<input type="hidden" name="javax.faces.ViewState" id="javax.faces.ViewState" value="j_id13" />
+</form>
+	
+	
+	
+	</div>
+	
+	
+	</div>
+		<div class="clear"> </div>
+	</div>
+	
+
+
+<style>
+	#avaliacao-portal th, #avaliacao-portal td{
+		text-align:left;
+	}
+</style>
+
+<script type="text/javascript">
+	PainelNoticias.init('/sigaa/portais/docente/viewNoticia.jsf');
+</script>
+
+
+
+	
+	
+		
+
+
+
+<div class="clear"> </div>
+
+</div> 
+	<br />
+
+	
+	
+	<div style="width: 80%; text-align: center; margin: 0 auto;">
+		<a href='/sigaa/verPortalDiscente.do'>Portal do Discente</a>
+	</div>
+	
+	
+
+	<div id="rodape">
+		<p>	SIGUEMA Acad&#234;mico | Coordena&#231;&#227;o de Sistemas de Informa&#231;&#227;o - 2016-8200, ramal 9950/2016-8201/2016-8202 | Copyright &copy; 2006-2026 - UEMA - AppServer1.s1i1
+		
+		 
+			 - <a onclick="javascript:versao();">v3.18.245</a>
+			-	
+		<span style="font-size: 6pt;">12/06/2026 09:58</span>
+		</p>
+	</div>
+
+
+</div>  
+
+<div id="painel-mensagem-envio"> </div>
+
+
+
+<!-- MYFACES JAVASCRIPT -->
+
+</body>
+
+</html>
+ 
+	<script type="text/javascript" charset="UTF-8">
+		function versao(){
+			var msg='';
+			msg+='SIGUEMA Acad&#234;mico 3.18.245,  publicado em: 09/06/2026\n\n';
+			msg+='Depend\u00eancias:\n';
+			msg+='Arquitetura 2.7.4_s.13\n';
+			msg+='Entidades Comuns 1.4.5.s_3\n';
+			msg+='Servicos Integrados 1.4.5\n';
+			msg+='SharedResources 1.4.21\n\n';
+			msg+='Copyright SINFO/UFRN';
+			alert(msg);
+		}	
+	</script>
+
+
+<script language="javascript">
+Relogio.init(60);
+</script>
+
+	
+
+<script src="https://cdn.jsdelivr.net/npm/js-cookie@2/src/js.cookie.min.js"></script>
+<script type="text/javascript">
+jQuery.noConflict();
+
+!(function($){
+	Cookies.set('funcionalidadeAcessada', "");
+
+	$(function(){
+		$('.ThemeOfficeMenuItem').mousedown(function(e) {
+			var caminhoMenu = $('.ThemeOfficeMainItemHover, .ThemeOfficeMenuItemHover, .ThemeOfficeMenuItemActive')
+				.map(function(i, el) {
+					return $.trim($(el).text());
+				});
+
+			var value =	$.makeArray(caminhoMenu);
+
+			Cookies.set('funcionalidadeAcessada', value.join(" &rarr; "));
+		});
+
+		$('a, button, input[type=submit]').click(function(e) {
+			var value = [];
+			var clicado;
+
+			if ($(this).closest('#turmas-portal').length > 0) {
+				return;
+			}
+
+			if ($(this).is('[type=submit]')) {
+				clicado = $(this).attr('value');
+			} else {
+				clicado = $(this).text();
+			}
+
+			var aba;
+			if ($('.ytab-strip').length > 0) {
+				aba = $('.ytab-strip td.on').text();
+			} else {
+				aba = $('#aba').val();
+			}
+			
+			if($.trim(aba) == $.trim(clicado)) {
+				return;
+			}
+
+			richTabAtivos = $('.rich-tab-active').filter(function(i, el) {
+				return $(el).css('visibility') != 'hidden';
+			});
+
+			if ($.trim(aba).length > 0 && (
+					$(this).closest('.ytab-strip').length > 0
+					|| $(this).closest('.yui-ext-tabbody').length > 0)) {
+				value.push(aba);
+			}
+
+			if (richTabAtivos.length > 0 && $(this).closest('.rich-tab-active').length > 0) {
+				var a = $.makeArray(richTabAtivos.map(function(i, el) {
+					return $(el).text();
+				}));
+				$(a).each(function(i, el) {
+					value.push(el);
+				});
+			}
+			
+			var liHierarquia = $(this).parents('li').not($(this).parent('li'));
+
+			if (liHierarquia.length > 0) {
+				var li = $.makeArray(liHierarquia.map(function(i, el){
+					return $.trim($($(el).contents().get(0)).text());
+				}).filter(function(i, el){
+					return $.trim(el).length > 0;
+				}));
+				
+				$(li.reverse()).each(function(i, el){
+					value.push(el);
+				});
+			}
+
+			if (richTabAtivos.length == 0
+					&& liHierarquia.length == 0
+					&& $(this).closest('h2').length == 0
+					&& $(this).closest('#cabecalho').length == 0) {
+				var h2 = $('h2');
+
+				if (h2.length == 1) {
+					console.log(h2.text().split('>'));
+
+					$(h2.text().split('>')).each(function(i, el){
+						value.push($.trim(el));
+					});
+				}
+			}
+			
+			value.push(clicado);
+			
+			var casoUso = value.join(" &rarr; ");
+
+			Cookies.set('funcionalidadeAcessada', casoUso);
+		});
+	});
+})(jQuery);
+</script>

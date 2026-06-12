@@ -31,6 +31,12 @@ _QUEUES: dict[str, str] = {
     "sigaa_biblioteca": "default",
     "sigaa_extensao":   "default",
     "sigaa_processos":  "default",
+    "sigaa_notas":      "default",
+    "sigaa_indice":     "default",
+    "sigaa_historico":  "default",
+    "sigaa_estrutura":  "default",
+    "sigaa_turmas":     "default",
+    "sigaa_calendario": "default",
 }
 
 

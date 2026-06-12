@@ -24,6 +24,54 @@ class SIGAAUseCase:
         """
         m = mensagem.lower()
 
+        # Novo Fluxo: Notas
+        if any(t in m for t in ["nota", "média", "media", "boletim", "desempenho"]):
+            logger.info("🎯 Fluxo de Notas detectado.")
+            return {
+                "worker": "sigaa_notas",
+                "args": {}
+            }
+
+        # Novo Fluxo: Índice Acadêmico
+        if any(t in m for t in ["cr", "ira", "rendimento", "coeficiente"]):
+            logger.info("🎯 Fluxo de Índice Acadêmico detectado.")
+            return {
+                "worker": "sigaa_indice",
+                "args": {}
+            }
+
+        # Novo Fluxo: Histórico / Integralização / Horas Complementares
+        if any(t in m for t in ["histórico", "historico", "formar", "concluir", "complementar", "ch ", "integraliza"]):
+            logger.info("🎯 Fluxo de Histórico detectado.")
+            return {
+                "worker": "sigaa_historico",
+                "args": {}
+            }
+
+        # Novo Fluxo: Estrutura Curricular
+        if any(t in m for t in ["estrutura curricular", "matriz curricular", "fluxograma", "matriz", "currículo", "curriculo"]):
+            logger.info("🎯 Fluxo de Estrutura Curricular detectado.")
+            return {
+                "worker": "sigaa_estrutura",
+                "args": {}
+            }
+
+        # Novo Fluxo: Turmas / Horários / Aulas
+        if any(t in m for t in ["turma", "horário", "horario", "sala", "professor", "aula", "cursar", "próximo semestre", "proximo semestre"]):
+            logger.info("🎯 Fluxo de Turmas detectado.")
+            return {
+                "worker": "sigaa_turmas",
+                "args": {}
+            }
+
+        # Novo Fluxo: Calendário Acadêmico
+        if any(t in m for t in ["calendário", "calendario"]):
+            logger.info("🎯 Fluxo de Calendário detectado.")
+            return {
+                "worker": "sigaa_calendario",
+                "args": {}
+            }
+
         # Fluxo A: Biblioteca Pública e Exportação
         if any(t in m for t in ["biblioteca", "livro", "obra", "acervo", "busca livro", "pesquisa livro", "marc"]):
             logger.info("🎯 Fluxo de Biblioteca detectado.")

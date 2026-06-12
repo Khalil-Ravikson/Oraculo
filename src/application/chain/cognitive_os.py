@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -86,25 +87,125 @@ async def processar(
         if hitl_state_raw:
             try:
                 hitl_state = json.loads(hitl_state_raw if isinstance(hitl_state_raw, str) else hitl_state_raw.decode())
-                msg_lower = message.strip().lower()
+                action = hitl_state.get("action")
+                msg_clean = message.strip()
                 
+                if action == "sigaa_collect_cpf":
+                    # Limpa e valida CPF
+                    cpf = re.sub(r"\D", "", msg_clean)
+                    if len(cpf) != 11:
+                        return OSResult(
+                            answer="❌ **CPF Inválido!**\nO CPF deve conter exatamente 11 dígitos numéricos. Por favor, informe seu CPF novamente:",
+                            plan_id=hitl_state.get("event", {}).get("plan_id", "sigaa_auth"),
+                            rota="SIGAA",
+                            cache_hit=False,
+                            total_ms=10,
+                            status="hitl_pending"
+                        )
+                    # Avança para coletar senha
+                    hitl_state["action"] = "sigaa_collect_password"
+                    hitl_state["cpf"] = cpf
+                    r.setex(f"hitl:session:{session_id}", 300, json.dumps(hitl_state, ensure_ascii=False))
+                    return OSResult(
+                        answer="🔐 **CPF recebido!**\nAgora, por favor, envie sua **senha do SIGAA** para iniciarmos o acesso (sua senha é transmitida de forma segura e não será salva persistentemente):",
+                        plan_id=hitl_state.get("event", {}).get("plan_id", "sigaa_auth"),
+                        rota="SIGAA",
+                        cache_hit=False,
+                        total_ms=10,
+                        status="hitl_pending"
+                    )
+                
+                elif action == "sigaa_collect_password":
+                    senha = msg_clean
+                    cpf = hitl_state.get("cpf")
+                    target_action = hitl_state.get("target_action")
+                    event = hitl_state.get("event", {})
+                    
+                    # Anexa credenciais ao event de forma temporária
+                    event["login"] = cpf
+                    event["senha"] = senha
+                    event["hitl_confirmed"] = True
+                    
+                    r.delete(f"hitl:session:{session_id}")
+                    
+                    from src.application.workers.registry import _REGISTRY, _autodiscover_workers
+                    from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
+                    from celery import chain
+                    
+                    _autodiscover_workers()
+                    fn = _REGISTRY.get(target_action)
+                    if fn:
+                        delivery_ctx = {
+                            "plan_id": event.get("plan_id", "hitl_fast_path"),
+                            "chat_id": session_id,
+                            "sender_jid": session_id,
+                            "route": "SIGAA",
+                            "query": event.get("query", ""),
+                        }
+                        workflow = chain(
+                            fn.s(event),
+                            enviar_resposta_whatsapp_task.s(delivery_ctx)
+                        )
+                        workflow.apply_async()
+                        
+                        desc = hitl_state.get("description", target_action)
+                        return OSResult(
+                            answer=f"🚀 **Autenticação em andamento!**\nIniciando acesso seguro ao SIGAA para a operação **{desc}**. Você receberá os resultados em breve por aqui.",
+                            plan_id=event.get("plan_id", "hitl_fast_path"),
+                            rota="SIGAA",
+                            cache_hit=True,
+                            total_ms=10,
+                            status="ok"
+                        )
+                    else:
+                        from src.application.workers.registry import dispatch
+                        dispatch(target_action, event)
+                        return OSResult(
+                            answer=f"✅ Ação '{target_action}' iniciada.",
+                            plan_id=event.get("plan_id", "hitl_fast_path"),
+                            rota="SIGAA",
+                            cache_hit=True,
+                            total_ms=10,
+                            status="ok"
+                        )
+                
+                # Fallback para confirmações SIM/NAO legadas (ex: baixar mídia)
+                msg_lower = msg_clean.lower()
                 if msg_lower in ("sim", "s", "yes", "y", "confirmo", "ok"):
                     r.delete(f"hitl:session:{session_id}")
                     action = hitl_state.get("action")
+                    worker_name = hitl_state.get("worker_name")
+                    event = hitl_state.get("event", {})
                     
-                    if action == "media_download":
-                        from src.application.workers.registry import dispatch
-                        dispatch(hitl_state.get("worker_name"), hitl_state.get("event"))
-                        return OSResult(
-                            answer="✅ Download confirmado! Enviado para processamento.",
-                            plan_id="hitl_fast_path", rota="HITL", cache_hit=True, total_ms=10, status="ok"
+                    from src.application.workers.registry import _REGISTRY, _autodiscover_workers
+                    from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
+                    from celery import chain
+                    
+                    _autodiscover_workers()
+                    fn = _REGISTRY.get(worker_name)
+                    if fn:
+                        delivery_ctx = {
+                            "plan_id": event.get("plan_id", "hitl_fast_path"),
+                            "chat_id": session_id,
+                            "sender_jid": session_id,
+                            "route": "SIGAA" if (action.startswith("sigaa_") or "sigaa" in worker_name) else "MEDIA_DOWNLOAD",
+                            "query": event.get("query", ""),
+                        }
+                        workflow = chain(
+                            fn.s(event),
+                            enviar_resposta_whatsapp_task.s(delivery_ctx)
                         )
-                    
-                    return OSResult(
-                        answer=f"✅ Ação '{action}' confirmada e iniciada.",
-                        plan_id="hitl_fast_path", rota="HITL", cache_hit=True, total_ms=10, status="ok"
-                    )
-                    
+                        workflow.apply_async()
+                        
+                        desc = hitl_state.get("description", action)
+                        return OSResult(
+                            answer=f"✅ Ação **{desc}** confirmada! Enviada para processamento no servidor Celery.",
+                            plan_id=event.get("plan_id", "hitl_fast_path"),
+                            rota="SIGAA" if (action.startswith("sigaa_") or "sigaa" in worker_name) else "MEDIA_DOWNLOAD",
+                            cache_hit=True,
+                            total_ms=10,
+                            status="ok"
+                        )
                 elif msg_lower in ("nao", "não", "n", "no", "cancela", "cancelar"):
                     r.delete(f"hitl:session:{session_id}")
                     return OSResult(
@@ -192,6 +293,102 @@ async def processar(
                 status="hitl_pending",
                 action_buttons=[{"label": "Sim, baixar", "value": "sim"}, {"label": "Não", "value": "nao"}]
             )
+
+        # ── Fast-Path SIGAA HITL ──────────────────────────────────────────────
+        if decision.rota == "SIGAA":
+            from src.application.use_cases.sigaa_use_cases import SIGAAUseCase
+            uc = SIGAAUseCase()
+            fluxo = uc.detectar_fluxo(message)
+            worker = fluxo["worker"] if fluxo else "sigaa_biblioteca"
+            args = fluxo["args"] if fluxo else {}
+            
+            # Se já está confirmado via HITL, prossegue normalmente
+            if args.get("hitl_confirmed"):
+                args.pop("hitl_confirmed", None)
+            else:
+                friendly_names = {
+                    "sigaa_notas": "Consultar Minhas Notas",
+                    "sigaa_indice": "Consultar Índice Acadêmico (CR)",
+                    "sigaa_historico": "Emitir Histórico Escolar",
+                    "sigaa_estrutura": "Consultar Estrutura Curricular",
+                    "sigaa_turmas": "Consultar Turmas do Semestre",
+                    "sigaa_calendario": "Consultar Calendário Acadêmico",
+                    "sigaa_extensao": "Realizar Inscrição em Evento de Extensão",
+                    "sigaa_biblioteca": "Consultar Acervo da Biblioteca",
+                    "sigaa_processos": "Consultar Processos Seletivos",
+                }
+                op_desc = friendly_names.get(worker, "Acessar o Portal SIGAA")
+                
+                # Se o usuário já possui cookies de sessão válidos no Redis, dispacha a tarefa imediatamente
+                session_key = f"sigaa:session:{session_id}"
+                if r.exists(session_key):
+                    from src.application.workers.registry import _autodiscover_workers, _REGISTRY
+                    from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
+                    from celery import chain
+                    
+                    _autodiscover_workers()
+                    fn = _REGISTRY.get(worker)
+                    if fn:
+                        event = {
+                            "plan_id": f"fast_{worker}_{int(time.time())}",
+                            "session_id": session_id,
+                            "step_id": "s1",
+                            "query": message,
+                            **args
+                        }
+                        delivery_ctx = {
+                            "plan_id": event["plan_id"],
+                            "chat_id": session_id,
+                            "sender_jid": session_id,
+                            "route": "SIGAA",
+                            "query": message,
+                        }
+                        workflow = chain(
+                            fn.s(event),
+                            enviar_resposta_whatsapp_task.s(delivery_ctx)
+                        )
+                        workflow.apply_async()
+                        
+                        ms = int((time.monotonic() - t0) * 1000)
+                        _OS_LATENCY.observe(ms)
+                        _OS_REQUESTS.labels(status="ok").inc()
+                        return OSResult(
+                            answer="🔄 **Acessando dados no SIGAA...**\nUtilizando sua sessão ativa existente. Buscando informações, aguarde um instante...",
+                            plan_id=event["plan_id"],
+                            rota="SIGAA",
+                            cache_hit=True,
+                            total_ms=ms,
+                            status="ok"
+                        )
+                
+                # Caso contrário, inicia a coleta de CPF
+                hitl_state = {
+                    "action": "sigaa_collect_cpf",
+                    "target_action": worker,
+                    "description": op_desc,
+                    "event": {
+                        "plan_id": f"fast_{worker}_{int(time.time())}",
+                        "session_id": session_id,
+                        "step_id": "s1",
+                        "query": message,
+                        **args
+                    }
+                }
+                r.setex(f"hitl:session:{session_id}", 300, json.dumps(hitl_state, ensure_ascii=False))
+                
+                ms = int((time.monotonic() - t0) * 1000)
+                _OS_LATENCY.observe(ms)
+                _OS_REQUESTS.labels(status="ok").inc()
+                
+                return OSResult(
+                    answer=f"⚠️ **Autenticação Requerida**\n\nPara executar a operação **{op_desc}**, preciso que você se autentique no SIGAA.\n\nPor favor, informe seu **CPF** (apenas números, sem pontos ou traços):",
+                    plan_id=hitl_state["event"]["plan_id"],
+                    rota=decision.rota,
+                    cache_hit=False,
+                    total_ms=ms,
+                    status="hitl_pending",
+                    action_buttons=[]
+                )
 
         # ── 2. Planner ────────────────────────────────────────────────────────
         from src.application.chain.planner import criar_plano

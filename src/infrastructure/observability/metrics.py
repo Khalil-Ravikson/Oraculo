@@ -156,6 +156,39 @@ class PrometheusMetrics:
             Gauge, f"{ns}_crag_score_last",
             "Último CRAG score calculado (qualidade do retrieval)")
 
+        # ── SIGAA Metrics ─────────────────────────────────────────────────────
+        self._sigaa_scraping_latency = _get_or_create(
+            Histogram, f"{ns}_sigaa_scraping_latency_ms",
+            "Latência do scraping do SIGAA em ms", ["operacao"],
+            buckets=_REQUEST_BUCKETS)
+        
+        self._sigaa_login_latency = _get_or_create(
+            Histogram, f"{ns}_sigaa_login_latency_ms",
+            "Latência de login no SIGAA em ms",
+            buckets=_REQUEST_BUCKETS)
+
+        self._sigaa_pdf_download_latency = _get_or_create(
+            Histogram, f"{ns}_sigaa_pdf_download_latency_ms",
+            "Latência de download de PDF do SIGAA em ms",
+            buckets=_REQUEST_BUCKETS)
+
+        self._sigaa_pdf_parsing_latency = _get_or_create(
+            Histogram, f"{ns}_sigaa_pdf_parsing_latency_ms",
+            "Latência do parsing de PDF do SIGAA em ms",
+            buckets=_REQUEST_BUCKETS)
+
+        self._sigaa_success_total = _get_or_create(
+            Counter, f"{ns}_sigaa_success_total",
+            "Total de operações bem-sucedidas do SIGAA", ["operacao"])
+
+        self._sigaa_failure_total = _get_or_create(
+            Counter, f"{ns}_sigaa_failure_total",
+            "Total de falhas em operações do SIGAA", ["operacao"])
+
+        self._sigaa_selector_changes_total = _get_or_create(
+            Counter, f"{ns}_sigaa_selector_changes_total",
+            "Total de alterações detectadas nos seletores HTML do SIGAA")
+
         self._initialized = True
         logger.info("✅ [METRICS] PrometheusMetrics inicializado (Singleton).")
 
@@ -255,6 +288,36 @@ class PrometheusMetrics:
     def set_crag_score(self, score: float) -> None:
         if self._enabled:
             self._crag_score_last.set(round(score, 4))
+
+    # ── SIGAA Observer Methods ────────────────────────────────────────────────
+
+    def observe_sigaa_scraping_latency(self, operacao: str, ms: int) -> None:
+        if self._enabled:
+            self._sigaa_scraping_latency.labels(operacao=operacao).observe(ms)
+
+    def observe_sigaa_login_latency(self, ms: int) -> None:
+        if self._enabled:
+            self._sigaa_login_latency.observe(ms)
+
+    def observe_sigaa_pdf_download_latency(self, ms: int) -> None:
+        if self._enabled:
+            self._sigaa_pdf_download_latency.observe(ms)
+
+    def observe_sigaa_pdf_parsing_latency(self, ms: int) -> None:
+        if self._enabled:
+            self._sigaa_pdf_parsing_latency.observe(ms)
+
+    def increment_sigaa_success(self, operacao: str) -> None:
+        if self._enabled:
+            self._sigaa_success_total.labels(operacao=operacao).inc()
+
+    def increment_sigaa_failure(self, operacao: str) -> None:
+        if self._enabled:
+            self._sigaa_failure_total.labels(operacao=operacao).inc()
+
+    def increment_sigaa_selector_change(self) -> None:
+        if self._enabled:
+            self._sigaa_selector_changes_total.inc()
 
     # ── Decorator de latência ─────────────────────────────────────────────────
 

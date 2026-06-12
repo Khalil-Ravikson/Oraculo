@@ -4,7 +4,7 @@ build-backend = "setuptools.backends.legacy:build"
 #desatualizado:#
 [project]
 name = "uema-bot"
-version = "4.0.0"s
+version = "4.0.0"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.111",

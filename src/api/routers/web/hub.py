@@ -275,8 +275,105 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
             if hitl_state_raw:
                 try:
                     hitl_state = _json.loads(hitl_state_raw if isinstance(hitl_state_raw, str) else hitl_state_raw.decode())
-                    msg_lower = msg.strip().lower()
+                    action = hitl_state.get("action")
+                    msg_clean = msg.strip()
+                    msg_lower = msg_clean.lower()
                     
+                    if action == "sigaa_collect_cpf":
+                        import re
+                        cpf = re.sub(r"\D", "", msg_clean)
+                        if len(cpf) != 11:
+                            resp = {
+                                'type': 'response',
+                                'text': "❌ **CPF Inválido!**\nO CPF deve conter exatamente 11 dígitos numéricos. Por favor, informe seu CPF novamente:",
+                                'rota': "SIGAA",
+                                'total_ms': 10,
+                                'action_buttons': [],
+                                'status': 'hitl_pending'
+                            }
+                            yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
+                            return
+                        # Avança para coletar senha
+                        hitl_state["action"] = "sigaa_collect_password"
+                        hitl_state["cpf"] = cpf
+                        r.setex(f"hitl:session:{thread_id}", 300, _json.dumps(hitl_state, ensure_ascii=False))
+                        resp = {
+                            'type': 'response',
+                            'text': "🔐 **CPF recebido!**\nAgora, por favor, envie sua **senha do SIGAA** para iniciarmos o acesso (sua senha é transmitida de forma segura e não será salva persistentemente):",
+                            'rota': "SIGAA",
+                            'total_ms': 10,
+                            'action_buttons': [],
+                            'status': 'hitl_pending'
+                        }
+                        yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
+                        return
+                    
+                    elif action == "sigaa_collect_password":
+                        senha = msg_clean
+                        cpf = hitl_state.get("cpf")
+                        target_action = hitl_state.get("target_action")
+                        event = hitl_state.get("event", {})
+                        
+                        event["login"] = cpf
+                        event["senha"] = senha
+                        event["hitl_confirmed"] = True
+                        
+                        r.delete(f"hitl:session:{thread_id}")
+                        
+                        yield _sse_step("router", "skip", "Autenticação em andamento")
+                        yield _sse_step("planner", "skip", "HITL Validado")
+                        yield _sse_step("dispatch", "running", f"Disparando worker {target_action}...")
+                        t0 = _t.monotonic()
+                        
+                        from src.application.workers.registry import _autodiscover_workers, _REGISTRY
+                        _autodiscover_workers()
+                        fn = _REGISTRY.get(target_action)
+                        if fn:
+                            fn.s(event).apply_async()
+                            yield _sse_step("dispatch", "ok", "Worker enfileirado", _t.monotonic() - t0)
+                            yield _sse_step("synthesis", "running", "Autenticando e extraindo dados do SIGAA...")
+                            t0 = _t.monotonic()
+                            
+                            from src.application.chain.cognitive_os import _aguardar_resposta_final
+                            final_data = await _aguardar_resposta_final(event["plan_id"], timeout=15.0)
+                            synth_ms = _t.monotonic() - t0
+                            
+                            if final_data is None:
+                                answer = "⏳ A sua requisição continua sendo processada em background. Você será notificado quando terminar."
+                                action_buttons = []
+                                status = "warning"
+                                yield _sse_step("synthesis", "warning", "Processamento em background", synth_ms)
+                            else:
+                                answer = final_data.get("answer", "")
+                                action_buttons = final_data.get("action_buttons", [])
+                                status = final_data.get("status", "ok")
+                                yield _sse_step("synthesis", "ok", f"{len(answer)} chars gerados", synth_ms)
+                            
+                            total_ms = int((_t.monotonic() - t_total) * 1000)
+                            response_payload = {
+                                'type': 'response',
+                                'text': answer,
+                                'rota': "SIGAA",
+                                'total_ms': total_ms,
+                                'action_buttons': action_buttons,
+                                'status': status
+                            }
+                            yield f"data: {_json.dumps(response_payload, ensure_ascii=False)}\n\n"
+                            
+                            metrics_payload = {
+                                'type': 'metrics',
+                                'rota': "SIGAA",
+                                'total_ms': total_ms,
+                                'workers': 1,
+                                'confianca': 1.0
+                            }
+                            yield f"data: {_json.dumps(metrics_payload, ensure_ascii=False)}\n\n"
+                            return
+                        else:
+                            resp = {'type': 'response', 'text': f"❌ Falha crítica: worker '{target_action}' não encontrado.", 'rota': "SIGAA", 'total_ms': 10, 'action_buttons': [], 'status': 'error'}
+                            yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
+                            return
+
                     if msg_lower in ("sim", "s", "yes", "y", "confirmo", "ok"):
                         r.delete(f"hitl:session:{thread_id}")
                         action = hitl_state.get("action")
@@ -325,7 +422,7 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
                 {"rota": decision.rota}
             )
 
-            # ── Fast-Paths GREETING / MEDIA_DOWNLOAD ──────
+            # ── Fast-Paths GREETING / MEDIA_DOWNLOAD / SIGAA ──────
             if decision.rota == "GREETING":
                 import random
                 answer = random.choice([
@@ -400,6 +497,116 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
                 yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
                 
                 metrics = {'type': 'metrics', 'rota': decision.rota, 'total_ms': total_ms, 'workers': 0, 'confianca': round(decision.confianca, 2)}
+                yield f"data: {_json.dumps(metrics, ensure_ascii=False)}\n\n"
+                return
+
+            if decision.rota == "SIGAA":
+                from src.application.use_cases.sigaa_use_cases import SIGAAUseCase
+                uc = SIGAAUseCase()
+                fluxo = uc.detectar_fluxo(msg)
+                worker = fluxo["worker"] if fluxo else "sigaa_biblioteca"
+                args = fluxo["args"] if fluxo else {}
+                
+                session_key = f"sigaa:session:{thread_id}"
+                if r.exists(session_key):
+                    yield _sse_step("dispatch", "running", f"Disparando {worker} usando sessão existente...")
+                    t0 = _t.monotonic()
+                    
+                    from src.application.workers.registry import _autodiscover_workers, _REGISTRY
+                    _autodiscover_workers()
+                    fn = _REGISTRY.get(worker)
+                    if fn:
+                        plan_id = f"fast_{worker}_{int(_t.time())}"
+                        event = {
+                            "plan_id": plan_id,
+                            "session_id": thread_id,
+                            "step_id": "s1",
+                            "query": msg,
+                            **args
+                        }
+                        fn.s(event).apply_async()
+                        
+                        yield _sse_step("dispatch", "ok", "Worker enfileirado", _t.monotonic() - t0)
+                        yield _sse_step("synthesis", "running", "Aguardando resposta do SIGAA...")
+                        t0 = _t.monotonic()
+                        
+                        from src.application.chain.cognitive_os import _aguardar_resposta_final
+                        final_data = await _aguardar_resposta_final(plan_id, timeout=15.0)
+                        synth_ms = _t.monotonic() - t0
+                        
+                        if final_data is None:
+                            answer = "⏳ A sua requisição continua sendo processada em background. Você será notificado quando terminar."
+                            action_buttons = []
+                            status = "warning"
+                            yield _sse_step("synthesis", "warning", "Processamento em background", synth_ms)
+                        else:
+                            answer = final_data.get("answer", "")
+                            action_buttons = final_data.get("action_buttons", [])
+                            status = final_data.get("status", "ok")
+                            yield _sse_step("synthesis", "ok", f"{len(answer)} chars gerados", synth_ms)
+                        
+                        total_ms = int((_t.monotonic() - t_total) * 1000)
+                        response_payload = {
+                            'type': 'response',
+                            'text': answer,
+                            'rota': decision.rota,
+                            'total_ms': total_ms,
+                            'action_buttons': action_buttons,
+                            'status': status
+                        }
+                        yield f"data: {_json.dumps(response_payload, ensure_ascii=False)}\n\n"
+                        return
+
+                friendly_names = {
+                    "sigaa_notas": "Consultar Minhas Notas",
+                    "sigaa_indice": "Consultar Índice Acadêmico (CR)",
+                    "sigaa_historico": "Emitir Histórico Escolar",
+                    "sigaa_estrutura": "Consultar Estrutura Curricular",
+                    "sigaa_turmas": "Consultar Turmas do Semestre",
+                    "sigaa_calendario": "Consultar Calendário Acadêmico",
+                    "sigaa_extensao": "Realizar Inscrição em Evento de Extensão",
+                    "sigaa_biblioteca": "Consultar Acervo da Biblioteca",
+                    "sigaa_processos": "Consultar Processos Seletivos",
+                }
+                op_desc = friendly_names.get(worker, "Acessar o Portal SIGAA")
+                
+                hitl_state = {
+                    "action": "sigaa_collect_cpf",
+                    "target_action": worker,
+                    "description": op_desc,
+                    "event": {
+                        "plan_id": f"fast_{worker}_{int(_t.time())}",
+                        "session_id": thread_id,
+                        "step_id": "s1",
+                        "query": msg,
+                        **args
+                    }
+                }
+                r.setex(f"hitl:session:{thread_id}", 300, _json.dumps(hitl_state, ensure_ascii=False))
+                
+                yield _sse_step("planner", "skip", "Coleta de Credenciais")
+                yield _sse_step("dispatch", "skip", "Bypass Celery")
+                yield _sse_step("synthesis", "ok", "Identificação Requerida")
+                
+                total_ms = int((_t.monotonic() - t_total) * 1000)
+                answer = f"⚠️ **Autenticação Requerida**\n\nPara executar a operação **{op_desc}**, preciso que você se autentique no SIGAA.\n\nPor favor, informe seu **CPF** (apenas números, sem pontos ou traços):"
+                resp = {
+                    'type': 'response',
+                    'text': answer,
+                    'rota': decision.rota,
+                    'total_ms': total_ms,
+                    'action_buttons': [],
+                    'status': 'hitl_pending'
+                }
+                yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
+                
+                metrics = {
+                    'type': 'metrics',
+                    'rota': decision.rota,
+                    'total_ms': total_ms,
+                    'workers': 0,
+                    'confianca': round(decision.confianca, 2)
+                }
                 yield f"data: {_json.dumps(metrics, ensure_ascii=False)}\n\n"
                 return
 

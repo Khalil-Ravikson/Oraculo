@@ -1,0 +1,5 @@
+dados/tmp/
+venv/
+.git/
+.pytest_cache/
+__pycache__/

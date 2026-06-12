@@ -36,8 +36,6 @@ dados/*.csv
 # Adicionado 
 .env.test
 .pytest_cache/
-dados/uploads/
-dados/PDF/testes/
-dados/CSV/testes/
+dados/
 *.pdf
 *.csv

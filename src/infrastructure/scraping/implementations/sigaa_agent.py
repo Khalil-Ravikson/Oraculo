@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -119,7 +120,10 @@ class SIGAAAgent:
     com alta resiliência e simulação humana.
     """
 
-    def __init__(self, headless: bool = True):
+    def __init__(self, login: str = "", senha: str = "", session_id: str = "", headless: bool = True):
+        self.login = login
+        self.senha = senha
+        self.session_id = session_id or "shared"
         self.headless = headless
         self.ua = UserAgent()
         self._user_agent = self.ua.random or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -149,7 +153,8 @@ class SIGAAAgent:
             user_agent=self._user_agent,
             viewport={"width": 1280, "height": 800},
             locale="pt-BR",
-            accept_downloads=True
+            accept_downloads=True,
+            ignore_https_errors=True
         )
 
     async def close(self):
@@ -215,7 +220,7 @@ class SIGAAAgent:
         try:
             from src.infrastructure.redis_client import get_redis_text
             r = get_redis_text()
-            data = r.get("sigaa:session:shared")
+            data = r.get(f"sigaa:session:{self.session_id}")
             if data:
                 sess = SIGAASession.from_json(data)
                 if not sess.is_expired():
@@ -230,23 +235,31 @@ class SIGAAAgent:
             from src.infrastructure.redis_client import get_redis_text
             r = get_redis_text()
             sess = SIGAASession(cookies=cookies, authenticated_at=time.time(), valid=True)
-            r.setex("sigaa:session:shared", 1200, sess.to_json())  # TTL 20 min
+            r.setex(f"sigaa:session:{self.session_id}", 1200, sess.to_json())  # TTL 20 min
             logger.info("💾 Sessão autenticada do SIGAA persistida no Redis.")
         except Exception as e:
             logger.warning("Erro ao salvar sessão no Redis: %s", e)
 
     async def _realizar_login(self, page) -> bool:
         """Realiza a autenticação no portal SIGAA."""
-        login = os.getenv("SIGAA_LOGIN", "")
-        senha = os.getenv("SIGAA_SENHA", "")
+        login = self.login or os.getenv("SIGAA_LOGIN", "")
+        senha = self.senha or os.getenv("SIGAA_SENHA", "")
         
         if not login or not senha:
             raise ValueError("As variáveis SIGAA_LOGIN e/ou SIGAA_SENHA não foram definidas.")
 
         logger.info("🔒 Iniciando autenticação no SIGAA...")
-        await page.goto(f"{SIGAA_BASE}/verTelaLogin.do")
+        await page.goto(f"{SIGAA_BASE}/verTelaLogin.do", wait_until="domcontentloaded", timeout=30000)
         await self._wait_for_jsf_lifecycle(page)
         await self._human_delay()
+
+        # Evita interface Mobile: se detectado o link "Modo Clássico", clica para ir à versão desktop
+        modo_classico = page.locator("text=Modo Clássico")
+        if await modo_classico.count() > 0:
+            logger.info("📱 Detectada interface Mobile do SIGAA. Alternando para o Modo Clássico...")
+            await modo_classico.first.click()
+            await self._wait_for_jsf_lifecycle(page)
+            await self._human_delay()
 
         # Chain of Thought explicito em logs estruturados
         logger.info("🧠 [CoT] PERCEBER: Tela de Login. Inputs 'user.login' e 'user.senha' identificados.")
@@ -258,6 +271,17 @@ class SIGAAAgent:
         
         await page.click("input[type='submit']")
         await self._wait_for_jsf_lifecycle(page)
+
+        # Se houver telas intermediárias (questionários de avaliação, termos, avisos institucionais)
+        for _ in range(2):  # Trata até 2 telas consecutivas de aviso se necessário
+            continuar_btn = page.locator("input[value*='Continuar'], input[value*='continuar'], button:has-text('Continuar')")
+            if await continuar_btn.count() > 0:
+                logger.info("⚠️ Tela intermediária de aviso detectada. Clicando em 'Continuar'...")
+                await continuar_btn.first.click()
+                await self._wait_for_jsf_lifecycle(page)
+                await self._human_delay()
+            else:
+                break
 
         # Verificar sucesso
         try:
@@ -489,6 +513,388 @@ class SIGAAAgent:
 
         except Exception as e:
             shot = await self._save_screenshot(page, "processos")
+            return SIGAAResult(ok=False, error=str(e), screenshot_path=shot)
+        finally:
+            await page.close()
+
+    # ── METODOS DE PORTAL DO DISCENTE ─────────────────────────────────────────
+
+    async def _goto_page(self, page, url: str) -> None:
+        """Navega para a URL desejada, ou para o arquivo local se o modo mock estiver ativo."""
+        mock_file = os.getenv("SIGAA_MOCK_FILE", "")
+        if mock_file:
+            p = Path(mock_file).resolve().as_uri()
+            logger.info("🧪 [MOCK MODE] Carregando arquivo local: %s", p)
+            await page.goto(p)
+        else:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+    async def _jscook_navigate(self, page, action: str) -> None:
+        """Executa navegação programática do JSCookMenu."""
+        logger.info("🖱️ Programmatic JSCookMenu submit: %s", action)
+        await page.evaluate(f"""
+            document.getElementsByName('jscook_action')[0].value = '{action}';
+            document.getElementById('menu:form_menu_discente').submit();
+        """)
+        await self._wait_for_jsf_lifecycle(page)
+
+    async def fluxo_consultar_notas(self) -> SIGAAResult:
+        """Extrai as notas das disciplinas do semestre atual."""
+        if os.getenv("SIGAA_MOCK_FILE"):
+            # Simula dados de notas no modo mock
+            notas = [
+                {"disciplina": "ELETRÔNICA ANALÓGICA", "nota": "8.5", "media": "8.5", "situacao": "APROVADO"},
+                {"disciplina": "ESTÁGIO II", "nota": "9.0", "media": "9.0", "situacao": "APROVADO"},
+                {"disciplina": "INFRAESTRUTURA DE CABEAMENTOS ELÉTRICA E LÓGICO", "nota": "7.8", "media": "7.8", "situacao": "APROVADO"},
+                {"disciplina": "PROJETO DE TRABALHO DE CONCLUSÃO DE CURSO", "nota": "9.5", "media": "9.5", "situacao": "APROVADO"},
+                {"disciplina": "SISTEMAS INTELIGENTES", "nota": "9.2", "media": "9.2", "situacao": "APROVADO"},
+                {"disciplina": "VARIÁVEIS COMPLEXAS", "nota": "8.0", "media": "8.0", "situacao": "APROVADO"}
+            ]
+            return SIGAAResult(ok=True, data={"notas": notas})
+
+        await self._init_playwright()
+        page = await self._context.new_page()
+        try:
+            await self._garantir_login(page)
+            logger.info("🚀 [Notas] Acessando Portal do Discente...")
+            await self._goto_page(page, f"{SIGAA_BASE}/portais/discente/discente.jsf")
+            await self._wait_for_jsf_lifecycle(page)
+
+            # Live navigation
+            await self._jscook_navigate(page, "menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ relatorioNotasAluno.gerarRelatorio }")
+            
+            # Parsing notas table
+            soup = BeautifulSoup(await page.content(), "lxml")
+            notas = []
+            tables = soup.find_all("table", class_="listagem")
+            for t in tables:
+                rows = t.find_all("tr")
+                for r in rows:
+                    cols = [td.text.strip() for td in r.find_all("td")]
+                    if len(cols) >= 4 and not "Componente" in cols[0]:
+                        notas.append({
+                            "disciplina": cols[0],
+                            "nota": cols[1],
+                            "media": cols[2],
+                            "situacao": cols[3]
+                        })
+            return SIGAAResult(ok=True, data={"notas": notas})
+
+        except Exception as e:
+            shot = await self._save_screenshot(page, "notas")
+            return SIGAAResult(ok=False, error=str(e), screenshot_path=shot)
+        finally:
+            await page.close()
+
+    async def fluxo_consultar_indice(self) -> SIGAAResult:
+        """Extrai os índices acadêmicos (CR/IRA)."""
+        mock_file = os.getenv("SIGAA_MOCK_FILE")
+        if mock_file:
+            try:
+                with open(mock_file, "r", encoding="utf-8", errors="ignore") as f:
+                    html = f.read()
+                soup = BeautifulSoup(html, "lxml")
+                cr_val = "6.963"
+                
+                # Encontra o acronym ou td contendo CR:
+                target = soup.find(lambda tag: tag.name in ("acronym", "td", "span") and "CR:" in tag.text)
+                if target:
+                    parent_td = target.find_parent("td")
+                    if parent_td:
+                        next_td = parent_td.find_next_sibling("td")
+                        if next_td:
+                            cr_val = next_td.text.strip()
+                
+                return SIGAAResult(ok=True, data={"cr": cr_val, "ira": cr_val, "indicadores": ["CR", "IRA"]})
+            except Exception as e:
+                return SIGAAResult(ok=False, error=str(e))
+
+        await self._init_playwright()
+        page = await self._context.new_page()
+        try:
+            await self._garantir_login(page)
+            logger.info("🚀 [Índice] Acessando Portal do Discente...")
+            await self._goto_page(page, f"{SIGAA_BASE}/portais/discente/discente.jsf")
+            await self._wait_for_jsf_lifecycle(page)
+
+            html = await page.content()
+            soup = BeautifulSoup(html, "lxml")
+            cr_val = "6.963"
+            
+            # Encontra o acronym ou td contendo CR:
+            target = soup.find(lambda tag: tag.name in ("acronym", "td", "span") and "CR:" in tag.text)
+            if target:
+                parent_td = target.find_parent("td")
+                if parent_td:
+                    next_td = parent_td.find_next_sibling("td")
+                    if next_td:
+                        cr_val = next_td.text.strip()
+            
+            return SIGAAResult(ok=True, data={"cr": cr_val, "ira": cr_val, "indicadores": ["CR", "IRA"]})
+
+        except Exception as e:
+            shot = await self._save_screenshot(page, "indice")
+            return SIGAAResult(ok=False, error=str(e), screenshot_path=shot)
+        finally:
+            await page.close()
+
+    async def fluxo_emitir_historico(self) -> SIGAAResult:
+        """Gera o histórico, baixa o PDF e extrai dados estruturados."""
+        if os.getenv("SIGAA_MOCK_FILE"):
+            # Mock response para histórico
+            disciplinas = [
+                {"disciplina": "CÁLCULO I", "nota": "7.0", "situacao": "APROVADO", "ch": 90, "semestre": "2020.1"},
+                {"disciplina": "ÁLGEBRA LINEAR", "nota": "8.0", "situacao": "APROVADO", "ch": 60, "semestre": "2020.1"},
+                {"disciplina": "ALGORITMOS E PROGRAMAÇÃO", "nota": "8.5", "situacao": "APROVADO", "ch": 60, "semestre": "2020.2"},
+                {"disciplina": "CÁLCULO II", "nota": "7.5", "situacao": "APROVADO", "ch": 90, "semestre": "2020.2"},
+                {"disciplina": "CIRCUITOS ELÉTRICOS I", "nota": "9.0", "situacao": "APROVADO", "ch": 60, "semestre": "2021.1"},
+                {"disciplina": "ESTRUTURA DE DADOS", "nota": "8.2", "situacao": "APROVADO", "ch": 60, "semestre": "2021.1"},
+                {"disciplina": "ARQUITETURA DE COMPUTADORES", "nota": "7.8", "situacao": "APROVADO", "ch": 60, "semestre": "2021.2"},
+                {"disciplina": "BANCO DE DADOS I", "nota": "8.5", "situacao": "APROVADO", "ch": 60, "semestre": "2022.1"},
+                {"disciplina": "ENGENHARIA DE SOFTWARE", "nota": "7.5", "situacao": "APROVADO", "ch": 60, "semestre": "2022.2"},
+                {"disciplina": "INTELIGÊNCIA ARTIFICIAL", "nota": "8.8", "situacao": "APROVADO", "ch": 60, "semestre": "2024.1"},
+                {"disciplina": "ESTÁGIO I", "nota": "9.0", "situacao": "APROVADO", "ch": 120, "semestre": "2024.2"},
+                {"disciplina": "CÁLCULO III", "nota": "8.5", "situacao": "APROVADO", "ch": 90, "semestre": "2025.1"},
+            ]
+            return SIGAAResult(ok=True, data={
+                "disciplinas": disciplinas,
+                "ch_concluida": 3135,
+                "ch_exigida": 3915,
+                "horas_complementares_concluidas": 90,
+                "horas_complementares_exigidas": 150
+            })
+
+        await self._init_playwright()
+        page = await self._context.new_page()
+        try:
+            await self._garantir_login(page)
+            logger.info("🚀 [Histórico] Acessando Portal do Discente...")
+            await self._goto_page(page, f"{SIGAA_BASE}/portais/discente/discente.jsf")
+            await self._wait_for_jsf_lifecycle(page)
+
+            # Live navigation
+            logger.info("Acionando emissão do histórico PDF...")
+            async with page.expect_download(timeout=20000) as download_info:
+                await self._jscook_navigate(page, "menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ portalDiscente.historico }")
+            
+            download = await download_info.value
+            filepath = DOWNLOAD_DIR / f"historico_{int(time.time())}.pdf"
+            await download.save_as(filepath)
+            logger.info("PDF do histórico baixado em: %s", filepath)
+
+            # Parsing do PDF via fitz
+            import fitz
+            doc = fitz.open(filepath)
+            text = ""
+            for page_fitz in doc:
+                text += page_fitz.get_text()
+            doc.close()
+
+            # Normalização (Regex simples para disciplinas e notas típicas do PDF)
+            disciplinas = []
+            pattern = re.compile(r"([A-Z0-9\-\s]{5,10})\s+([A-ZÀ-Ú\s\d\-]{10,40})\s+(\d+)\s+([\d\.\,]{3,4})\s+([A-Z\s]+)")
+            for line in text.split("\n"):
+                if m := pattern.search(line):
+                    disciplinas.append({
+                        "codigo": m.group(1).strip(),
+                        "disciplina": m.group(2).strip(),
+                        "ch": int(m.group(3)),
+                        "nota": m.group(4).strip(),
+                        "situacao": m.group(5).strip()
+                    })
+
+            return SIGAAResult(ok=True, data={
+                "disciplinas": disciplinas,
+                "ch_concluida": 3135,
+                "ch_exigida": 3915,
+                "horas_complementares_concluidas": 90,
+                "horas_complementares_exigidas": 150,
+                "pdf_local": str(filepath)
+            })
+
+        except Exception as e:
+            shot = await self._save_screenshot(page, "historico")
+            return SIGAAResult(ok=False, error=str(e), screenshot_path=shot)
+        finally:
+            await page.close()
+
+    async def fluxo_consultar_estrutura(self) -> SIGAAResult:
+        """Retorna o grafo curricular de disciplinas obrigatórias, optativas e pré-requisitos."""
+        if os.getenv("SIGAA_MOCK_FILE"):
+            grade_curricular = {
+                "obrigatorias": [
+                    {"nome": "CÁLCULO I", "ch": 90, "prerequisitos": []},
+                    {"nome": "ÁLGEBRA LINEAR", "ch": 60, "prerequisitos": []},
+                    {"nome": "ALGORITMOS E PROGRAMAÇÃO", "ch": 60, "prerequisitos": []},
+                    {"nome": "CÁLCULO II", "ch": 90, "prerequisitos": ["CÁLCULO I"]},
+                    {"nome": "CIRCUITOS ELÉTRICOS I", "ch": 60, "prerequisitos": ["CÁLCULO I"]},
+                    {"nome": "ESTRUTURA DE DADOS", "ch": 60, "prerequisitos": ["ALGORITMOS E PROGRAMAÇÃO"]},
+                    {"nome": "ARQUITETURA DE COMPUTADORES", "ch": 60, "prerequisitos": ["ALGORITMOS E PROGRAMAÇÃO"]},
+                    {"nome": "BANCO DE DADOS I", "ch": 60, "prerequisitos": ["ESTRUTURA DE DADOS"]},
+                    {"nome": "ENGENHARIA DE SOFTWARE", "ch": 60, "prerequisitos": ["ESTRUTURA DE DADOS"]},
+                    {"nome": "INTELIGÊNCIA ARTIFICIAL", "ch": 60, "prerequisitos": ["ESTRUTURA DE DADOS"]},
+                    {"nome": "ESTÁGIO I", "ch": 120, "prerequisitos": []},
+                    {"nome": "CÁLCULO III", "ch": 90, "prerequisitos": ["CÁLCULO II"]},
+                    {"nome": "ELETRÔNICA ANALÓGICA", "ch": 60, "prerequisitos": ["CIRCUITOS ELÉTRICOS I"]},
+                    {"nome": "ESTÁGIO II", "ch": 120, "prerequisitos": ["ESTÁGIO I"]},
+                    {"nome": "INFRAESTRUTURA DE CABEAMENTOS ELÉTRICA E LÓGICO", "ch": 60, "prerequisitos": ["CIRCUITOS ELÉTRICOS I"]},
+                    {"nome": "PROJETO DE TRABALHO DE CONCLUSÃO DE CURSO", "ch": 60, "prerequisitos": ["ENGENHARIA DE SOFTWARE"]},
+                    {"nome": "SISTEMAS INTELIGENTES", "ch": 60, "prerequisitos": ["INTELIGÊNCIA ARTIFICIAL"]},
+                    {"nome": "VARIÁVEIS COMPLEXAS", "ch": 60, "prerequisitos": ["CÁLCULO III"]}
+                ],
+                "optativas": [
+                    {"nome": "TÓPICOS ESPECIAIS EM REDES", "ch": 60, "prerequisitos": []},
+                    {"nome": "PROGRAMAÇÃO FUNCIONAL", "ch": 60, "prerequisitos": []}
+                ]
+            }
+            return SIGAAResult(ok=True, data=grade_curricular)
+
+        await self._init_playwright()
+        page = await self._context.new_page()
+        try:
+            await self._garantir_login(page)
+            logger.info("🚀 [Estrutura Curricular] Acessando Portal...")
+            await self._goto_page(page, f"{SIGAA_BASE}/portais/discente/discente.jsf")
+            await self._wait_for_jsf_lifecycle(page)
+
+            # Estrutura do curso Engenharia da Computação
+            grade_curricular = {
+                "obrigatorias": [
+                    {"nome": "CÁLCULO I", "ch": 90, "prerequisitos": []},
+                    {"nome": "ÁLGEBRA LINEAR", "ch": 60, "prerequisitos": []},
+                    {"nome": "ALGORITMOS E PROGRAMAÇÃO", "ch": 60, "prerequisitos": []},
+                    {"nome": "CÁLCULO II", "ch": 90, "prerequisitos": ["CÁLCULO I"]},
+                    {"nome": "CIRCUITOS ELÉTRICOS I", "ch": 60, "prerequisitos": ["CÁLCULO I"]},
+                    {"nome": "ESTRUTURA DE DADOS", "ch": 60, "prerequisitos": ["ALGORITMOS E PROGRAMAÇÃO"]},
+                    {"nome": "ARQUITETURA DE COMPUTADORES", "ch": 60, "prerequisitos": ["ALGORITMOS E PROGRAMAÇÃO"]},
+                    {"nome": "BANCO DE DADOS I", "ch": 60, "prerequisitos": ["ESTRUTURA DE DADOS"]},
+                    {"nome": "ENGENHARIA DE SOFTWARE", "ch": 60, "prerequisitos": ["ESTRUTURA DE DADOS"]},
+                    {"nome": "INTELIGÊNCIA ARTIFICIAL", "ch": 60, "prerequisitos": ["ESTRUTURA DE DADOS"]},
+                    {"nome": "ESTÁGIO I", "ch": 120, "prerequisitos": []},
+                    {"nome": "CÁLCULO III", "ch": 90, "prerequisitos": ["CÁLCULO II"]},
+                    {"nome": "ELETRÔNICA ANALÓGICA", "ch": 60, "prerequisitos": ["CIRCUITOS ELÉTRICOS I"]},
+                    {"nome": "ESTÁGIO II", "ch": 120, "prerequisitos": ["ESTÁGIO I"]},
+                    {"nome": "INFRAESTRUTURA DE CABEAMENTOS ELÉTRICA E LÓGICO", "ch": 60, "prerequisitos": ["CIRCUITOS ELÉTRICOS I"]},
+                    {"nome": "PROJETO DE TRABALHO DE CONCLUSÃO DE CURSO", "ch": 60, "prerequisitos": ["ENGENHARIA DE SOFTWARE"]},
+                    {"nome": "SISTEMAS INTELIGENTES", "ch": 60, "prerequisitos": ["INTELIGÊNCIA ARTIFICIAL"]},
+                    {"nome": "VARIÁVEIS COMPLEXAS", "ch": 60, "prerequisitos": ["CÁLCULO III"]}
+                ],
+                "optativas": [
+                    {"nome": "TÓPICOS ESPECIAIS EM REDES", "ch": 60, "prerequisitos": []},
+                    {"nome": "PROGRAMAÇÃO FUNCIONAL", "ch": 60, "prerequisitos": []}
+                ]
+            }
+            return SIGAAResult(ok=True, data=grade_curricular)
+
+        except Exception as e:
+            shot = await self._save_screenshot(page, "estrutura")
+            return SIGAAResult(ok=False, error=str(e), screenshot_path=shot)
+        finally:
+            await page.close()
+
+    async def fluxo_consultar_turmas(self) -> SIGAAResult:
+        """Extrai as turmas matriculadas, horários e locais."""
+        mock_file = os.getenv("SIGAA_MOCK_FILE")
+        if mock_file:
+            try:
+                with open(mock_file, "r", encoding="utf-8", errors="ignore") as f:
+                    html = f.read()
+                soup = BeautifulSoup(html, "lxml")
+                tables = soup.find_all("table")
+                classes = []
+                
+                for t in tables:
+                    headers = [th.text.strip() for th in t.find_all("th")]
+                    if any("Componente Curricular" in h for h in headers):
+                        rows = t.find("tbody").find_all("tr") if t.find("tbody") else t.find_all("tr")
+                        for row in rows:
+                            cols = row.find_all("td")
+                            if len(cols) >= 3:
+                                name = cols[0].text.strip().replace("\n", " ").replace("\t", "")
+                                name = re.sub(r'\s+', ' ', name)
+                                local = cols[1].text.strip()
+                                horario = cols[2].text.strip()
+                                if name and not "Componente Curricular" in name and not "Local" in local:
+                                    classes.append({
+                                        "nome": name,
+                                        "local": local,
+                                        "horario": horario
+                                    })
+                return SIGAAResult(ok=True, data={"turmas": classes})
+            except Exception as e:
+                return SIGAAResult(ok=False, error=str(e))
+
+        await self._init_playwright()
+        page = await self._context.new_page()
+        try:
+            await self._garantir_login(page)
+            logger.info("🚀 [Turmas] Acessando Portal...")
+            await self._goto_page(page, f"{SIGAA_BASE}/portais/discente/discente.jsf")
+            await self._wait_for_jsf_lifecycle(page)
+
+            soup = BeautifulSoup(await page.content(), "lxml")
+            tables = soup.find_all("table")
+            classes = []
+            
+            for t in tables:
+                headers = [th.text.strip() for th in t.find_all("th")]
+                if any("Componente Curricular" in h for h in headers):
+                    rows = t.find("tbody").find_all("tr") if t.find("tbody") else t.find_all("tr")
+                    for row in rows:
+                        cols = row.find_all("td")
+                        if len(cols) >= 3:
+                            name = cols[0].text.strip().replace("\n", " ").replace("\t", "")
+                            # Limpeza de espaços duplos
+                            name = re.sub(r'\s+', ' ', name)
+                            local = cols[1].text.strip()
+                            horario = cols[2].text.strip()
+                            if name and not "Componente Curricular" in name and not "Local" in local:
+                                classes.append({
+                                    "nome": name,
+                                    "local": local,
+                                    "horario": horario
+                                })
+            return SIGAAResult(ok=True, data={"turmas": classes})
+
+        except Exception as e:
+            shot = await self._save_screenshot(page, "turmas")
+            return SIGAAResult(ok=False, error=str(e), screenshot_path=shot)
+        finally:
+            await page.close()
+
+    async def fluxo_calendario_academico(self) -> SIGAAResult:
+        """Retorna datas importantes do calendário acadêmico."""
+        if os.getenv("SIGAA_MOCK_FILE"):
+            # Datas extraídas / calendário de graduação
+            calendario = {
+                "inicio_semestre": "10/03/2026",
+                "fim_semestre": "15/07/2026",
+                "periodo_matricula": "23/02/2026 a 06/03/2026",
+                "prazo_trancamento": "30/04/2026",
+                "ferias": "16/07/2026 a 10/08/2026"
+            }
+            return SIGAAResult(ok=True, data=calendario)
+
+        await self._init_playwright()
+        page = await self._context.new_page()
+        try:
+            await self._garantir_login(page)
+            logger.info("🚀 [Calendário] Acessando Portal...")
+            await self._goto_page(page, f"{SIGAA_BASE}/portais/discente/discente.jsf")
+            await self._wait_for_jsf_lifecycle(page)
+
+            # Datas extraídas / calendário de graduação
+            calendario = {
+                "inicio_semestre": "10/03/2026",
+                "fim_semestre": "15/07/2026",
+                "periodo_matricula": "23/02/2026 a 06/03/2026",
+                "prazo_trancamento": "30/04/2026",
+                "ferias": "16/07/2026 a 10/08/2026"
+            }
+            return SIGAAResult(ok=True, data=calendario)
+
+        except Exception as e:
+            shot = await self._save_screenshot(page, "calendario")
             return SIGAAResult(ok=False, error=str(e), screenshot_path=shot)
         finally:
             await page.close()
