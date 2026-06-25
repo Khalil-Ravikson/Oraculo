@@ -482,7 +482,23 @@ async def _enviar_resposta_whatsapp_async(task, synth_result: dict, delivery_ctx
     # 3. Envia mensagem via Gateway
     gateway = EvolutionAdapter()
     try:
-        await gateway.enviar_mensagem(chat_id, answer)
+        response = await gateway.enviar_mensagem(chat_id, answer)
+        
+        from src.memory.services.redis_memory_service import get_cognitive_memory
+        cog_mem = get_cognitive_memory()
+        user_id = sender or chat_id
+        
+        if not response: # Ou se status_code >= 400
+            # O whatsapp falhou
+            await cog_mem.save_task_result(
+                session_id=user_id,
+                worker=delivery_ctx.get("route", "GERAL"),
+                result="⚠️ A tarefa foi concluída, mas falhei ao entregar a mensagem final pelo WhatsApp."
+            )
+            # Limpa a memoria operacional
+            await cog_mem.clear_operational(user_id)
+            return {"status": "failed", "reason": "evolution_api_error"}
+
         logger.info("✅ [DELIVERY] Resposta entregue com sucesso via WhatsApp para %s", chat_id)
         
         # Salva turno de resposta assíncrona
@@ -490,7 +506,6 @@ async def _enviar_resposta_whatsapp_async(task, synth_result: dict, delivery_ctx
             from src.memory.container import create_memory_service
             mem_svc = create_memory_service()
             query = delivery_ctx.get("query") or ""
-            user_id = sender or chat_id
             if query and answer and status == "ok":
                 mem_svc.persistir_turno(
                     session_id=user_id,
@@ -500,6 +515,16 @@ async def _enviar_resposta_whatsapp_async(task, synth_result: dict, delivery_ctx
                     rota=delivery_ctx.get("route", "GERAL")
                 )
                 mem_svc.extrair_fatos_background(user_id=user_id, session_id=user_id)
+                
+                # Cognitive Memory Service update
+                await cog_mem.add_turn(user_id, "user", query)
+                await cog_mem.add_turn(user_id, "assistant", synth_result.get("answer") or answer)
+                await cog_mem.save_task_result(
+                    session_id=user_id,
+                    worker=delivery_ctx.get("route", "GERAL"),
+                    result=(synth_result.get("answer") or answer)[:400],
+                )
+                await cog_mem.clear_operational(user_id)
         except Exception as e:
             logger.warning("⚠️  Falha ao salvar turno assíncrono na memória: %s", e)
     except Exception as exc:

@@ -48,7 +48,7 @@ def _parse_evolution_payload(payload: dict) -> IncomingMessage | None:
 
         return IncomingMessage(
             remote_jid    = remote_jid,
-            sender_jid    = re.sub(r"[^\d]", "", sender_jid.split("@")[0]),
+            sender_jid    = re.sub(r"[^\d]", "", sender_jid.split("@")[0].split(":")[0]),
             text          = text,
             push_name     = data.get("pushName", ""),
             is_group      = is_group,

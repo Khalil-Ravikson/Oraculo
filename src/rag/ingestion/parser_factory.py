@@ -93,6 +93,10 @@ def _get_rapidocr_parser() -> "IDocumentParser":
     from src.infrastructure.adapters.parsers.rapidocr_adapter import RapidOcrAdapter
     return RapidOcrAdapter()
 
+def _get_calendar_llm_parser() -> "IDocumentParser":
+    from src.infrastructure.adapters.parsers.calendar_llm_adapter import CalendarLLMAdapter
+    return CalendarLLMAdapter()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Registry
 # ─────────────────────────────────────────────────────────────────────────────
@@ -106,6 +110,7 @@ _REGISTRY: dict[str, callable] = {
     "txt":           _get_txt_parser,
     "csv":           _get_csv_parser,
     "rapidocr":      _get_rapidocr_parser,
+    "calendar_llm":  _get_calendar_llm_parser,
 }
 
 # Mapeamento extensão → lista de parsers candidatos (ordem de preferência)

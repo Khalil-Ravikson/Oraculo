@@ -197,7 +197,7 @@ async def _sintetizar_fatos_flash(session_id: str, conversas: str) -> list[str]:
     try:
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         response = await client.aio.models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-2.5-flash",
             contents=_PROMPT_SINTETIZAR.format(conversas=conversas[:2000]),
             config=types.GenerateContentConfig(
                 temperature=0.05,

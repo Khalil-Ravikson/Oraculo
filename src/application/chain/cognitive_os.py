@@ -221,9 +221,62 @@ async def processar(
                 logger.error("Erro no parse do HITL state: %s", e)
                 r.delete(f"hitl:session:{session_id}")
 
-        # ── 1. Router ──────────────────────────────────────────────────────────
+        # ── 0b. Fast Path: comandos explícitos ───────────────────────────────────────
+        # ! @ $ → vai direto pro router semântico existente (sem gastar tokens no LLM)
+        # linguagem natural → LLMOrchestrator decide a ação
+        is_command = message.startswith(("!", "@", "$"))
+
+        if not is_command:
+            from src.application.routing.llm_orchestrator import orchestrate
+            from src.memory.services.redis_memory_service import get_cognitive_memory
+
+            mem = get_cognitive_memory()
+            orch_decision = await orchestrate(
+                message=message,
+                history_summary=await mem.format_history(session_id),
+                task_history=await mem.get_task_history(session_id),
+                user_context=user_context,
+            )
+
+            logger.info(f"⏱️ Tempo Orquestrador: {time.monotonic() - t0}s")
+
+            # Atualiza operational memory
+            await mem.set_operational(session_id, {
+                "last_action": orch_decision.action,
+                "route_hint": orch_decision.route_hint,
+                "status": "routing",
+            })
+
+            # check_status → responde com o histórico de task sem acionar RAG
+            if orch_decision.action == "check_status":
+                th = await mem.get_task_history(session_id)
+                answer = (
+                    f"Última tarefa: *{th.get('last_worker', '?')}*\n"
+                    f"Resultado: {th.get('last_result', 'Nenhuma tarefa anterior encontrada.')}"
+                ) if th else "Nenhuma tarefa anterior registrada nesta sessão."
+                ms = int((time.monotonic() - t0) * 1000)
+                return OSResult(answer=answer, plan_id="check_status",
+                                rota="GERAL", cache_hit=True, total_ms=ms, status="ok")
+
+            # reply_direct → greeting inline
+            if orch_decision.action == "reply_direct":
+                decision_rota = "GREETING"
+            # call_sigaa → força rota SIGAA
+            elif orch_decision.action == "call_sigaa":
+                decision_rota = "SIGAA"
+            else:
+                # call_rag → usa route_hint do orquestrador
+                decision_rota = orch_decision.route_hint or "GERAL"
+        else:
+            decision_rota = None  # deixa o Semantic Router decidir
+
+        # ── 1. Router (semântico, só para comandos ou quando o Orchestrator pediu RAG) ──
         from src.application.routing.semantic_router import rotear
         decision = await rotear(message, session_id, user_context)
+
+        # Orchestrator tem prioridade sobre o router semântico para linguagem natural
+        if not is_command and decision_rota:
+            decision.rota = decision_rota
 
         # Cache HIT: resposta imediata sem acionar workers
         if decision.cache_hit:
@@ -451,7 +504,11 @@ async def _despachar_workers(plan) -> None:
     from src.application.workers.worker_rag_search import worker_rag_search_task
     from src.application.workers.worker_synthesis import worker_synthesis_task
     from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
+    from src.memory.services.redis_memory_service import get_cognitive_memory
     
+    mem = get_cognitive_memory()
+    plan.context["task_history"] = await mem.get_task_history(plan.session_id)
+
     rag_tasks = []
     synthesis_step = None
     other_step = None

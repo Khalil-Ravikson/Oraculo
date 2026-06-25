@@ -39,7 +39,7 @@ class AudioService:
             b64 = base64.b64encode(audio_bytes).decode()
 
             response = await client.aio.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.5-flash",
                 contents=[
                     types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
                     "Transcreva o áudio acima para texto em português. "

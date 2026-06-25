@@ -90,7 +90,7 @@ async def _summarize(session_id: str) -> dict:
 
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         resp   = await client.aio.models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-2.5-flash",
             contents=f"Resuma esta conversa em 3-5 bullet points preservando fatos importantes:\n{conversa}",
             config=types.GenerateContentConfig(temperature=0.1, max_output_tokens=200),
         )

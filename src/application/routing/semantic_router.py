@@ -261,7 +261,7 @@ async def _classificar_com_flash(query: str, ctx: dict, session_id: str | None =
     try:
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         response = await client.aio.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",
+            model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_ROUTER,

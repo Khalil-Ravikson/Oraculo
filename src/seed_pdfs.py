@@ -21,9 +21,14 @@ async def main():
         if not os.path.exists(path):
             print(f"❌ Arquivo não encontrado: {path}")
             continue
-        print(f"🚀 Iniciando ingestao de {path} (tipo: {doc_type}) via PyMuPDF...")
+        print(f"🚀 Iniciando ingestao de {path} (tipo: {doc_type})...")
         try:
-            parser = PyMuPDFAdapter()
+            if doc_type == "calendario":
+                from src.infrastructure.adapters.parsers.calendar_llm_adapter import CalendarLLMAdapter
+                parser = CalendarLLMAdapter()
+            else:
+                parser = PyMuPDFAdapter()
+                
             chunker = ChunkerFactory.for_doc_type(doc_type)
             embeddings = get_embeddings()
             

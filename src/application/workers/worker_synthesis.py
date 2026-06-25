@@ -257,18 +257,37 @@ async def _sintetizar_async(
         if content:
             contexto_rag += f"\n[{i}. {source}]\n{content}\n"
 
-    # Monta prompt completo
-    parts = []
+    from datetime import datetime
+
+    # Injeta data/hora atual
+    now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+    parts = [f"<datetime>{now_str}</datetime>"]
+
+    # Injeta histórico de conversa (Layer 1)
+    if history:
+        parts.append(f"<historico_conversa>\n{history[-1500:]}\n</historico_conversa>")
+
+    # Injeta contexto da última tarefa (Layer 3)
+    task_ctx = plan_ctx.get("task_history", {})
+    if task_ctx.get("last_worker"):
+        parts.append(
+            f"<contexto_tarefa_anterior>\n"
+            f"Worker: {task_ctx['last_worker']}\n"
+            f"Resultado: {task_ctx.get('last_result', '')[:300]}\n"
+            f"</contexto_tarefa_anterior>"
+        )
+
+    # Aluno
     nome  = user_ctx.get("nome", "")
     curso = user_ctx.get("curso", "")
     if nome or curso:
-        parts.append(f"<contexto_aluno>Aluno: {nome}" +
-                     (f" | Curso: {curso}" if curso else "") + "</contexto_aluno>")
+        parts.append(f"<contexto_aluno>Aluno: {nome}"
+                     + (f" | Curso: {curso}" if curso else "") + "</contexto_aluno>")
+
     if fatos:
         parts.append("<perfil>\n" + "\n".join(f"- {f}" for f in fatos[:3]) + "\n</perfil>")
-    if history:
-        parts.append(f"<historico>\n{history[-1500:]}\n</historico>")
 
+    # RAG
     parts.append(f"<contexto_rag>\n{contexto_rag or 'Nenhuma informação encontrada.'}\n</contexto_rag>")
     parts.append(f"<pergunta>{query}</pergunta>")
 

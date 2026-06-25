@@ -63,7 +63,7 @@ class GraphExtractorService:
 
             client = genai.Client(api_key=settings.GEMINI_API_KEY)
             response = await client.aio.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.5-flash",
                 contents=_PROMPT.format(texto=text[:3000]),
                 config=types.GenerateContentConfig(
                     temperature=0.0,

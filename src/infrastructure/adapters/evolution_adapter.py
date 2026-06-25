@@ -200,6 +200,8 @@ def _clean_number(jid: str) -> str:
     """
     if "@g.us" in jid:
         return jid
-    # Remove @s.whatsapp.net e não-dígitos
+    # Remove @s.whatsapp.net, multi-device suffix e não-dígitos
     import re
-    return re.sub(r"\D", "", jid.split("@")[0])
+    base = jid.split("@")[0]
+    base = base.split(":")[0]  # Remove multi-device suffix (ex: 559899999999:17 -> 559899999999)
+    return re.sub(r"\D", "", base)
