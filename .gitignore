@@ -28,14 +28,15 @@ __pycache__/
 
 
 
-#dados
-dados/*.pdf
-dados/tmp/*.json
-dados/*.csv
-.oraculo_backup_20260401_163916
-# Adicionado 
-.env.test
-.pytest_cache/
+# Dados e Arquivos Temporários
 dados/
+tmp/
 *.pdf
 *.csv
+
+# Backups
+.oraculo_backup_*
+
+# Testes e Cache
+.env.test
+.pytest_cache/
