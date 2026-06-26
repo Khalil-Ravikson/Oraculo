@@ -94,6 +94,9 @@ class IngestionPipeline:
         if not texto.strip():
             return IngestionResult(source=source, success=False, error="Texto vazio após parsing.")
 
+        if doc_type.lower() == "calendario":
+            texto = self._enriquecer_texto_calendario(texto)
+
         # 2. Chunk
         try:
             chunks = await asyncio.to_thread(
@@ -172,6 +175,9 @@ class IngestionPipeline:
         if not texto.strip():
             return IngestionResult(source=source, success=False, error="Texto vazio.")
 
+        if doc_type.lower() == "calendario":
+            texto = self._enriquecer_texto_calendario(texto)
+
         try:
             chunks = self._chunker.chunk(texto, source=source, doc_type=doc_type)
         except Exception as exc:
@@ -217,6 +223,30 @@ class IngestionPipeline:
             chunker_used    = type(self._chunker).__name__,
             success         = saved > 0,
         )
+
+    @staticmethod
+    def _enriquecer_texto_calendario(texto: str) -> str:
+        """
+        Enriquece datas no formato DD/MM/YYYY adicionando a versão por extenso.
+        Isso ajuda o retriever vetorial a entender consultas como "fevereiro" ou "março".
+        """
+        import re
+        meses = {
+            "01": "janeiro", "02": "fevereiro", "03": "março", "04": "abril",
+            "05": "maio", "06": "junho", "07": "julho", "08": "agosto",
+            "09": "setembro", "10": "outubro", "11": "novembro", "12": "dezembro"
+        }
+        
+        def sub_data(match):
+            dia, mes, ano = match.groups()
+            nome_mes = meses.get(mes, "")
+            if nome_mes:
+                return f"{dia}/{mes}/{ano} ({dia} de {nome_mes} de {ano})"
+            return match.group(0)
+
+        # Regex para DD/MM/YYYY
+        padrao = r"\b(\d{2})/(\d{2})/(\d{4})\b"
+        return re.sub(padrao, sub_data, texto)
 
     @classmethod
     def build_auto(cls, file_path: str, doc_type: str = "geral") -> "IngestionPipeline":

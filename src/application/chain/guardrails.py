@@ -95,6 +95,12 @@ _SYSTEM_LEAK_MARKERS = [
     "system_instruction",
     "<informacao_documentos>",
     "<contexto_aluno>",
+    "<context>",
+    "</context>",
+    "<thinking>",
+    "</thinking>",
+    "<perfil>",
+    "</perfil>",
 ]
 
 

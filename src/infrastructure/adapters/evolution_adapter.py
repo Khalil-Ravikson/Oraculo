@@ -194,20 +194,19 @@ class EvolutionAdapter:
 
 def _clean_number(jid: str) -> str:
     """
-    Evolution v2.3 aceita:
-      - "559899999999"          → privado
-      - "999999999999999999@g.us" → grupo (manter como está)
+    Evolution v2.3 exige o remoteJid completo (com @s.whatsapp.net ou @g.us).
     """
-    if "@g.us" in jid:
+    if not jid:
+        return ""
+    if "@g.us" in jid or "@s.whatsapp.net" in jid:
         return jid
-    # Remove @s.whatsapp.net, multi-device suffix e não-dígitos
+        
+    # Remove não-dígitos para garantir um formato limpo antes de adicionar o sufixo
     import re
-    base = jid.split("@")[0]
-    base = base.split(":")[0]  # Remove multi-device suffix (ex: 559899999999:17 -> 559899999999)
-    numeros = re.sub(r"\D", "", base)
+    numeros = re.sub(r"\D", "", jid)
     
-    # Se não tiver DDI, força "55"
-    if not numeros.startswith("55"):
+    # Adiciona 55 apenas para números curtos (brasileiros padrão sem DDI)
+    if not numeros.startswith("55") and len(numeros) <= 11:
         numeros = f"55{numeros}"
         
-    return numeros
+    return f"{numeros}@s.whatsapp.net"

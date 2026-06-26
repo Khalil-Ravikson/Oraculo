@@ -225,11 +225,12 @@ async def processar(
                 else:
                     return OSResult(
                         answer="⚠️ Não entendi. Responda *SIM* para confirmar ou *NÃO* para cancelar.",
-                        plan_id="hitl_fast_path", rota="HITL", cache_hit=True, total_ms=10, status="ok"
+                        plan_id="hitl_fast_path", rota="HITL", cache_hit=True, total_ms=10, status="hitl_pending"
                     )
             except Exception as e:
                 logger.error("Erro no parse do HITL state: %s", e)
-                r.delete(f"hitl:session:{session_id}")
+                # Não deletamos a sessão em caso de erro para permitir nova tentativa do usuário
+
 
         # ── 0b. Fast Path: comandos explícitos ───────────────────────────────────────
         # ! @ $ → vai direto pro router semântico existente (sem gastar tokens no LLM)
@@ -294,7 +295,7 @@ async def processar(
         if not is_command and decision_rota:
             decision.rota = decision_rota
 
-        # Cache HIT: resposta imediata sem acionar workers
+        # Cache HIT da Rota: roteador identificou uma intenção rápida ou já cacheadas
         if decision.cache_hit:
             _OS_REQUESTS.labels(status="cache_hit").inc()
             cached_answer = _buscar_resposta_cached(decision)
@@ -309,6 +310,28 @@ async def processar(
                     total_ms=ms,
                     status="ok",
                 )
+
+        # 1b. Semantic Cache de Respostas (Cosine Similarity > 0.92)
+        if decision_rota or decision.rota:
+            rota_efetiva = decision_rota or decision.rota
+            if rota_efetiva not in ("SIGAA", "MEDIA_DOWNLOAD", "GREETING"):
+                from src.infrastructure.semantic_cache import SemanticCache
+                sem_cache = SemanticCache(threshold=0.92)
+                
+                cached_response = await sem_cache.get(query=message, rota=rota_efetiva)
+                if cached_response:
+                    _OS_REQUESTS.labels(status="cache_hit").inc()
+                    ms = int((time.monotonic() - t0) * 1000)
+                    _OS_LATENCY.observe(ms)
+                    return OSResult(
+                        answer=cached_response.get("answer", ""),
+                        plan_id="sem_cache",
+                        rota=rota_efetiva,
+                        cache_hit=True,
+                        total_ms=ms,
+                        status="ok",
+                        action_buttons=cached_response.get("action_buttons", [])
+                    )
 
         # ── Fast-Path GREETING ────────────────────────────────────────────────
         if decision.rota == "GREETING":

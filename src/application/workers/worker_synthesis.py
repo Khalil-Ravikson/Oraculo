@@ -63,6 +63,7 @@ POLL_INTERVAL          = 0.25  # segundos entre polls
 # ── System prompt ─────────────────────────────────────────────────────────────
 _SYSTEM_SYNTHESIS = """<system_instruction>
 Você é o Oráculo, o assistente virtual oficial da UEMA (Universidade Estadual do Maranhão) via WhatsApp.
+Seja direto, amigável e prestativo, assumindo o tom de um colega universitário experiente.
 Sua responsabilidade é responder à pergunta do usuário baseando-se estritamente nas informações oficiais fornecidas no bloco <contexto_rag> ou no <contexto_tarefa_anterior>.
 
 <regras_de_grounding>
@@ -205,6 +206,31 @@ async def _run_async(results: list, event: dict) -> dict:
         pass
 
     logger.info("✅ [SYNTH WORKER] Resposta gerada | %d chars | %dms", len(resposta), ms)
+    
+    # Salva no Semantic Cache se for uma rota passível de cache
+    if status == "ok" and plan_ctx.get("query"):
+        try:
+            from src.infrastructure.semantic_cache import SemanticCache
+            import asyncio
+            sc = SemanticCache(threshold=0.92)
+            # Como a síntese é chamada pelo planner, podemos não ter a rota no plan_ctx diretamente
+            # Vamos salvar na rota indicada, ou GERAL
+            rota_efetiva = plan_ctx.get("route", plan_ctx.get("route_hint", "GERAL"))
+            
+            # Não fazemos cache semântico de rotas de integração (SIGAA, MEDIA)
+            if rota_efetiva not in ("SIGAA", "MEDIA_DOWNLOAD", "GREETING"):
+                # Não podemos dar await diretamente se não quisermos bloquear
+                asyncio.create_task(
+                    sc.set(
+                        query=plan_ctx["query"],
+                        rota=rota_efetiva,
+                        response={"answer": resposta, "status": "ok"},
+                        ttl=3600
+                    )
+                )
+        except Exception as e:
+            logger.warning("⚠️ Falha ao salvar no SemanticCache: %s", e)
+
     return {"status": status, "plan_id": plan_id, "answer": resposta, "chars": len(resposta), "latency_ms": ms}
 
 
@@ -283,11 +309,12 @@ async def _sintetizar_async(
     if history:
         parts.append(f"<historico_conversa>\n{history[-1500:]}\n</historico_conversa>")
 
-    # Injeta contexto da última tarefa (Layer 3)
+    # Injeta contexto da última tarefa (Layer 3) na system instruction
     task_ctx = plan_ctx.get("task_history", {})
+    sys_instruction = _SYSTEM_SYNTHESIS
     if task_ctx.get("last_worker"):
-        parts.append(
-            f"<contexto_tarefa_anterior>\n"
+        sys_instruction += (
+            f"\n\n<contexto_tarefa_anterior>\n"
             f"Worker: {task_ctx['last_worker']}\n"
             f"Resultado: {task_ctx.get('last_result', '')[:300]}\n"
             f"</contexto_tarefa_anterior>"
@@ -314,7 +341,7 @@ async def _sintetizar_async(
         model=settings.GEMINI_MODEL,
         contents=prompt,
         config=types.GenerateContentConfig(
-            system_instruction=_SYSTEM_SYNTHESIS,
+            system_instruction=sys_instruction,
             temperature=0.2,
             max_output_tokens=max_tokens,
         ),

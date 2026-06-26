@@ -276,10 +276,22 @@ class ChunkerFactory:
         wiki_ctic         → semantic (documentação técnica)
         geral             → recursive
         """
-        if doc_type in ("calendario", "edital"):
+        if doc_type == "calendario":
+            kwargs.setdefault("chunk_size", 280)
             return ChunkerFactory.get("markdown", **kwargs)
-        if doc_type in ("wiki_ctic",) and embeddings:
-            return ChunkerFactory.get("semantic", embeddings_model=embeddings, **kwargs)
-        if doc_type in ("edital",) and not embeddings:
-            return ChunkerFactory.get("parent_child", parent_size=1200, child_size=300)
+        
+        if doc_type == "edital":
+            kwargs.setdefault("chunk_size", 500)
+            return ChunkerFactory.get("markdown", **kwargs)
+            
+        if doc_type == "contatos":
+            kwargs.setdefault("chunk_size", 250)
+            return ChunkerFactory.get("recursive", **kwargs)
+            
+        if doc_type in ("wiki", "wiki_ctic"):
+            kwargs.setdefault("chunk_size", 400)
+            if embeddings:
+                return ChunkerFactory.get("semantic", embeddings_model=embeddings, **kwargs)
+            return ChunkerFactory.get("recursive", **kwargs)
+            
         return ChunkerFactory.get("recursive", **kwargs)

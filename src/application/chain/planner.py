@@ -50,6 +50,13 @@ _PLANNER_LATENCY = Histogram(
     buckets=[50, 100, 250, 500, 1000, 2000],
 )
 
+# ── Configurações ─────────────────────────────────────────────────────────────
+MAX_TOKENS_POR_ROTA = {
+    "SIGAA": 1024,
+    "EDITAL": 800,
+}
+
+
 # ── Prompt do Planner ─────────────────────────────────────────────────────────
 _SYSTEM_PLANNER = """<system_instruction>
 Você é o Planner (Agente de Planejamento) do Oráculo UEMA.
@@ -176,6 +183,14 @@ async def criar_plano(
     except Exception as e:
         logger.error("❌ [PLANNER] Pro falhou, usando plano padrão: %s", e)
         plan = _plano_padrao_rag(rota, dag_hint, query, session_id, user_context, history, fatos or [])
+
+    # ── Enforce max tokens por rota para o Synthesis ──
+    max_t = MAX_TOKENS_POR_ROTA.get(rota.upper(), 512)
+    for step in plan.steps:
+        if step.get("worker") == "synthesis":
+            if "args" not in step:
+                step["args"] = {}
+            step["args"]["max_tokens"] = max_t
 
     ms = int((time.monotonic() - t0) * 1000)
     _PLANNER_LATENCY.observe(ms)

@@ -36,6 +36,19 @@ class GeminiProvider:
         self._model  = model   or settings.GEMINI_MODEL
         self._client = genai.Client(api_key=api_key or settings.GEMINI_API_KEY)
 
+    async def _with_backoff(self, func, *args, **kwargs):
+        from tenacity import retry, stop_after_attempt, wait_exponential
+
+        @retry(
+            stop=stop_after_attempt(4),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            reraise=True
+        )
+        async def _execute():
+            return await func(*args, **kwargs)
+
+        return await _execute()
+
     # ─── Geração de texto livre ───────────────────────────────────────────────
 
     async def gerar_resposta_async(
@@ -55,7 +68,8 @@ class GeminiProvider:
         )
 
         try:
-            response = await self._client.aio.models.generate_content(
+            response = await self._with_backoff(
+                self._client.aio.models.generate_content,
                 model    = self._model,
                 contents = prompt,
                 config   = config,
@@ -103,7 +117,8 @@ class GeminiProvider:
         )
 
         try:
-            response = await self._client.aio.models.generate_content(
+            response = await self._with_backoff(
+                self._client.aio.models.generate_content,
                 model    = self._model,
                 contents = prompt,
                 config   = config,

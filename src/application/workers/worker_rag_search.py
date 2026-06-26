@@ -56,6 +56,10 @@ async def _executar(task, event: dict) -> dict:
 
     logger.info("🔍 [RAG WORKER] plan=%s step=%s doc=%s", plan_id[:8], step_id, doc_type)
 
+    metadata_filter = {"ano": "2026"}
+    if doc_type and doc_type != "geral":
+        metadata_filter["tipo_doc"] = doc_type.capitalize()
+
     try:
         from src.infrastructure.services.rag_search_service import RAGSearchService
         svc = RAGSearchService()
@@ -67,6 +71,7 @@ async def _executar(task, event: dict) -> dict:
             rota=rota,
             fatos=fatos,
             historico=historico,
+            metadata_filter=metadata_filter,
         )
         chunks = result.data.get("chunks", [])
         status = "ok" if result.ok else "error"
