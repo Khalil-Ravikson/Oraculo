@@ -33,15 +33,6 @@ RESULTS_TTL          = 120
 STREAM_MAXLEN        = 5_000
 
 
-@celery_app.task(
-    name="worker_rag_search",
-    bind=True,
-    max_retries=2,
-    default_retry_delay=5,
-    queue="rag_search",
-)
-
-
 @register("rag_search") # NOVO DECORADOR
 @celery_app.task(name="worker_rag_search", bind=True, max_retries=3)
 def worker_rag_search_task(self, event: dict) -> dict:

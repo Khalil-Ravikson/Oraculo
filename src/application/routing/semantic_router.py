@@ -23,6 +23,7 @@ from dataclasses import dataclass
 import re
 from prometheus_client import Counter, Histogram
 from pydantic import BaseModel, Field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +267,7 @@ async def _classificar_com_flash(query: str, ctx: dict, session_id: str | None =
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_ROUTER,
                 temperature=0.0,
-                max_output_tokens=80,
+                max_output_tokens=150,
                 response_mime_type="application/json",
                 response_schema=RoutingDecision,
             ),

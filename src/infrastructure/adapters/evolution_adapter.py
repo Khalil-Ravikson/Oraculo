@@ -178,9 +178,9 @@ class EvolutionAdapter:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 resp = await client.post(url, headers=_headers(), json=body)
                 if resp.status_code >= 400:
-                    logger.warning(
-                        "⚠️  Evolution %s → HTTP %d | %s",
-                        url.split("/")[-2], resp.status_code, resp.text[:120],
+                    logger.error(
+                        "❌ Evolution %s → HTTP %d | Body: %s | Resp: %s",
+                        url.split("/")[-2], resp.status_code, body, resp.text[:200],
                     )
                     return False
             return True
@@ -204,4 +204,10 @@ def _clean_number(jid: str) -> str:
     import re
     base = jid.split("@")[0]
     base = base.split(":")[0]  # Remove multi-device suffix (ex: 559899999999:17 -> 559899999999)
-    return re.sub(r"\D", "", base)
+    numeros = re.sub(r"\D", "", base)
+    
+    # Se não tiver DDI, força "55"
+    if not numeros.startswith("55"):
+        numeros = f"55{numeros}"
+        
+    return numeros

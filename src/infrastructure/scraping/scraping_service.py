@@ -221,7 +221,7 @@ def build_default_scraping_service(
     from .cache import NoOpCache, ScraperCache
     from .retry import RetryConfig, RetryPolicy
     from .implementations.wikipedia_scraper import WikipediaScraper
-    from .implementations.generic_scraper import GenericHTTPScraper, UEMAWikiScraper
+    from .implementations.generic_scraper import GenericHTTPScraper
     from .implementations.uema_wiki_scraper import UEMAWikiScraper
     # Componentes compartilhados
     anti_block = AntiBlockManager(AntiBlockConfig(min_delay_s=0.3, max_delay_s=1.5))

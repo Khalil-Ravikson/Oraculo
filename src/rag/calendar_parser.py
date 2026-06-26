@@ -70,11 +70,11 @@ _RE_DATA_EXTENSO = re.compile(
     re.IGNORECASE,
 )
 
-# Padrão "EVENTO: ... | DATA: ... | SEM: ..."
+# Padrão "EVENTO: ... | DATA: ... | MES: ... | SEM: ..."
 _RE_EVENTO = re.compile(
     r"EVENTO:\s*(?P<nome>[^|]+)\|?\s*"
     r"DATA:\s*(?P<data>[^|]+)\|?\s*"
-    r"(?:SEM:\s*(?P<semestre>[^\n|]+))?",
+    r"(?:(?:MES:\s*[^|]+\|?\s*)?(?:SEM:\s*(?P<semestre>[^\n|]+))?)?",
     re.IGNORECASE,
 )
 

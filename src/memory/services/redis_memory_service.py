@@ -119,10 +119,6 @@ import weakref
 import asyncio
 
 # Usamos um WeakKeyDictionary em vez de uma variável global simples.
-# Isto garante que:
-# 1. Cada Event Loop (FastAPI vs Celery Task) tem a sua própria ligação Redis.
-# 2. Quando o Celery destrói o Event Loop no fim da task, a ligação ao Redis 
-#    é apagada automaticamente (evitando Memory Leaks).
 _instances = weakref.WeakKeyDictionary()
 
 def get_cognitive_memory() -> CognitiveMemoryService:

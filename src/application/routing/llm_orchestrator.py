@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-ACTIONS = ["reply_direct", "call_rag", "call_sigaa", "check_status"]
+ACTIONS = ["reply_direct", "call_rag", "call_sigaa", "check_status", "call_media"]
 
 
 class OrchestratorDecision(BaseModel):
@@ -24,7 +24,8 @@ Analise a mensagem e decida a ação correta:
 - reply_direct: saudação, agradecimento, pergunta sobre você mesmo
 - call_rag: dúvida sobre documentos, calendário, editais, contatos, wiki
 - call_sigaa: notas, histórico, turmas, CR, IRA, estrutura curricular
-- check_status: usuário pergunta sobre andamento de uma tarefa anterior
+- check_status: usuário pergunta sobre andamento, solicita o resultado de uma tarefa/requisição anterior, ou faz referência à 'requisição anterior'.
+- call_media: usuário pede para baixar um vídeo, áudio, criar sticker, ou processar mídia
 
 Responda apenas com o JSON estruturado."""
 
@@ -33,7 +34,9 @@ async def orchestrate(
     message: str,
     history_summary: str = "",
     task_history: dict | None = None,
+    operational_memory: dict | None = None,
     user_context: dict | None = None,
+    session_id: str = "",
 ) -> OrchestratorDecision:
     from src.infrastructure.settings import settings
     import google.genai as genai
@@ -45,7 +48,13 @@ async def orchestrate(
     if task_history and task_history.get("last_worker"):
         ctx_parts.append(
             f"[ÚLTIMA TAREFA]\nWorker: {task_history['last_worker']}\n"
-            f"Resultado: {task_history.get('last_result', '')[:200]}"
+            f"Resultado: {task_history.get('last_result', '')[:200]}\n"
+            f"(DICA: Se a pergunta for sobre o resultado acima, retorne a ação 'check_status')"
+        )
+    if operational_memory and operational_memory.get("last_action"):
+        ctx_parts.append(
+            f"[MEMÓRIA OPERACIONAL]\nÚltima ação: {operational_memory['last_action']}\n"
+            f"Se o usuário estiver apenas reagindo a uma informação prévia, considere 'reply_direct' ou 'check_status'."
         )
 
     prompt = "\n\n".join(ctx_parts + [f"Mensagem: \"{message[:300]}\""])
@@ -63,6 +72,13 @@ async def orchestrate(
                 response_schema=OrchestratorDecision,
             ),
         )
+        
+        usage = response.usage_metadata
+        if usage and session_id:
+            from src.infrastructure.redis_client import registrar_tokens_redis
+            registrar_tokens_redis(session_id,
+                                   usage.prompt_token_count or 0,
+                                   usage.candidates_token_count or 0)
         
         # 1. Extrair e limpar o texto (Remove blocos markdown ```json ... ```)
         raw_text = response.text or "{}"

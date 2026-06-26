@@ -68,6 +68,8 @@ COPY --chown=oraculo:oraculo static/     ./static/
 COPY --chown=oraculo:oraculo src/        ./src/
 
 USER oraculo
+RUN python -c "import os; os.environ['HF_HOME']='/home/oraculo/.cache/huggingface'; from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', max_length=512)"
+
 EXPOSE 9000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

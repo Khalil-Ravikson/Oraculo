@@ -267,6 +267,17 @@ def _publicar_resultado(event: dict, status: str, answer: str, data: Any = None)
         },
         maxlen=2000, approximate=True
     )
+    
+    # Save to Task History (Layer 3) so LLMOrchestrator can reference it later
+    try:
+        r.hset(f"task_hist:{session_id}", mapping={
+            "last_worker": "sigaa",
+            "last_result": answer[:400],
+            "ts": str(int(time.time())),
+        })
+        r.expire(f"task_hist:{session_id}", 1800)
+    except Exception:
+        pass
 
 async def _run_notas(event: dict) -> dict:
     from src.infrastructure.scraping.implementations.sigaa_agent import SIGAAAgent

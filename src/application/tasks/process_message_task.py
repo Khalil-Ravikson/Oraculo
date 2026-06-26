@@ -76,6 +76,7 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
     user_context = identidade.contexto_llm
     user_context["role"] = identidade.role
     user_context["is_admin"] = identidade.is_admin
+    user_context["chat_id"] = chat_id
 
     if not message.strip():
         logger.debug("⏭️  Mensagem vazia ignorada para %s", phone)
@@ -115,15 +116,7 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
                 success = True
                 return
 
-        # ── Monta contexto do usuário ──────────────────────────────────────────
-        user_context = {
-            "nome":      identity.get("nome", ""),
-            "curso":     identity.get("curso", ""),
-            "periodo":   identity.get("periodo", ""),
-            "matricula": identity.get("matricula", ""),
-            "centro":    identity.get("centro", ""),
-            "role":      identity.get("role", "estudante"),
-        }
+
 
         # ── Carrega contexto da memória ────────────────────────────────────────
         from src.memory.container import create_memory_service
@@ -142,6 +135,12 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
             history=mem_ctx.historico.texto_formatado if mem_ctx.historico else "",
             fatos=[f.texto for f in mem_ctx.fatos] if mem_ctx.fatos else []
         )
+        
+        # ── Guardrails (Saída) ────────────────────────────────────────────────────
+        from src.application.chain.guardrails import get_output_guardrail
+        if result_os.answer:
+            _, answer_final = get_output_guardrail().validate(result_os.answer, phone)
+            result_os.answer = answer_final
         
         # Adaptador (Mock) para manter a compatibilidade com a função _salvar_metrica
         result = type("R", (), {
@@ -364,6 +363,7 @@ async def _handle_message(**kwargs) -> None:
             "nome":  user_data.get("nome", "") if user_data else kwargs.get("push_name", "Estudante"),
             "curso": user_data.get("curso", "") if user_data else "Instituição",
             "role":  user_data.get("role", "student") if user_data else "guest",
+            "chat_id": chat_id,
         }
 
         # ── Humanização: simula "digitando..." no grupo ───────────────────────
@@ -389,6 +389,12 @@ async def _handle_message(**kwargs) -> None:
             history=mem_ctx.historico.texto_formatado if mem_ctx.historico else "",
             fatos=[f.texto for f in mem_ctx.fatos] if mem_ctx.fatos else []   
         )
+        
+        # ── Guardrails (Saída) ────────────────────────────────────────────────────
+        from src.application.chain.guardrails import get_output_guardrail
+        if result_os.answer:
+            _, answer_final = get_output_guardrail().validate(result_os.answer, sender)
+            result_os.answer = answer_final
         
         # Adaptador (Mock) para manter a compatibilidade
         result = type("R", (), {
@@ -461,10 +467,26 @@ async def _enviar_resposta_whatsapp_async(task, synth_result: dict, delivery_ctx
     
     plan_id = synth_result.get("plan_id") or delivery_ctx.get("plan_id")
     chat_id = delivery_ctx.get("chat_id")
+    
+    # ── Normalização de JID para evitar HTTP 400 na Evolution API ────────────
+    if chat_id and "@" not in chat_id:
+        # Remover caracteres não numéricos
+        import re
+        numeros = re.sub(r"\D", "", chat_id)
+        # Se não tiver DDI
+        if not numeros.startswith("55"):
+            numeros = f"55{numeros}"
+        chat_id = f"{numeros}@s.whatsapp.net"
+    
     sender = delivery_ctx.get("sender_jid")
     answer = synth_result.get("answer") or ""
     status = synth_result.get("status") or "ok"
     error = synth_result.get("error") or ""
+
+    # ── Guardrails (Saída - Async) ───────────────────────────────────────────
+    from src.application.chain.guardrails import get_output_guardrail
+    _, answer_final = get_output_guardrail().validate(answer, sender or chat_id)
+    answer = answer_final
 
     r = get_redis_text()
     
@@ -482,7 +504,34 @@ async def _enviar_resposta_whatsapp_async(task, synth_result: dict, delivery_ctx
     # 3. Envia mensagem via Gateway
     gateway = EvolutionAdapter()
     try:
-        response = await gateway.enviar_mensagem(chat_id, answer)
+        file_path = synth_result.get("file_path")
+        if file_path:
+            import os, base64, mimetypes
+            if os.path.exists(file_path):
+                mimetype, _ = mimetypes.guess_type(file_path)
+                mimetype = mimetype or "application/octet-stream"
+                media_type = synth_result.get("media_type", "document")
+                
+                with open(file_path, "rb") as f:
+                    b64_data = base64.b64encode(f.read()).decode("utf-8")
+                
+                response = await gateway.enviar_midia_url(
+                    number=chat_id,
+                    url=b64_data,
+                    mediatype=media_type,
+                    mimetype=mimetype,
+                    caption=answer,
+                    filename=os.path.basename(file_path)
+                )
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+            else:
+                logger.error("❌ Arquivo de mídia não encontrado: %s", file_path)
+                response = await gateway.enviar_mensagem(chat_id, answer)
+        else:
+            response = await gateway.enviar_mensagem(chat_id, answer)
         
         from src.memory.services.redis_memory_service import get_cognitive_memory
         cog_mem = get_cognitive_memory()

@@ -63,12 +63,13 @@ POLL_INTERVAL          = 0.25  # segundos entre polls
 # ── System prompt ─────────────────────────────────────────────────────────────
 _SYSTEM_SYNTHESIS = """<system_instruction>
 Você é o Oráculo, o assistente virtual oficial da UEMA (Universidade Estadual do Maranhão) via WhatsApp.
-Sua responsabilidade é responder à pergunta do usuário baseando-se estritamente nas informações oficiais fornecidas no bloco <contexto_rag>.
+Sua responsabilidade é responder à pergunta do usuário baseando-se estritamente nas informações oficiais fornecidas no bloco <contexto_rag> ou no <contexto_tarefa_anterior>.
 
 <regras_de_grounding>
-1. Grounding Estrito: Responda apenas com informações contidas no <contexto_rag> fornecido.
-2. Tratamento de Falha: Se a resposta factual para a pergunta do usuário NÃO estiver explicitada no <contexto_rag>, responda exatamente e apenas: "Não encontrei essa informação nos meus registros. Consulte o site oficial em uema.br."
-3. Proibição de Alucinações: NUNCA crie ou deduza datas, e-mails, telefones ou prazos que não estejam escritos nos documentos. Se faltar algum dado, use a recusa padrão.
+1. Grounding Estrito: Responda apenas com informações contidas no <contexto_rag> ou no <contexto_tarefa_anterior>.
+2. Validação de Memória Contínua: Antes de dizer que não encontrou informações, valide se o <contexto_tarefa_anterior> responde à pergunta ou mantém o sentido da conversa. A conversa é fluida, e o usuário pode estar apenas reagindo a uma informação já enviada.
+3. Tratamento de Falha: Se a resposta factual para a pergunta do usuário NÃO estiver explicitada no <contexto_rag> NEM no <contexto_tarefa_anterior>, responda exatamente e apenas: "Não encontrei essa informação nos meus registros. Consulte o site oficial em uema.br."
+4. Proibição de Alucinações: NUNCA crie ou deduza datas, e-mails, telefones ou prazos que não estejam escritos nos documentos. Se faltar algum dado, use a recusa padrão.
 </regras_de_grounding>
 
 <instrucoes_de_capabilities>
@@ -172,8 +173,10 @@ async def _run_async(results: list, event: dict) -> dict:
         )
         status = "ok"
     except Exception as exc:
-        logger.exception("❌ [SYNTH WORKER] Pro falhou: %s", exc)
-        resposta = "Tive dificuldades ao processar. Tente reformular sua pergunta. 🙏"
+        import google.genai.errors as genai_errors
+        is_api_err = isinstance(exc, genai_errors.APIError)
+        logger.exception("❌ [SYNTH WORKER] Pro falhou (API Error: %s): %s", is_api_err, exc)
+        resposta = "Estou enfrentando lentidão, mas anotei sua dúvida. Tente novamente em alguns instantes. 🙏"
         status = "error"
 
     ms = int((time.monotonic() - t_start) * 1000)
@@ -187,6 +190,19 @@ async def _run_async(results: list, event: dict) -> dict:
 
     # Salva a resposta também para o pool saber que o plan terminou
     _marcar_step_completo(plan_id, step_id, {"answer": resposta, "status": status})
+
+    # Salva resultado na Layer 3 (Task History)
+    try:
+        from src.infrastructure.redis_client import get_redis_text
+        _r = get_redis_text()
+        _r.hset(f"task_hist:{session_id}", mapping={
+            "last_worker": "synthesis",
+            "last_result": resposta[:400],
+            "ts": str(int(time.time())),
+        })
+        _r.expire(f"task_hist:{session_id}", 1800)
+    except Exception:
+        pass
 
     logger.info("✅ [SYNTH WORKER] Resposta gerada | %d chars | %dms", len(resposta), ms)
     return {"status": status, "plan_id": plan_id, "answer": resposta, "chars": len(resposta), "latency_ms": ms}

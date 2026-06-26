@@ -79,22 +79,29 @@ class MessageRouter:
             return RouterDecision(DispatchTarget.IGNORE, reason="grupo_estranho_ignorado")
 
         # Se a mensagem for no PRIVADO, mas a pessoa NÃO FOR ADMIN -> BLOQUEIA
-        # Isso impede que seus amigos, familiares ou curiosos ativem a IA
         if not is_group and not is_admin:
             return RouterDecision(DispatchTarget.IGNORE, reason="privado_bloqueado_no_beta")
 
-        # ── 1. Gatilhos dentro do Grupo Permitido ─────────────────────────────
+        # ── 1. Funil de Cadastro (Máxima Prioridade) ─────────────────────────
+        if in_register_mode:
+            # Mensagem é parte do fluxo de cadastro — não roteia para outros targets
+            return RouterDecision(DispatchTarget.REGISTER_MODE, text=text)
+
+        if not is_registered:
+            return RouterDecision(DispatchTarget.REGISTER_MODE, text=text)
+
+        # ── 2. Gatilhos dentro do Grupo Permitido ─────────────────────────────
         if is_group:
             # Dentro do grupo: só responde a comandos ($, !) ou se o bot for mencionado (@oraculo)
             if not (text.startswith("$") or text.startswith("!") or
                     self._RE_MENTION.search(text)):
                 return RouterDecision(DispatchTarget.IGNORE, reason="sem_trigger_grupo")
 
-        # ── 2. Mensagem inútil em privado ─────────────────────────────────────
+        # ── 3. Mensagem inútil em privado ─────────────────────────────────────
         if not is_group and self._RE_USELESS.match(text):
             return RouterDecision(DispatchTarget.IGNORE, reason="mensagem_inutil")
 
-        # ── 3. Admin Commands ($) — não requer cadastro ───────────────────────
+        # ── 4. Admin Commands ($) — não requer cadastro ───────────────────────
         if text.startswith("$"):
             if not is_admin:
                 return RouterDecision(DispatchTarget.IGNORE, reason="nao_e_admin")
@@ -106,14 +113,6 @@ class MessageRouter:
                     text=(m.group(2) or "").strip(),
                 )
             return RouterDecision(DispatchTarget.IGNORE, reason="admin_cmd_invalido")
-
-        # ── 4. Funil de Cadastro ──────────────────────────────────────────────
-        if in_register_mode:
-            # Mensagem é parte do fluxo de cadastro — não roteia para outros targets
-            return RouterDecision(DispatchTarget.REGISTER_MODE, text=text)
-
-        if not is_registered:
-            return RouterDecision(DispatchTarget.REGISTER_MODE, text=text)
 
         # ── 5. Public Commands (!) ────────────────────────────────────────────
         if text.startswith("!"):

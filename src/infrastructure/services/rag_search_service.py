@@ -362,10 +362,10 @@ class RAGSearchService:
                 doc["rrf_score"] = score
                 fused_results.append(doc)
 
-            # 5. Deduplicação por conteúdo textual (fingerprint de 100 caracteres)
+            # 5. Deduplicação por conteúdo textual (evita chunks duplicados)
             vistos = {}
             for doc in fused_results:
-                fingerprint = doc.get("content", "")[:100].strip().lower()
+                fingerprint = doc.get("content", "").strip().lower()
                 if fingerprint not in vistos or doc["rrf_score"] > vistos[fingerprint]["rrf_score"]:
                     vistos[fingerprint] = doc
             
@@ -389,7 +389,7 @@ class RAGSearchService:
                 # Deduplica e ordena os resultados do step-back
                 vistos_sb = {}
                 for doc in sb_resultados:
-                    fingerprint = doc.get("content", "")[:100].strip().lower()
+                    fingerprint = doc.get("content", "").strip().lower()
                     if fingerprint not in vistos_sb or doc.get("rrf_score", 0) > vistos_sb[fingerprint].get("rrf_score", 0):
                         vistos_sb[fingerprint] = doc
                 resultados = sorted(vistos_sb.values(), key=lambda d: d.get("rrf_score", 0), reverse=True)

@@ -43,13 +43,14 @@ Você é um extrator de dados altamente preciso.
 Abaixo está o texto bruto extraído de um PDF de um Calendário Acadêmico (as colunas podem estar desordenadas ou os números soltos).
 Sua tarefa é reconstruir os eventos acadêmicos linha por linha EXATAMENTE no seguinte formato:
 
-EVENTO: <Nome do Evento> | DATA: <DD/MM/YYYY a DD/MM/YYYY> | SEM: <Semestre>
+EVENTO: <Nome do Evento> | DATA: <DD/MM/YYYY a DD/MM/YYYY> | MES: <Nome do Mês por Extenso e Ano> | SEM: <Semestre>
 
 Regras:
 1. Extraia APENAS eventos válidos com datas legíveis.
 2. Não inclua texto extra, cabeçalhos ou explicações. APENAS as linhas no formato especificado.
 3. Se um evento for apenas em um dia, a data deve ser DD/MM/YYYY. Se for um período, use DD/MM/YYYY a DD/MM/YYYY.
-4. Se o semestre não for evidente, deixe SEM: 2026.1 ou omita a tag SEM.
+4. Adicione a tag MES: contendo o nome do mês por extenso e o ano correspondente à data (Ex: MES: Janeiro de 2026). Se for um período pegando dois meses, inclua ambos (Ex: MES: Fevereiro e Março de 2026).
+5. Se o semestre não for evidente, deixe SEM: 2026.1 ou omita a tag SEM.
 
 Texto Bruto:
 {raw_text[:30000]}  # Limite seguro de tamanho

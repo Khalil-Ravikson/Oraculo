@@ -125,9 +125,21 @@ celery_app.autodiscover_tasks([
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Signal: worker_ready — Recovery de XPENDING no startup
-# ─────────────────────────────────────────────────────────────────────────────
+from celery.signals import worker_ready, worker_shutdown, worker_process_init
+
+@worker_process_init.connect
+def on_worker_process_init(**kwargs):
+    """
+    Executado quando um novo worker child process é iniciado (prefork).
+    Carrega modelos de ML em memória no boot para eliminar latência nas tasks.
+    """
+    try:
+        from src.application.chain.reranker import get_reranker
+        logger.info("⏳ [CELERY] Pre-loading ML models on process init...")
+        get_reranker()
+        logger.info("✅ [CELERY] ML models pre-loaded successfully.")
+    except Exception as e:
+        logger.error("❌ [CELERY] Failed to pre-load models: %s", e)
 
 @worker_ready.connect
 def on_worker_ready(sender=None, **kwargs):

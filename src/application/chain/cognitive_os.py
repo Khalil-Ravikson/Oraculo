@@ -79,6 +79,16 @@ async def processar(
     t0 = time.monotonic()
     fatos = fatos or []
 
+    # ── Guardrails (Entrada) ──────────────────────────────────────────────────
+    from src.application.chain.guardrails import get_input_guardrail
+    from src.infrastructure.redis_client import get_redis_text
+    r_text = get_redis_text()
+    ok, text_or_error = get_input_guardrail().validate(message, session_id, r_text)
+    if not ok:
+        return OSResult(answer=text_or_error, plan_id="", rota="BLOCKED",
+                        cache_hit=False, total_ms=0, status="error")
+    message = text_or_error  # sanitizado
+
     try:
         # ── 0. HITL Interception ──────────────────────────────────────────────────
         from src.infrastructure.redis_client import get_redis_text
@@ -137,7 +147,7 @@ async def processar(
                     if fn:
                         delivery_ctx = {
                             "plan_id": event.get("plan_id", "hitl_fast_path"),
-                            "chat_id": session_id,
+                            "chat_id": user_context.get("chat_id") or session_id,
                             "sender_jid": session_id,
                             "route": "SIGAA",
                             "query": event.get("query", ""),
@@ -186,7 +196,7 @@ async def processar(
                     if fn:
                         delivery_ctx = {
                             "plan_id": event.get("plan_id", "hitl_fast_path"),
-                            "chat_id": session_id,
+                            "chat_id": user_context.get("chat_id") or session_id,
                             "sender_jid": session_id,
                             "route": "SIGAA" if (action.startswith("sigaa_") or "sigaa" in worker_name) else "MEDIA_DOWNLOAD",
                             "query": event.get("query", ""),
@@ -231,11 +241,15 @@ async def processar(
             from src.memory.services.redis_memory_service import get_cognitive_memory
 
             mem = get_cognitive_memory()
+            op_mem = await mem.get_operational(session_id)
+            
             orch_decision = await orchestrate(
                 message=message,
                 history_summary=await mem.format_history(session_id),
                 task_history=await mem.get_task_history(session_id),
+                operational_memory=op_mem,
                 user_context=user_context,
+                session_id=session_id,
             )
 
             logger.info(f"⏱️ Tempo Orquestrador: {time.monotonic() - t0}s")
@@ -264,6 +278,8 @@ async def processar(
             # call_sigaa → força rota SIGAA
             elif orch_decision.action == "call_sigaa":
                 decision_rota = "SIGAA"
+            elif orch_decision.action == "call_media":
+                decision_rota = "MEDIA_DOWNLOAD"
             else:
                 # call_rag → usa route_hint do orquestrador
                 decision_rota = orch_decision.route_hint or "GERAL"
@@ -302,11 +318,18 @@ async def processar(
                 "Oi! Em que posso ajudá-lo(a) hoje?",
                 "Olá! Pode perguntar sobre calendário, editais, contatos ou suporte. 🎓",
             ]
+            resposta = random.choice(saudacoes)
+            
+            from src.memory.services.redis_memory_service import get_cognitive_memory
+            mem = get_cognitive_memory()
+            await mem.add_turn(session_id, "user", message)
+            await mem.add_turn(session_id, "assistant", resposta)
+            
             ms = int((time.monotonic() - t0) * 1000)
             _OS_LATENCY.observe(ms)
             _OS_REQUESTS.labels(status="ok").inc()
             return OSResult(
-                answer=random.choice(saudacoes),
+                answer=resposta,
                 plan_id="fast_greeting",
                 rota=decision.rota,
                 cache_hit=False,
@@ -314,37 +337,57 @@ async def processar(
                 status="ok"
             )
 
-        # ── Fast-Path MEDIA_DOWNLOAD HITL ─────────────────────────────────────
+        # ── Fast-Path MEDIA_DOWNLOAD ──────────────────────────────────────────
         if decision.rota == "MEDIA_DOWNLOAD":
-            url = decision.dag_hint.get("url", message)
+            # Extrair URL da mensagem (se houver)
+            import re
+            urls = re.findall(r'(https?://\S+)', message)
+            url = urls[0] if urls else message
             
-            # Salvar intenção de HITL no Redis
-            hitl_state = {
-                "action": "media_download",
-                "worker_name": decision.dag_hint["steps"][0],
-                "event": {
-                    "plan_id": "fast_media",
+            from src.application.workers.registry import _autodiscover_workers, _REGISTRY
+            from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
+            from celery import chain
+            
+            _autodiscover_workers()
+            worker_name = "insta_download" if "instagram" in url.lower() else "ytb_download"
+            fn = _REGISTRY.get(worker_name)
+            
+            plan_id = f"fast_media_{int(time.time())}"
+            if fn:
+                event = {
+                    "plan_id": plan_id,
                     "session_id": session_id,
                     "step_id": "s1",
                     "url": url,
-                    "hitl_confirmed": True,
+                    "query": message,
+                    "hitl_confirmed": True
                 }
-            }
-            # Reusa o 'r' já instanciado no bloco de HITL Interception
-            r.setex(f"hitl:session:{session_id}", 300, json.dumps(hitl_state, ensure_ascii=False))
+                delivery_ctx = {
+                    "plan_id": plan_id,
+                    "chat_id": user_context.get("chat_id") or session_id,
+                    "sender_jid": session_id,
+                    "route": "MEDIA_DOWNLOAD",
+                    "query": message,
+                }
+                workflow = chain(
+                    fn.s(event),
+                    enviar_resposta_whatsapp_task.s(delivery_ctx)
+                )
+                workflow.apply_async()
+            else:
+                logger.error("❌ worker '%s' não encontrado no Registry.", worker_name)
 
             ms = int((time.monotonic() - t0) * 1000)
             _OS_LATENCY.observe(ms)
             _OS_REQUESTS.labels(status="ok").inc()
 
             return OSResult(
-                answer="🎥 **Mídia detectada!**\n\nIdentifiquei um link suportado.\nDeseja iniciar o download deste arquivo agora?",
-                plan_id="fast_media",
+                answer="📥 **Download iniciado!**\nO arquivo será enviado aqui em instantes. Aguarde...",
+                plan_id=plan_id,
                 rota=decision.rota,
-                cache_hit=False,
+                cache_hit=True,
                 total_ms=ms,
-                status="hitl_pending",
-                action_buttons=[{"label": "Sim, baixar", "value": "sim"}, {"label": "Não", "value": "nao"}]
+                status="ok"
             )
 
         # ── Fast-Path SIGAA HITL ──────────────────────────────────────────────
@@ -391,7 +434,7 @@ async def processar(
                         }
                         delivery_ctx = {
                             "plan_id": event["plan_id"],
-                            "chat_id": session_id,
+                            "chat_id": user_context.get("chat_id") or session_id,
                             "sender_jid": session_id,
                             "route": "SIGAA",
                             "query": message,
@@ -504,10 +547,11 @@ async def _despachar_workers(plan) -> None:
     from src.application.workers.worker_rag_search import worker_rag_search_task
     from src.application.workers.worker_synthesis import worker_synthesis_task
     from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
-    from src.memory.services.redis_memory_service import get_cognitive_memory
-    
-    mem = get_cognitive_memory()
-    plan.context["task_history"] = await mem.get_task_history(plan.session_id)
+    from src.infrastructure.redis_client import get_redis_text
+    import json as _json
+    _r = get_redis_text()
+    th = _r.hgetall(f"task_hist:{plan.session_id}")
+    plan.context["task_history"] = dict(th) if th else {}
 
     rag_tasks = []
     synthesis_step = None
@@ -693,6 +737,7 @@ def _iniciar_crud_hitl(plan, args: dict) -> None:
             "args":        args,
             "status":      "pending",
             "expires_at":  int(_time.time()) + 300,
+            "chat_id":     plan.context["user_context"].get("chat_id"),
         }
         r.setex(f"hitl:session:{plan.session_id}", 300, json.dumps(hitl_data, ensure_ascii=False))
 

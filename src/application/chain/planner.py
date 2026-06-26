@@ -253,7 +253,7 @@ Gere o plano de execução:"""
         context={
             "query": query,
             "user_context": user_context,
-            "history": history[-500:] if history else "",
+            "history": history[-1500:] if history else "",
             "fatos": fatos[:5],
         },
     )
@@ -279,7 +279,7 @@ def _plano_padrao_rag(
         context={
             "query": query,
             "user_context": user_context,
-            "history": history[-500:] if history else "",
+            "history": history[-1500:] if history else "",
             "fatos": fatos[:5],
         },
     )

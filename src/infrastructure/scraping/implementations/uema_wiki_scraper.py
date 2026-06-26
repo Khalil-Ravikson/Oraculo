@@ -33,14 +33,14 @@ class UEMAWikiScraper(BaseScraper):
             r.raise_for_status()
             return r.text
         
-    async def parse(self, raw_content: str, url: str) -> ScrapedDocument:
+    def parse(self, raw_content: str, url: str) -> ScrapedDocument:
         from bs4 import BeautifulSoup
         import re
         soup = BeautifulSoup(raw_content, "lxml")
 
         # 1. Extrair Links Internos ANTES de destruir o HTML (para o Crawler continuar)
         div_page = soup.find("div", class_="page") or soup.find("div", id="dokuwiki__content") or soup.find("body")
-        links_internos = self._extrair_links(div_page, request.url) if div_page else []
+        links_internos = self._extrair_links(div_page, url) if div_page else []
 
         # 2. Remoção Agressiva de Ruído
         for sel in ["script", "style", "nav", "footer", "header", "aside", "iframe", "noscript", "form", "button", "input", "meta", "link"]:
@@ -51,12 +51,12 @@ class UEMAWikiScraper(BaseScraper):
 
         main = soup.find("div", class_="page") or soup.find("div", id="dokuwiki__content") or soup.find("body")
         
-        page_id = self._url_para_page_id(request.url)
+        page_id = self._url_para_page_id(url)
         title_node = soup.find("h1") or soup.find("title")
         title = title_node.get_text(strip=True) if title_node else f"Wiki CTIC: {page_id}"
 
         if not main:
-            return ScrapedDocument(url=request.url, title=title, content="", source_name=self.source_name, doc_type="wiki_ctic")
+            return ScrapedDocument(url=url, title=title, content="", source_name=self.source_name, doc_type="wiki_ctic")
 
         # 3. Converter para Markdown
         lines = []
@@ -72,7 +72,7 @@ class UEMAWikiScraper(BaseScraper):
         markdown = re.sub(r"\n{3,}", "\n\n", markdown).strip()
 
         return ScrapedDocument(
-            url=request.url,
+            url=url,
             content=markdown,
             title=title,
             doc_type="wiki_ctic",

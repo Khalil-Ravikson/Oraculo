@@ -82,11 +82,16 @@ async def _startup(settings) -> None:
         await inicializar_indices()
         logger.info("✅ Índices Redis inicializados (SVS-VAMANA)")
         
-        # 👇 ADICIONE ESTA IMPORTAÇÃO E CHAMADA AQUI 👇
         from src.infrastructure.services.intent_seeder_service import IntentSeederService
         seeder = IntentSeederService()
         await seeder.seed()
         logger.info("🌱 [INTENT SEEDER] Configurações e vetores carregados no Redis com sucesso!")
+        
+        # Resetar flag de Reranker Desabilitado no boot
+        from src.infrastructure.redis_client import get_redis_text
+        r = get_redis_text()
+        r.delete("reranker:status")
+        logger.info("✅ Status do Reranker resetado no Redis (pronto para tentar carregar)")
         
     except Exception as exc:
         logger.error("❌ Falha crítica no Redis/Seeder: %s", exc)
