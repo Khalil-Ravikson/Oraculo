@@ -83,7 +83,11 @@ async def processar(
     from src.application.chain.guardrails import get_input_guardrail
     from src.infrastructure.redis_client import get_redis_text
     r_text = get_redis_text()
-    ok, text_or_error = get_input_guardrail().validate(message, session_id, r_text)
+    
+    def _validate_sync():
+        return get_input_guardrail().validate(message, session_id, r_text)
+        
+    ok, text_or_error = await asyncio.to_thread(_validate_sync)
     if not ok:
         return OSResult(answer=text_or_error, plan_id="", rota="BLOCKED",
                         cache_hit=False, total_ms=0, status="error")
@@ -93,7 +97,7 @@ async def processar(
         # ── 0. HITL Interception ──────────────────────────────────────────────────
         from src.infrastructure.redis_client import get_redis_text
         r = get_redis_text()
-        hitl_state_raw = r.get(f"hitl:session:{session_id}")
+        hitl_state_raw = await asyncio.to_thread(r.get, f"hitl:session:{session_id}")
         if hitl_state_raw:
             try:
                 hitl_state = json.loads(hitl_state_raw if isinstance(hitl_state_raw, str) else hitl_state_raw.decode())
@@ -104,6 +108,7 @@ async def processar(
                     # Limpa e valida CPF
                     cpf = re.sub(r"\D", "", msg_clean)
                     if len(cpf) != 11:
+                        # IMPORTANTE: NÃO deletar o estado HITL aqui.
                         return OSResult(
                             answer="❌ **CPF Inválido!**\nO CPF deve conter exatamente 11 dígitos numéricos. Por favor, informe seu CPF novamente:",
                             plan_id=hitl_state.get("event", {}).get("plan_id", "sigaa_auth"),
@@ -115,7 +120,7 @@ async def processar(
                     # Avança para coletar senha
                     hitl_state["action"] = "sigaa_collect_password"
                     hitl_state["cpf"] = cpf
-                    r.setex(f"hitl:session:{session_id}", 300, json.dumps(hitl_state, ensure_ascii=False))
+                    await asyncio.to_thread(r.setex, f"hitl:session:{session_id}", 300, json.dumps(hitl_state, ensure_ascii=False))
                     return OSResult(
                         answer="🔐 **CPF recebido!**\nAgora, por favor, envie sua **senha do SIGAA** para iniciarmos o acesso (sua senha é transmitida de forma segura e não será salva persistentemente):",
                         plan_id=hitl_state.get("event", {}).get("plan_id", "sigaa_auth"),
@@ -131,12 +136,15 @@ async def processar(
                     target_action = hitl_state.get("target_action")
                     event = hitl_state.get("event", {})
                     
-                    # Anexa credenciais ao event de forma temporária
+                    # Anexa credenciais ao event de forma temporária usando um token
                     event["login"] = cpf
-                    event["senha"] = senha
+                    import uuid
+                    auth_token = str(uuid.uuid4())
+                    await asyncio.to_thread(r.setex, f"hitl:auth_token:{auth_token}", 300, json.dumps({"senha": senha}))
+                    event["auth_token"] = auth_token
                     event["hitl_confirmed"] = True
                     
-                    r.delete(f"hitl:session:{session_id}")
+                    await asyncio.to_thread(r.delete, f"hitl:session:{session_id}")
                     
                     from src.application.workers.registry import _REGISTRY, _autodiscover_workers
                     from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
@@ -182,7 +190,7 @@ async def processar(
                 # Fallback para confirmações SIM/NAO legadas (ex: baixar mídia)
                 msg_lower = msg_clean.lower()
                 if msg_lower in ("sim", "s", "yes", "y", "confirmo", "ok"):
-                    r.delete(f"hitl:session:{session_id}")
+                    await asyncio.to_thread(r.delete, f"hitl:session:{session_id}")
                     action = hitl_state.get("action")
                     worker_name = hitl_state.get("worker_name")
                     event = hitl_state.get("event", {})
@@ -198,7 +206,7 @@ async def processar(
                             "plan_id": event.get("plan_id", "hitl_fast_path"),
                             "chat_id": user_context.get("chat_id") or session_id,
                             "sender_jid": session_id,
-                            "route": "SIGAA" if (action.startswith("sigaa_") or "sigaa" in worker_name) else "MEDIA_DOWNLOAD",
+                            "route": "SIGAA" if (action and (action.startswith("sigaa_") or "sigaa" in worker_name)) else "MEDIA_DOWNLOAD",
                             "query": event.get("query", ""),
                         }
                         workflow = chain(
@@ -211,13 +219,13 @@ async def processar(
                         return OSResult(
                             answer=f"✅ Ação **{desc}** confirmada! Enviada para processamento no servidor Celery.",
                             plan_id=event.get("plan_id", "hitl_fast_path"),
-                            rota="SIGAA" if (action.startswith("sigaa_") or "sigaa" in worker_name) else "MEDIA_DOWNLOAD",
+                            rota="SIGAA" if (action and (action.startswith("sigaa_") or "sigaa" in worker_name)) else "MEDIA_DOWNLOAD",
                             cache_hit=True,
                             total_ms=10,
                             status="ok"
                         )
                 elif msg_lower in ("nao", "não", "n", "no", "cancela", "cancelar"):
-                    r.delete(f"hitl:session:{session_id}")
+                    await asyncio.to_thread(r.delete, f"hitl:session:{session_id}")
                     return OSResult(
                         answer="❌ Ação cancelada.",
                         plan_id="hitl_fast_path", rota="HITL", cache_hit=True, total_ms=10, status="ok"
@@ -440,7 +448,7 @@ async def processar(
                 
                 # Se o usuário já possui cookies de sessão válidos no Redis, dispacha a tarefa imediatamente
                 session_key = f"sigaa:session:{session_id}"
-                if r.exists(session_key):
+                if await asyncio.to_thread(r.exists, session_key):
                     from src.application.workers.registry import _autodiscover_workers, _REGISTRY
                     from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
                     from celery import chain
@@ -493,7 +501,7 @@ async def processar(
                         **args
                     }
                 }
-                r.setex(f"hitl:session:{session_id}", 300, json.dumps(hitl_state, ensure_ascii=False))
+                await asyncio.to_thread(r.setex, f"hitl:session:{session_id}", 300, json.dumps(hitl_state, ensure_ascii=False))
                 
                 ms = int((time.monotonic() - t0) * 1000)
                 _OS_LATENCY.observe(ms)
@@ -522,7 +530,7 @@ async def processar(
         )
 
         # ── 3. Marca plano em andamento no Redis ──────────────────────────────
-        r.setex(f"plan:status:{plan.plan_id}", 120, "processing")
+        await asyncio.to_thread(r.setex, f"plan:status:{plan.plan_id}", 120, "processing")
 
         # ── 4. Despacha Workers via Celery Canvas (Não bloqueante!) ───────────
         await _despachar_workers(plan)
@@ -573,7 +581,10 @@ async def _despachar_workers(plan) -> None:
     from src.infrastructure.redis_client import get_redis_text
     import json as _json
     _r = get_redis_text()
-    th = _r.hgetall(f"task_hist:{plan.session_id}")
+    
+    def _hget_sync():
+        return _r.hgetall(f"task_hist:{plan.session_id}")
+    th = await asyncio.to_thread(_hget_sync)
     plan.context["task_history"] = dict(th) if th else {}
 
     rag_tasks = []
@@ -671,7 +682,7 @@ async def _aguardar_resposta_final(plan_id: str, timeout: float) -> dict | None:
     # Vamos verificar tanto s1 (saudações/simples) quanto s2 (síntese)
     for step in ["s1", "s2"]:
         key = f"{RESULTS_CACHE_PREFIX}{plan_id}:{step}"
-        raw = r.get(key)
+        raw = await asyncio.to_thread(r.get, key)
         if raw:
             try:
                 data = json.loads(raw if isinstance(raw, str) else raw.decode())
@@ -685,7 +696,7 @@ async def _aguardar_resposta_final(plan_id: str, timeout: float) -> dict | None:
     while time.monotonic() < deadline:
         try:
             # Sem block para não travar o loop de eventos (asyncio)
-            results = r.xread({STREAM_FINAL_RESPONSES: last_id}, count=10)
+            results = await asyncio.to_thread(r.xread, {STREAM_FINAL_RESPONSES: last_id}, count=10)
             if results:
                 for _stream_key, messages in results:
                     for msg_id, fields in messages:

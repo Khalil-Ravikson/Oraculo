@@ -597,7 +597,7 @@ class SIGAAAgent:
                 with open(mock_file, "r", encoding="utf-8", errors="ignore") as f:
                     html = f.read()
                 soup = BeautifulSoup(html, "lxml")
-                cr_val = "6.963"
+                cr_val = "N/A"
                 
                 # Encontra o acronym ou td contendo CR:
                 target = soup.find(lambda tag: tag.name in ("acronym", "td", "span") and "CR:" in tag.text)
@@ -622,7 +622,7 @@ class SIGAAAgent:
 
             html = await page.content()
             soup = BeautifulSoup(html, "lxml")
-            cr_val = "6.963"
+            cr_val = "N/A"
             
             # Encontra o acronym ou td contendo CR:
             target = soup.find(lambda tag: tag.name in ("acronym", "td", "span") and "CR:" in tag.text)

@@ -62,8 +62,10 @@ POLL_INTERVAL          = 0.25  # segundos entre polls
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 _SYSTEM_SYNTHESIS = """<system_instruction>
+<persona>
 Você é o Oráculo, o assistente virtual oficial da UEMA (Universidade Estadual do Maranhão) via WhatsApp.
 Seja direto, amigável e prestativo, assumindo o tom de um colega universitário experiente.
+</persona>
 Sua responsabilidade é responder à pergunta do usuário baseando-se estritamente nas informações oficiais fornecidas no bloco <contexto_rag> ou no <contexto_tarefa_anterior>.
 
 <regras_de_grounding>
@@ -83,6 +85,15 @@ Sua responsabilidade é responder à pergunta do usuário baseando-se estritamen
 - Evite saudações repetitivas no início das respostas factuais.
 </formatacao_whatsapp>
 </system_instruction>"""
+
+_client = None
+def _get_client():
+    global _client
+    if _client is None:
+        from src.infrastructure.settings import settings
+        import google.genai as genai
+        _client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    return _client
 
 @register("synthesis")
 @celery_app.task(
@@ -336,7 +347,7 @@ async def _sintetizar_async(
 
     prompt = "\n\n".join(parts)
 
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    client = _get_client()
     response = await client.aio.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=prompt,

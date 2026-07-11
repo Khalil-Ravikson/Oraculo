@@ -27,7 +27,16 @@ Analise a mensagem e decida a ação correta:
 - check_status: usuário pergunta sobre andamento, solicita o resultado de uma tarefa/requisição anterior, ou faz referência à 'requisição anterior'.
 - call_media: usuário pede para baixar um vídeo, áudio, criar sticker, ou processar mídia
 
-Responda apenas com o JSON estruturado."""
+Você é uma API. RETORNE EXCLUSIVAMENTE UM JSON VÁLIDO obedecendo ao schema exigido. NÃO RETORNE MARKDOWN, NEM TEXTO EXPLICATIVO."""
+
+_client = None
+def _get_client():
+    global _client
+    if _client is None:
+        from src.infrastructure.settings import settings
+        import google.genai as genai
+        _client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    return _client
 
 
 async def orchestrate(
@@ -60,7 +69,7 @@ async def orchestrate(
     prompt = "\n\n".join(ctx_parts + [f"Mensagem: \"{message[:300]}\""])
 
     try:
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        client = _get_client()
         response = await client.aio.models.generate_content(
             model=settings.GEMINI_MODEL,
             contents=prompt,

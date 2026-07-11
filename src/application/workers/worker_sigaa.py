@@ -173,7 +173,6 @@ async def _run_processos(event: dict) -> dict:
                     msg += f"\n\n_...e outros {len(processos) - 5} processos ativos._"
                 if arquivos:
                     msg += f"\n\n📥 *Editais baixados com sucesso:* {len(arquivos)} arquivos PDF salvos temporariamente."
-                    msg += f"\n\n📥 *Editais baixados com sucesso:* {len(arquivos)} arquivos PDF salvos temporariamente."
             return {
                 "status": "ok",
                 "answer": msg,
@@ -290,6 +289,13 @@ async def _run_notas(event: dict) -> dict:
     r = get_redis_text()
     login = event.get("login", "")
     senha = event.get("senha", "")
+    auth_token = event.get("auth_token", "")
+    if auth_token and not senha:
+        import json
+        raw = r.get(f"hitl:auth_token:{auth_token}")
+        if raw:
+            senha = json.loads(raw if isinstance(raw, str) else raw.decode()).get("senha", "")
+            r.delete(f"hitl:auth_token:{auth_token}")
     cache_key = f"sigaa:cache:notas:{login or session_id}"
     cached = r.get(cache_key)
     
@@ -341,8 +347,8 @@ async def _run_indice(event: dict) -> dict:
         r.setex(cache_key, 1800, json.dumps(data, ensure_ascii=False))
 
     msg = f"📊 *Seus Índices Acadêmicos no SIGAA:*\n\n"
-    msg += f"📈 **CR (Coeficiente de Rendimento):** {data.get('cr', '6.963')}\n"
-    msg += f"🎓 **IRA (Índice de Rendimento Acadêmico):** {data.get('ira', '6.963')}\n"
+    msg += f"📈 **CR (Coeficiente de Rendimento):** {data.get('cr', 'N/A')}\n"
+    msg += f"🎓 **IRA (Índice de Rendimento Acadêmico):** {data.get('ira', 'N/A')}\n"
 
     _publicar_resultado(event, "ok", msg, data)
     return {"status": "ok", "answer": msg, "error": "", "plan_id": plan_id}
@@ -492,8 +498,8 @@ async def _run_turmas(event: dict) -> dict:
         for disc in obrigatorias:
             nome = disc["nome"].upper()
             if nome not in concluidas:
-                reqs = [r.upper() for r in disc["prerequisitos"]]
-                if all(r in concluidas for r in reqs):
+                reqs_cumpridos = [req.upper() for req in disc["prerequisitos"]]
+                if all(req in concluidas for req in reqs_cumpridos):
                     elegiveis.append(disc)
 
         msg = "🗓️ *Matérias elegíveis para matrícula no próximo semestre:*\n\n"

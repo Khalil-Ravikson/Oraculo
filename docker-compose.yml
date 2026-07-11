@@ -32,6 +32,7 @@ x-logging: &logging
       max-file: "3"
 
 x-build: &build
+  image: oraculo-app:latest
   build:
     context: .
     dockerfile: Dockerfile
@@ -53,12 +54,35 @@ x-worker-base: &worker-base
     redis:
       condition: service_healthy
 
+# ── Perfis de recursos (contenção de memória/CPU por container) ────────────────
+x-resources-light: &resources-light
+  deploy:
+    resources:
+      limits:
+        cpus: "0.5"
+        memory: 512M
+
+x-resources-heavy: &resources-heavy
+  deploy:
+    resources:
+      limits:
+        cpus: "1.5"
+        memory: 1536M
+      reservations:
+        memory: 256M
+
 services:
   # ── Infraestrutura Oráculo ──
   postgres:
     image: postgres:16-alpine
     container_name: oraculo_postgres
     <<: [*restart, *logging]
+    profiles: ["core"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
     networks:
       oraculo_net:
         ipv4_address: 172.18.0.40
@@ -79,6 +103,12 @@ services:
     image: redis/redis-stack:latest
     container_name: oraculo_redis
     <<: [*restart, *logging]
+    profiles: ["core"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
     networks:
       oraculo_net:
         ipv4_address: 172.18.0.50
@@ -97,7 +127,8 @@ services:
   redis_exporter:
     image: oliver006/redis_exporter:latest
     container_name: oraculo_redis_exporter
-    <<: [*restart, *logging]
+    <<: [*restart, *logging, *resources-light]
+    profiles: ["core"]
     environment:
       REDIS_ADDR: "redis://172.18.0.50:6379"
     networks:
@@ -107,7 +138,8 @@ services:
   prometheus:
     image: prom/prometheus:v2.51.0
     container_name: oraculo_prometheus
-    <<: [*restart, *logging]
+    <<: [*restart, *logging, *resources-light]
+    profiles: ["monitoring"]
     ports:
       - "9090:9090"
     volumes:
@@ -122,7 +154,8 @@ services:
   grafana:
     image: grafana/grafana:10.4.0
     container_name: oraculo_grafana
-    <<: [*restart, *logging]
+    <<: [*restart, *logging, *resources-light]
+    profiles: ["monitoring"]
     ports:
       - "3001:3000"
     environment:
@@ -137,8 +170,9 @@ services:
 
   # ── Aplicação Principal e Migrações ──
   migration:
-    <<: [*build, *app-env]
+    <<: [*build, *app-env, *resources-light]
     container_name: oraculo_migration
+    profiles: ["app"]
     command: ["alembic", "upgrade", "head"]
     networks:
       - oraculo_net
@@ -152,6 +186,12 @@ services:
   api:
     <<: [*build, *restart, *logging, *app-env]
     container_name: oraculo_api
+    profiles: ["app"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1536M
     command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "2", "--loop", "uvloop", "--no-access-log"]
     ports:
       - "${API_PORT:-9000}:9000"
@@ -174,40 +214,61 @@ services:
   worker:
     <<: *worker-base
     container_name: oraculo_worker
+    profiles: ["app"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=default,admin,notificacoes"]
 
   worker_rag:
-    <<: *worker-base
+    <<: [*worker-base, *resources-heavy]
     container_name: oraculo_worker_rag
+    profiles: ["app"]
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=rag_search"]
 
   worker_synthesis:
-    <<: *worker-base
+    <<: [*worker-base, *resources-heavy]
     container_name: oraculo_worker_synthesis
+    profiles: ["app"]
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=synthesis"]
 
   worker_media:
-    <<: *worker-base
+    <<: [*worker-base, *resources-heavy]
     container_name: oraculo_worker_media
+    profiles: ["app"]
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=media"]
 
   worker_graph:
     <<: *worker-base
     container_name: oraculo_worker_graph
+    profiles: ["app"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=1", "--queues=graph"]
 
   beat:
-    <<: *worker-base
+    <<: [*worker-base, *resources-light]
     container_name: oraculo_beat
+    profiles: ["app"]
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
 
-  # ── EVOLUTION API v2.3.7 (Build Local do GitHub) ──
+  # ── EVOLUTION API v2.3.7 (imagem oficial pré-compilada) ──
+  # Nota: o Docker Hub do projeto mudou de organização — não é mais "atendai/evolution-api".
   evolution_api:
-    build:
-      context: https://github.com/EvolutionAPI/evolution-api.git#2.3.7
-      dockerfile: Dockerfile
+    image: evoapicloud/evolution-api:v2.3.7
     container_name: oraculo_evolution
     <<: [*restart, *logging]
+    profiles: ["gateway"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
     ports:
       - "8081:8080"
     networks:
@@ -226,7 +287,14 @@ services:
       - CACHE_REDIS_PREFIX_KEY=evolution
       - WEBHOOK_GLOBAL_URL=http://api:9000/webhook/evolution
       - WEBHOOK_GLOBAL_ENABLED=true
+      # --- Configurações de Comportamento Limpo ---
+      - DEL_MESSAGE_INSTANCE=true           # Evita acumular lixo no banco da instância
+      - WA_BUSINESS_TOKEN_VALIDATION=false  # Desativa validação pesada se não estiver usando API oficial
+      # Estas flags abaixo controlam o que é enviado ao webhook
       - WEBHOOK_EVENTS_MESSAGES_UPSERT=true
+      - WEBHOOK_EVENTS_MESSAGES_UPDATE=true
+      - WEBHOOK_EVENTS_MESSAGES_DELETE=false # Recomendado: ignorar eventos de deleção
+      - WEBHOOK_EVENTS_GROUPS_UPSERT=false
     depends_on:
       postgres:
         condition: service_healthy

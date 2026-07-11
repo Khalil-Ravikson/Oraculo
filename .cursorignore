@@ -1,0 +1,18 @@
+# Bloqueio de dados acadêmicos pesados
+dados/PDF/
+dados/CSV/
+
+# Bloqueio de arquivos temporários e de mídia
+dados/tmp/celerybeat-schedule
+dados/tmp/oraculo_media/
+
+# Ocultar o dashboard e coleções pesadas (chame com @ no chat apenas quando for mexer neles)
+Oraculo_dashboard.json
+*.postman_collection.json
+
+# Bloqueio padrão Python e Banco
+__pycache__/
+.venv/
+venv/
+*.db
+*.sqlite3

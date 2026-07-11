@@ -81,10 +81,14 @@ class IntentSeederService:
 
         result = SeedResult()
 
-        # Lazy imports para não poluir boot
         if redis_client is None:
             from src.infrastructure.redis_client import get_redis
             redis_client = get_redis()
+
+        is_done = await asyncio.to_thread(redis_client.get, "seeder:done")
+        if is_done:
+            logger.info("🌱 [INTENT SEEDER] Seed já realizado anteriormente (seeder:done). Pulando.")
+            return result
 
         if embedding_model is None:
             from src.rag.embeddings import get_embeddings
@@ -103,20 +107,23 @@ class IntentSeederService:
         logger.info("🌱 [INTENT SEEDER] Seeding %d intents...", len(rows))
 
         # 2. Limpa vetores antigos (re-seed idempotente)
-        self._limpar_vetores_antigos(redis_client)
+        await self._limpar_vetores_antigos(redis_client)
 
         # 3. Salva regex e config em Redis Hash (sem embedding — zero custo)
-        pipe = redis_client.pipeline()
-        for intent in rows:
-            if intent.regex:
-                pipe.hset(REDIS_REGEX_KEY, intent.nome, intent.regex)
-            config = json.dumps({
-                "doc_type": intent.doc_type or "geral",
-                "k_vector": intent.k_vector or 6,
-                "k_text":   intent.k_text or 8,
-            })
-            pipe.hset(REDIS_CONFIG_KEY, intent.nome, config)
-        pipe.execute()
+        def _salva_regex_config():
+            pipe = redis_client.pipeline()
+            for intent in rows:
+                if intent.regex:
+                    pipe.hset(REDIS_REGEX_KEY, intent.nome, intent.regex)
+                config = json.dumps({
+                    "doc_type": intent.doc_type or "geral",
+                    "k_vector": intent.k_vector or 6,
+                    "k_text":   intent.k_text or 8,
+                })
+                pipe.hset(REDIS_CONFIG_KEY, intent.nome, config)
+            pipe.execute()
+            
+        await asyncio.to_thread(_salva_regex_config)
 
         # 4. Gera embeddings por intent (batch para economizar calls)
         for intent in rows:
@@ -129,7 +136,7 @@ class IntentSeederService:
                 vetores = await self._embeddings_batch(
                     embedding_model, intent.exemplos
                 )
-                self._salvar_vetores(redis_client, intent.nome, intent.exemplos, vetores)
+                await self._salvar_vetores(redis_client, intent.nome, intent.exemplos, vetores)
                 result.intents_com_vetores += 1
                 logger.info(
                     "  ✅ %s: %d exemplos vetorizados", intent.nome, len(vetores)
@@ -146,6 +153,7 @@ class IntentSeederService:
             result.total_intents, result.intents_com_vetores,
             result.intents_so_regex, len(result.erros),
         )
+        await asyncio.to_thread(redis_client.set, "seeder:done", "1")
         return result
 
     async def _embeddings_batch(
@@ -153,11 +161,22 @@ class IntentSeederService:
         model: Any,
         textos: list[str],
     ) -> list[list[float]]:
-        """Gera embeddings via Gemini API (nuvem, CPU-friendly)."""
+        """Gera embeddings via Gemini API (nuvem, CPU-friendly) com retry."""
         import asyncio
-        return await asyncio.to_thread(model.embed_documents, textos)
+        from google.api_core.exceptions import ResourceExhausted
+        
+        tentativas = 3
+        for i in range(tentativas):
+            try:
+                return await asyncio.to_thread(model.embed_documents, textos)
+            except ResourceExhausted as e:
+                if i < tentativas - 1:
+                    logger.warning("Rate limit do Gemini atingido. Aguardando 15s...")
+                    await asyncio.sleep(15.0)
+                else:
+                    raise e
 
-    def _salvar_vetores(
+    async def _salvar_vetores(
         self,
         r: Any,
         nome_intent: str,
@@ -165,24 +184,31 @@ class IntentSeederService:
         vetores: list[list[float]],
     ) -> None:
         """Salva embeddings no Redis JSON para uso pelo KNN router."""
-        for i, (exemplo, vetor) in enumerate(zip(exemplos, vetores)):
-            key = f"{PREFIX_TOOLS}{nome_intent}:{i}"
-            r.json().set(key, "$", {
-                "name":        nome_intent,
-                "description": exemplo,
-                "embedding":   vetor,
-            })
+        def _sync_salvar():
+            for i, (exemplo, vetor) in enumerate(zip(exemplos, vetores)):
+                key = f"{PREFIX_TOOLS}{nome_intent}:{i}"
+                r.json().set(key, "$", {
+                    "name":        nome_intent,
+                    "description": exemplo,
+                    "embedding":   vetor,
+                })
+        import asyncio
+        await asyncio.to_thread(_sync_salvar)
 
-    def _limpar_vetores_antigos(self, r: Any) -> None:
+    async def _limpar_vetores_antigos(self, r: Any) -> None:
         """Remove vetores antigos antes de re-seed."""
-        cursor = 0
-        keys_deletadas = 0
-        while True:
-            cursor, keys = r.scan(cursor, match=f"{PREFIX_TOOLS}*", count=200)
-            if keys:
-                r.delete(*keys)
-                keys_deletadas += len(keys)
-            if cursor == 0:
-                break
+        def _limpar_sync():
+            cursor = 0
+            keys_deletadas = 0
+            while True:
+                cursor, keys = r.scan(cursor, match=f"{PREFIX_TOOLS}*", count=200)
+                if keys:
+                    r.delete(*keys)
+                    keys_deletadas += len(keys)
+                if cursor == 0:
+                    break
+            return keys_deletadas
+        import asyncio
+        keys_deletadas = await asyncio.to_thread(_limpar_sync)
         if keys_deletadas:
             logger.info("🗑️  [INTENT SEEDER] %d vetores antigos removidos.", keys_deletadas)
