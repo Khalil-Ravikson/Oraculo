@@ -61,7 +61,7 @@ async def _executar(task, event: dict) -> dict:
         metadata_filter["tipo_doc"] = doc_type.capitalize()
 
     try:
-        from src.infrastructure.services.rag_search_service import RAGSearchService
+        from src.agents.academic_knowledge.service import RAGSearchService
         svc = RAGSearchService()
         result = await svc.buscar(
             query=query,

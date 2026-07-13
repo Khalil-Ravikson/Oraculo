@@ -60,41 +60,6 @@ STREAM_MAXLEN          = 2_000
 MAX_WAIT_SECONDS       = 12    # timeout aguardando dependências
 POLL_INTERVAL          = 0.25  # segundos entre polls
 
-# ── System prompt ─────────────────────────────────────────────────────────────
-_SYSTEM_SYNTHESIS = """<system_instruction>
-<persona>
-Você é o Oráculo, o assistente virtual oficial da UEMA (Universidade Estadual do Maranhão) via WhatsApp.
-Seja direto, amigável e prestativo, assumindo o tom de um colega universitário experiente.
-</persona>
-Sua responsabilidade é responder à pergunta do usuário baseando-se estritamente nas informações oficiais fornecidas no bloco <contexto_rag> ou no <contexto_tarefa_anterior>.
-
-<regras_de_grounding>
-1. Grounding Estrito: Responda apenas com informações contidas no <contexto_rag> ou no <contexto_tarefa_anterior>.
-2. Validação de Memória Contínua: Antes de dizer que não encontrou informações, valide se o <contexto_tarefa_anterior> responde à pergunta ou mantém o sentido da conversa. A conversa é fluida, e o usuário pode estar apenas reagindo a uma informação já enviada.
-3. Tratamento de Falha: Se a resposta factual para a pergunta do usuário NÃO estiver explicitada no <contexto_rag> NEM no <contexto_tarefa_anterior>, responda exatamente e apenas: "Não encontrei essa informação nos meus registros. Consulte o site oficial em uema.br."
-4. Proibição de Alucinações: NUNCA crie ou deduza datas, e-mails, telefones ou prazos que não estejam escritos nos documentos. Se faltar algum dado, use a recusa padrão.
-</regras_de_grounding>
-
-<instrucoes_de_capabilities>
-- Se o usuário perguntar sobre suas capacidades (o que você faz, quem é você) e essa informação não estiver no RAG, você está AUTORIZADO a explicar suas principais funções (esclarecer dúvidas sobre o Calendário Acadêmico 2026, Edital PAES 2026, Contatos oficiais e suporte do CTIC) em um tom amigável, sem aplicar a recusa padrão.
-</instrucoes_de_capabilities>
-
-<formatacao_whatsapp>
-- Limitação: Escreva de 1 a 3 parágrafos, de forma direta e concisa.
-- Estilo: Utilize *negrito* para destacar datas importantes, e-mails, telefones, siglas de departamentos ou conceitos cruciais.
-- Evite saudações repetitivas no início das respostas factuais.
-</formatacao_whatsapp>
-</system_instruction>"""
-
-_client = None
-def _get_client():
-    global _client
-    if _client is None:
-        from src.infrastructure.settings import settings
-        import google.genai as genai
-        _client = genai.Client(api_key=settings.GEMINI_API_KEY)
-    return _client
-
 @register("synthesis")
 @celery_app.task(
     name="worker_synthesis",
@@ -176,20 +141,23 @@ async def _run_async(results: list, event: dict) -> dict:
 
     logger.info("📦 [SYNTH WORKER] %d chunks únicos para síntese", len(chunks_unicos))
 
-    # ── Gera resposta com Gemini Pro ───────────────────────────────────────────
-    try:
-        resposta = await _sintetizar_async(
-            chunks=chunks_unicos[:6],
-            plan_ctx=plan_ctx,
-            max_tokens=max_tokens,
-        )
-        status = "ok"
-    except Exception as exc:
-        import google.genai.errors as genai_errors
-        is_api_err = isinstance(exc, genai_errors.APIError)
-        logger.exception("❌ [SYNTH WORKER] Pro falhou (API Error: %s): %s", is_api_err, exc)
+    # ── Gera resposta via SynthesisService (agents/academic_knowledge/synthesis.py) ──
+    from src.agents.academic_knowledge.synthesis import SynthesisService
+    synth_result = await SynthesisService().sintetizar(
+        chunks=chunks_unicos[:6],
+        plan_ctx=plan_ctx,
+        max_tokens=max_tokens,
+    )
+    if synth_result.error:
+        logger.exception("❌ [SYNTH WORKER] Pro falhou: %s", synth_result.error)
         resposta = "Estou enfrentando lentidão, mas anotei sua dúvida. Tente novamente em alguns instantes. 🙏"
         status = "error"
+    else:
+        resposta = synth_result.answer
+        status = "ok"
+        if synth_result.tokens_in or synth_result.tokens_out:
+            _PRO_TOKENS.labels(direction="input").inc(synth_result.tokens_in)
+            _PRO_TOKENS.labels(direction="output").inc(synth_result.tokens_out)
 
     ms = int((time.monotonic() - t_start) * 1000)
     _SYNTH_LATENCY.observe(ms)
@@ -286,88 +254,6 @@ async def _aguardar_dependencias_async(
                        len(resultados), len(depends_on))
         return resultados
     return None
-
-
-async def _sintetizar_async(
-    chunks: list[dict],
-    plan_ctx: dict,
-    max_tokens: int,
-) -> str:
-    from src.infrastructure.settings import settings
-    import google.genai as genai
-    from google.genai import types
-
-    query       = plan_ctx.get("query", "")
-    user_ctx    = plan_ctx.get("user_context", {})
-    history     = plan_ctx.get("history", "")
-    fatos       = plan_ctx.get("fatos", [])
-
-    # Monta contexto RAG
-    contexto_rag = ""
-    for i, chunk in enumerate(chunks, 1):
-        source  = chunk.get("source", "")
-        content = chunk.get("content", "").strip()
-        if content:
-            contexto_rag += f"\n[{i}. {source}]\n{content}\n"
-
-    from datetime import datetime
-
-    # Injeta data/hora atual
-    now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
-    parts = [f"<datetime>{now_str}</datetime>"]
-
-    # Injeta histórico de conversa (Layer 1)
-    if history:
-        parts.append(f"<historico_conversa>\n{history[-1500:]}\n</historico_conversa>")
-
-    # Injeta contexto da última tarefa (Layer 3) na system instruction
-    task_ctx = plan_ctx.get("task_history", {})
-    sys_instruction = _SYSTEM_SYNTHESIS
-    if task_ctx.get("last_worker"):
-        sys_instruction += (
-            f"\n\n<contexto_tarefa_anterior>\n"
-            f"Worker: {task_ctx['last_worker']}\n"
-            f"Resultado: {task_ctx.get('last_result', '')[:300]}\n"
-            f"</contexto_tarefa_anterior>"
-        )
-
-    # Aluno
-    nome  = user_ctx.get("nome", "")
-    curso = user_ctx.get("curso", "")
-    if nome or curso:
-        parts.append(f"<contexto_aluno>Aluno: {nome}"
-                     + (f" | Curso: {curso}" if curso else "") + "</contexto_aluno>")
-
-    if fatos:
-        parts.append("<perfil>\n" + "\n".join(f"- {f}" for f in fatos[:3]) + "\n</perfil>")
-
-    # RAG
-    parts.append(f"<contexto_rag>\n{contexto_rag or 'Nenhuma informação encontrada.'}\n</contexto_rag>")
-    parts.append(f"<pergunta>{query}</pergunta>")
-
-    prompt = "\n\n".join(parts)
-
-    client = _get_client()
-    response = await client.aio.models.generate_content(
-        model=settings.GEMINI_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=sys_instruction,
-            temperature=0.2,
-            max_output_tokens=max_tokens,
-        ),
-    )
-
-    usage = response.usage_metadata
-    if usage:
-        _PRO_TOKENS.labels(direction="input").inc(usage.prompt_token_count or 0)
-        _PRO_TOKENS.labels(direction="output").inc(usage.candidates_token_count or 0)
-        session_id = plan_ctx.get("session_id")
-        if session_id:
-            from src.infrastructure.redis_client import registrar_tokens_redis
-            registrar_tokens_redis(session_id, usage.prompt_token_count or 0, usage.candidates_token_count or 0)
-
-    return (response.text or "").strip()
 
 
 def _marcar_step_completo(plan_id: str, step_id: str, data: dict) -> None:
