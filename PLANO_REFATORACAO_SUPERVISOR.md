@@ -1,22 +1,29 @@
 # Plano de Refatoração: God Object → Padrão Supervisor
 
-## Projeto Oráculo — `router/` + `agents/` + `services/`
+## Projeto Oráculo — `router/` + `agents/` + `capabilities/`
 
 > **Status:** documento de planejamento, revisão 2 (incorpora revisão crítica de nomenclatura e camadas). Nenhuma alteração de código foi feita nesta fase — apenas varredura read-only de `src/`, `docker-compose.yml` e `arquitetura_oraculo.md`.
 
 ---
 
-## 0. Decisão Arquitetural Prévia: onde ficam `router/`, `agents/`, `services/`?
+## 0. Decisão Arquitetural Prévia: onde ficam `router/`, `agents/`, `capabilities/`?
 
 **Recomendação: pastas de topo-nível dentro de `src/`, paralelas a `domain/`, `application/`, `infrastructure/` — NÃO aninhadas dentro da Clean Architecture existente.**
 
 Justificativa:
 
-- O padrão Supervisor é um **padrão de orquestração de runtime**, ortogonal às camadas Clean Architecture (que descrevem direção de dependência de regras de negócio, não fluxo de execução de agentes). Forçar `agents/` dentro de `application/` ou `services/` dentro de `infrastructure/` reproduziria o mesmo problema atual: cada "agente" teria que decidir se é regra de negócio (application) ou IO (infrastructure), e a experiência mostra que essa linha já foi violada dezenas de vezes (`registration_funnel.py` fazendo SQL cru na application, `synthesis_service.py` com prompt de negócio na infrastructure).
+- O padrão Supervisor é um **padrão de orquestração de runtime**, ortogonal às camadas Clean Architecture (que descrevem direção de dependência de regras de negócio, não fluxo de execução de agentes). Forçar `agents/` dentro de `application/` ou `capabilities/` dentro de `infrastructure/` reproduziria o mesmo problema atual: cada "agente" teria que decidir se é regra de negócio (application) ou IO (infrastructure), e a experiência mostra que essa linha já foi violada dezenas de vezes (`registration_funnel.py` fazendo SQL cru na application, `synthesis_service.py` com prompt de negócio na infrastructure).
 - Um `src/agents/<nome>/` isolado por especialista permite que cada agente tenha sua própria micro-Clean-Architecture interna se precisar (ex: `agents/sigaa/domain.py` para regra de elegibilidade + `agents/sigaa/service.py`), sem forçar todo o projeto a essa granularidade.
 - `router/` vira o único ponto de entrada de decisão "qual agente chamar" — precisa ser importável por `application/tasks/process_message_task.py` sem depender de nada de `agents/` internamente (só de contratos/enum de nomes de agente + o Registry, ver 0.2), o que é mais simples de garantir como pacote de topo-nível do que soterrado em `application/routing/`.
-- **Renomeação `tools/` → `services/`** (revisão pós-crítica): a pasta de topo nível **não se chama `tools/`**. Hoje praticamente todo framework de LLM (function calling, MCP, OpenAI tool calling) usa "Tool" com um significado muito específico — *LLM → tool call → executa função*. O que esta pasta contém (SQL, Playwright, Redis, mensageria) não é isso: são adapters/serviços de domínio atômicos consumidos pelos agentes, não invocados diretamente por um LLM via function-calling. Chamar isso de `tools/` cria confusão garantida no dia em que o projeto adicionar MCP ou tool-calling nativo do Gemini. Toda referência a `tools/` neste documento foi substituída por **`services/`**.
-- `services/` de topo nível deixa claro, visualmente e por convenção de import (`from src.services.sigaa import ...`), que **services não têm lógica de decisão** — são a nova "infrastructure fina" convocável por qualquer agente. Isso não elimina `infrastructure/` (adapters de Evolution API, Postgres, Redis client continuam lá como portas técnicas de baixo nível); `services/` é a camada de **funções de negócio atômicas e burras** que embrulham 1+ adapters de infra para uma operação específica (ex: `services/sigaa/scrape_historico.py` usa Playwright + `infrastructure/scraping` por baixo).
+- **Renomeação `tools/` → `capabilities/`** (revisão pós-crítica): a pasta de topo nível **não se chama `tools/`**. Hoje praticamente todo framework de LLM (function calling, MCP, OpenAI tool calling) usa "Tool" com um significado muito específico — *LLM → tool call → executa função*. O que esta pasta contém (SQL, Playwright, Redis, mensageria) não é isso: são adapters/serviços de domínio atômicos consumidos pelos agentes, não invocados diretamente por um LLM via function-calling. Chamar isso de `tools/` cria confusão garantida no dia em que o projeto adicionar MCP ou tool-calling nativo do Gemini. Toda referência a `tools/` neste documento foi substituída por **`capabilities/`**.
+- `capabilities/` de topo nível deixa claro, visualmente e por convenção de import (`from src.capabilities.sigaa import ...`), que **capabilities não têm lógica de decisão** — são a nova "infrastructure fina" convocável por qualquer agente. Isso não elimina `infrastructure/` (adapters de Evolution API, Postgres, Redis client continuam lá como portas técnicas de baixo nível); `capabilities/` é a camada de **funções de negócio atômicas e burras** que embrulham 1+ adapters de infra para uma operação específica (ex: `capabilities/sigaa/scrape_historico.py` usa Playwright + `infrastructure/scraping` por baixo).
+
+### 0.1b Achado durante a Fase 3: `src/services/` já existe e NÃO é a camada acima
+
+Durante a execução (não no levantamento read-only original, que nunca varreu essa pasta), descobriu-se que **`src/services/` já existe como pacote de topo nível legado**, com `email_service.py`, `evolution_service.py` (`EvolutionService`, ativamente importado por `main.py`, `application/tasks/ingestion_tasks.py` e `tasks_admin.py`) e `registration_service.py` (530 linhas, **zero consumidores** — código morto adicional não capturado no levantamento original). Isso é relevante por dois motivos:
+
+1. **Confirma a decisão de nomear a nova camada `capabilities/` em vez de `services/`**: já existe uma colisão de nome real, e pior, `evolution_service.py` parece fazer o mesmo papel que `infrastructure/adapters/evolution_adapter.py` (ambos clientes da Evolution API) — ou seja, há uma duplicação de implementação pré-existente que o plano original também não capturou.
+2. **Fica fora do escopo deste roadmap de 8 fases**: consolidar `services/evolution_service.py` com `infrastructure/adapters/evolution_adapter.py`, e decidir o destino de `services/registration_service.py` (morto) e `services/email_service.py`, é trabalho novo, não coberto pelas Fases 0-7 originais. Fica registrado aqui como item de limpeza futura — não bloqueia a Fase 6 (`capabilities/messaging/`), que consome apenas `infrastructure/adapters/evolution_adapter.py` conforme já planejado em 2.6.
 
 Estrutura resultante:
 
@@ -25,12 +32,12 @@ src/
   router/            # Supervisor: decide o agente, sem IO pesada nem regra de negócio
   agents/
     academic_knowledge/  # RAG acadêmico + synthesis (ex "academic_rag" — RAG é a técnica, não o papel do agente)
-    sigaa/                # especialista SIGAA (elegibilidade, formatação, orquestra services de scraping)
+    sigaa/                # especialista SIGAA (elegibilidade, formatação, orquestra capabilities de scraping)
     conversation/         # saudação, boas-vindas, funil de cadastro (ex "chat" — todo agente conversa, isso é a função de onboarding)
     tickets/              # GLPI/ações administrativas (ex "action" — nome genérico demais; concretamente é abertura de chamado)
     base.py               # BaseAgent (contrato comum) + AgentContext, ver 0.2
     registry.py           # Agent Registry, ver 0.2
-  services/
+  capabilities/
     sigaa/             # scraping cru (Playwright), sem decisão
     rag/               # embeddings, KNN Redis, RRF puro
     messaging/         # Evolution API, envio de mídia
@@ -40,7 +47,7 @@ src/
   infrastructure/       # adapters técnicos genéricos (DB engine, Redis client, Gemini provider, Evolution adapter)
 ```
 
-`application/` não desaparece: continua sendo o "sistema nervoso" que conecta webhook → router → agents → services → resposta, mas deixa de conter lógica de negócio ou chamadas LLM diretas.
+`application/` não desaparece: continua sendo o "sistema nervoso" que conecta webhook → router → agents → capabilities → resposta, mas deixa de conter lógica de negócio ou chamadas LLM diretas.
 
 ### 0.1 Fluxo de execução: Supervisor é o `router/`, não uma camada acima dele
 
@@ -181,7 +188,7 @@ Mapeamento de origem:
 - `src/domain/services/oraculo_router.py` → **DELETAR** após portar o padrão de validação Pydantic
 - `src/domain/services/semantic_router.py` → **DELETAR** após portar o padrão de DI
 - `src/infrastructure/services/router_service.py` → **DELETAR** sem aproveitamento
-- `src/domain/tools/tool_registry.py` → **DELETAR** as `description=` de tool (fonte de verdade duplicada); qualquer schema de tool reaproveitável migra para `services/registry.py` (ver 2.5), mas sem texto de intenção — só assinatura/contrato de IO
+- `src/domain/tools/tool_registry.py` → **DELETAR** as `description=` de tool (fonte de verdade duplicada); qualquer schema de tool reaproveitável migra para `capabilities/registry.py` (ver 2.5), mas sem texto de intenção — só assinatura/contrato de IO
 
 ### 2.2 `cognitive_os.py` — Decomposição
 
@@ -190,19 +197,19 @@ Mapeamento de origem:
 1. **Roteamento** (decisão de qual agente/fluxo chamar) → absorvido por `router/supervisor.py` (já cobre isso hoje via chamada a `semantic_router`; `cognitive_os` hoje decide em cima do resultado do router, então essa decisão condicional também migra para dentro do supervisor como parte do contrato de saída).
 2. **Dispatch de workers Celery** (`_despachar_workers`, chains/chords) → fica em `application/runtime/dispatcher.py`. Esta é a peça de "cola" que permanece em `application/` porque é puramente mecânica (monta uma chain Celery a partir de uma decisão já tomada) — não decide nada, só executa. Não vira `agents/` nem `router/`.
 3. **Lógica de negócio específica** (HITL, validação de CPF/senha SIGAA) → migra para `agents/sigaa/auth_flow.py` (fluxo de autenticação/HITL é conhecimento específico do domínio SIGAA, não genérico de orquestração).
-4. **IO Redis cru** (get/setex/delete/xadd/xread espalhado) → extraído para `services/persistence/redis_state.py`, uma service burra de "gerenciamento de estado conversacional" (set/get/expire de estado de sessão) consumida tanto pelo dispatcher quanto pelos agentes que precisam de HITL, e exposta a todo agente via `AgentContext.redis` (0.2).
+4. **IO Redis cru** (get/setex/delete/xadd/xread espalhado) → extraído para `capabilities/persistence/redis_state.py`, uma service burra de "gerenciamento de estado conversacional" (set/get/expire de estado de sessão) consumida tanto pelo dispatcher quanto pelos agentes que precisam de HITL, e exposta a todo agente via `AgentContext.redis` (0.2).
 
 Resultado: `cognitive_os.py` deixa de existir como arquivo único; vira 4 arquivos pequenos e coesos, cada um em sua pasta correta. `application/tasks/process_message_task.py` passa a chamar `router.supervisor.decide()` → `application/runtime/dispatcher.dispatch()` diretamente, eliminando a camada extra de indireção que `cognitive_os.processar()` hoje representa.
 
-### 2.3 SIGAA: separar `sigaa_agent.py` (966 linhas) em services puros vs agente especialista
+### 2.3 SIGAA: separar `sigaa_agent.py` (966 linhas) em capabilities puras vs agente especialista
 
 - **`agents/sigaa/`**:
   - `service.py` — orquestra o fluxo: decide QUAL scraping rodar, calcula elegibilidade de matrícula/próximo semestre (hoje duplicado entre `worker_sigaa.py` e `sigaa_agent.py` — consolidar num único lugar aqui), formata mensagens de resposta ao usuário. Implementa `BaseAgent` (0.2), registrado como `SigaaAgent` em `agents/registry.py`.
   - `auth_flow.py` — fluxo HITL de autenticação (CPF/senha), migrado de `cognitive_os.py` conforme 2.2.
   - `eligibility.py` — regra pura de negócio (cálculo de elegibilidade de semestre), extraída e testável isoladamente sem precisar mockar Playwright.
-- **`services/sigaa/`** (burras, atômicas, sem decisão):
-  - `scrape_login.py`, `scrape_historico.py`, `scrape_turmas.py`, `scrape_biblioteca.py` — cada função recebe credenciais/parâmetros e devolve dados crus (HTML parseado / dict), sem decidir mensagem nenhuma. Extraídas método a método de `sigaa_agent.py` (ex: `fluxo_a_biblioteca` é dividido: a parte Playwright fica em `services/sigaa/scrape_biblioteca.py`, a parte de decisão de mensagem vai para `agents/sigaa/service.py`).
-  - Reaproveita a infraestrutura Playwright existente em `infrastructure/scraping/` (Template Method de `base_scraper.py`/`generic_scraper.py`, já limpos, permanecem como estão e são consumidos por essas services).
+- **`capabilities/sigaa/`** (burras, atômicas, sem decisão):
+  - `scrape_login.py`, `scrape_historico.py`, `scrape_turmas.py`, `scrape_biblioteca.py` — cada função recebe credenciais/parâmetros e devolve dados crus (HTML parseado / dict), sem decidir mensagem nenhuma. Extraídas método a método de `sigaa_agent.py` (ex: `fluxo_a_biblioteca` é dividido: a parte Playwright fica em `capabilities/sigaa/scrape_biblioteca.py`, a parte de decisão de mensagem vai para `agents/sigaa/service.py`).
+  - Reaproveita a infraestrutura Playwright existente em `infrastructure/scraping/` (Template Method de `base_scraper.py`/`generic_scraper.py`, já limpos, permanecem como estão e são consumidos por essas capabilities).
 - `src/application/workers/worker_sigaa.py` (557 linhas) → reduzido para um worker fino que só chama `agents/sigaa/service.py` e devolve o resultado ao Celery — igual ao padrão já usado em `worker_rag_search.py` (bom modelo citado na auditoria).
 
 ### 2.4 Agente "Academic Knowledge" (RAG/Synthesis) coeso
@@ -218,33 +225,33 @@ src/agents/academic_knowledge/
   memory_summarizer.py  # ex worker_memory_manager.py (chamada Gemini de sumarização), viabiliza reuso fora do worker
   planning.py           # ex planner.py, mas a whitelist de workers vira router/contracts.py (fonte única), não mais no prompt
 
-src/services/rag/
+src/capabilities/rag/
   retrieval.py    # RRF, KNN Redis, step-back — só a MECÂNICA de busca, recebendo já a query decidida
   embeddings.py    # geração de embeddings pura
 ```
 
-- `infrastructure/services/rag_search_service.py` (611 linhas) → dividido: a parte "decide o que buscar e como combinar" (RRF/fallback step-back, `buscar()`) vira `agents/academic_knowledge/service.py`; a parte de IO pura (chamadas KNN Redis) vira `services/rag/retrieval.py`.
+- `infrastructure/services/rag_search_service.py` (611 linhas) → dividido: a parte "decide o que buscar e como combinar" (RRF/fallback step-back, `buscar()`) vira `agents/academic_knowledge/service.py`; a parte de IO pura (chamadas KNN Redis) vira `capabilities/rag/retrieval.py`.
 - `worker_synthesis.py` (408 linhas) → reduzido a um wrapper Celery fino chamando `agents/academic_knowledge/service.py`, eliminando a chamada Gemini duplicada hoje existente no worker.
 - `application/pipeline/workers.py` (código órfão, duplica registro `"synthesis"`) → **DELETAR** — nenhuma migração necessária, é puramente morto e um risco de conflito de registro.
-- Admin overrides do Redis (`admin:gemini_blocked`, `admin:system_prompt`), hoje lidos dentro de `synthesis_service.py` → migram para `services/persistence/admin_config.py` (service burra de leitura de config), injetada em `agents/academic_knowledge/service.py` via `AgentContext.config` (0.2), não lida diretamente pela camada de prompt.
+- Admin overrides do Redis (`admin:gemini_blocked`, `admin:system_prompt`), hoje lidos dentro de `synthesis_service.py` → migram para `capabilities/persistence/admin_config.py` (service burra de leitura de config), injetada em `agents/academic_knowledge/service.py` via `AgentContext.config` (0.2), não lida diretamente pela camada de prompt.
 
-### 2.5 Consolidação do registro de services + Agent Registry
+### 2.5 Consolidação do registro de capabilities + Agent Registry
 
-- `domain/tools/tool_registry.py` (morto, `StructuredTool` factory) vs `domain/tools/crud_tools.py` (dict `_TOOL_REGISTRY` + decorator `@tool`, também paralelo) → consolidar num único `services/registry.py`, adotando o mecanismo de **decorator + dict** de `crud_tools.py` por ser mais simples e já ter um padrão real de uso, mas sem embutir `description=` de intenção (essa responsabilidade já migrou para `router/contracts.py`, ver 2.1). O registry serve só para permitir que agentes descubram services disponíveis por nome, análogo ao `WorkerRegistry` do Celery (autodiscovery já citado como limpo — reaproveitar o mesmo padrão de `pkgutil` + decorator).
+- `domain/tools/tool_registry.py` (morto, `StructuredTool` factory) vs `domain/tools/crud_tools.py` (dict `_TOOL_REGISTRY` + decorator `@tool`, também paralelo) → consolidar num único `capabilities/registry.py`, adotando o mecanismo de **decorator + dict** de `crud_tools.py` por ser mais simples e já ter um padrão real de uso, mas sem embutir `description=` de intenção (essa responsabilidade já migrou para `router/contracts.py`, ver 2.1). O registry serve só para permitir que agentes descubram services disponíveis por nome, análogo ao `WorkerRegistry` do Celery (autodiscovery já citado como limpo — reaproveitar o mesmo padrão de `pkgutil` + decorator).
 - Esse é o mesmo padrão de autodiscovery reaproveitado por `agents/registry.py` (0.2): um `AgentRegistry` central onde cada agente se registra (`registry.register(SigaaAgent())`), e o router só resolve por nome — nunca importa a classe do agente diretamente.
-- `domain/tools/admin_tools.py` (`asyncio.run()` anti-pattern, toca ORM direto) → dividir: a query ORM pura (`Pessoa`, `select()`) vira `services/persistence/admin_repository.py` (função async nativa, sem `asyncio.run()`); qualquer decisão de quando/por que chamar fica em `agents/conversation/` ou num futuro `agents/administration/` se justificado por volume.
-- `domain/tools/gmail_tool.py` (bom exemplo de tool burra) → migra quase inalterado para `services/messaging/gmail_tool.py`, mantendo o padrão `StructuredTool` fino sobre `gmail_service` de infra.
+- `domain/tools/admin_tools.py` (`asyncio.run()` anti-pattern, toca ORM direto) → dividir: a query ORM pura (`Pessoa`, `select()`) vira `capabilities/persistence/admin_repository.py` (função async nativa, sem `asyncio.run()`); qualquer decisão de quando/por que chamar fica em `agents/conversation/` ou num futuro `agents/administration/` se justificado por volume.
+- `domain/tools/gmail_tool.py` (bom exemplo de tool burra) → migra quase inalterado para `capabilities/messaging/gmail_tool.py`, mantendo o padrão `StructuredTool` fino sobre `gmail_service` de infra.
 
 ### 2.6 `registration_funnel.py` e `worker_action.py` → `agents/conversation/` e `agents/tickets/`
 
-- `application/routing/registration_funnel.py` (SQL cru + chamada direta a `EvolutionAdapter`) → a máquina de estados de cadastro é lógica de negócio de "boas-vindas/onboarding", então migra para `agents/conversation/registration.py` (agente renomeado de "chat" para "conversation" — toda a interação é conversa, o que diferencia este agente é cuidar de saudação/onboarding/funil de cadastro); o SQL cru migra para `services/persistence/registration_repository.py`; a chamada a `EvolutionAdapter` (envio de mensagem) passa a ser feita através de `services/messaging/evolution_tool.py`, uma service fina que embrulha o adapter de infra já existente (`infrastructure/adapters/evolution_adapter.py` permanece como está — é o adapter técnico; a service é a camada que os agentes chamam).
-- `application/workers/worker_action.py` (UPDATE SQL cru, stub GLPI) → o SQL vira `services/persistence/ticket_repository.py`; a decisão de qual ação tomar (se/quando abrir chamado GLPI) migra para `agents/tickets/service.py` (renomeado de "action" para "tickets": o nome genérico "Action" não diz nada — concretamente este agente abre/consulta chamados GLPI; se amanhã ganhar outras integrações administrativas sem relação com chamados, aí sim justifica um agente novo em vez de generalizar o nome de volta).
+- `application/routing/registration_funnel.py` (SQL cru + chamada direta a `EvolutionAdapter`) → a máquina de estados de cadastro é lógica de negócio de "boas-vindas/onboarding", então migra para `agents/conversation/registration.py` (agente renomeado de "chat" para "conversation" — toda a interação é conversa, o que diferencia este agente é cuidar de saudação/onboarding/funil de cadastro); o SQL cru migra para `capabilities/persistence/registration_repository.py`; a chamada a `EvolutionAdapter` (envio de mensagem) passa a ser feita através de `capabilities/messaging/evolution_tool.py`, uma service fina que embrulha o adapter de infra já existente (`infrastructure/adapters/evolution_adapter.py` permanece como está — é o adapter técnico; a service é a camada que os agentes chamam).
+- `application/workers/worker_action.py` (UPDATE SQL cru, stub GLPI) → o SQL vira `capabilities/persistence/ticket_repository.py`; a decisão de qual ação tomar (se/quando abrir chamado GLPI) migra para `agents/tickets/service.py` (renomeado de "action" para "tickets": o nome genérico "Action" não diz nada — concretamente este agente abre/consulta chamados GLPI; se amanhã ganhar outras integrações administrativas sem relação com chamados, aí sim justifica um agente novo em vez de generalizar o nome de volta).
 
 ### 2.7 Tabela-resumo (arquivo → destino)
 
 | Arquivo Atual | Destino | Ação |
 |---|---|---|
-| `application/chain/cognitive_os.py` | `router/supervisor.py` + `application/runtime/dispatcher.py` + `agents/sigaa/auth_flow.py` + `services/persistence/redis_state.py` | Decompor |
+| `application/chain/cognitive_os.py` | `router/supervisor.py` + `application/runtime/dispatcher.py` + `agents/sigaa/auth_flow.py` + `capabilities/persistence/redis_state.py` | Decompor |
 | `application/routing/semantic_router.py` | `router/supervisor.py` (base) | Refatorar |
 | `application/routing/llm_orchestrator.py` | `router/llm_fallback.py` | Mesclar |
 | `application/routing/message_router.py` | `router/gatekeeper.py` | Mover (quase inalterado) |
@@ -252,20 +259,20 @@ src/services/rag/
 | `domain/services/semantic_router.py` | (padrão DI portado para `router/supervisor.py`) | Deletar após port |
 | `infrastructure/services/router_service.py` | — | Deletar |
 | `application/chain/planner.py` | `agents/academic_knowledge/planning.py` + `router/contracts.py` (whitelist) | Decompor |
-| `application/routing/registration_funnel.py` | `agents/conversation/registration.py` + `services/persistence/registration_repository.py` | Decompor |
+| `application/routing/registration_funnel.py` | `agents/conversation/registration.py` + `capabilities/persistence/registration_repository.py` | Decompor |
 | `application/chain/guardrails.py` | `application/runtime/guardrails.py` | Mover (inalterado, bom modelo) |
-| `application/chain/reranker.py` | `services/rag/reranker.py` | Mover + remover probe de rede embutida |
-| `domain/tools/tool_registry.py` | `services/registry.py` (mecanismo) | Consolidar, deletar descriptions de intenção |
-| `domain/tools/crud_tools.py` | `services/registry.py` (mecanismo escolhido) | Consolidar |
-| `domain/tools/admin_tools.py` | `services/persistence/admin_repository.py` | Dividir, remover `asyncio.run()` |
-| `domain/tools/gmail_tool.py` | `services/messaging/gmail_tool.py` | Mover (inalterado) |
-| `infrastructure/services/rag_search_service.py` | `agents/academic_knowledge/service.py` (decisão) + `services/rag/retrieval.py` (IO) | Decompor |
+| `application/chain/reranker.py` | `capabilities/rag/reranker.py` | Mover + remover probe de rede embutida |
+| `domain/tools/tool_registry.py` | `capabilities/registry.py` (mecanismo) | Consolidar, deletar descriptions de intenção |
+| `domain/tools/crud_tools.py` | `capabilities/registry.py` (mecanismo escolhido) | Consolidar |
+| `domain/tools/admin_tools.py` | `capabilities/persistence/admin_repository.py` | Dividir, remover `asyncio.run()` |
+| `domain/tools/gmail_tool.py` | `capabilities/messaging/gmail_tool.py` | Mover (inalterado) |
+| `infrastructure/services/rag_search_service.py` | `agents/academic_knowledge/service.py` (decisão) + `capabilities/rag/retrieval.py` (IO) | Decompor |
 | `infrastructure/services/synthesis_service.py` | `agents/academic_knowledge/synthesis.py` + `agents/academic_knowledge/prompts.py` | Decompor |
 | `application/workers/worker_sigaa.py` | `application/workers/worker_sigaa.py` (fino) chamando `agents/sigaa/service.py` | Emagrecer |
-| `infrastructure/scraping/implementations/sigaa_agent.py` | `services/sigaa/scrape_*.py` (IO) + `agents/sigaa/service.py` + `agents/sigaa/eligibility.py` (decisão) | Decompor |
+| `infrastructure/scraping/implementations/sigaa_agent.py` | `capabilities/sigaa/scrape_*.py` (IO) + `agents/sigaa/service.py` + `agents/sigaa/eligibility.py` (decisão) | Decompor |
 | `application/workers/worker_synthesis.py` | `application/workers/worker_synthesis.py` (fino) chamando `agents/academic_knowledge/service.py` | Emagrecer |
 | `application/workers/worker_memory_manager.py` | `agents/academic_knowledge/memory_summarizer.py` + worker fino | Decompor |
-| `application/workers/worker_action.py` | `agents/tickets/service.py` + `services/persistence/ticket_repository.py` | Decompor |
+| `application/workers/worker_action.py` | `agents/tickets/service.py` + `capabilities/persistence/ticket_repository.py` | Decompor |
 | `application/pipeline/workers.py` | — | Deletar (código órfão) |
 | `application/tasks/process_message_task.py` | `application/tasks/process_message_task.py` (emagrecido, chama router+dispatcher) | Refatorar |
 | — (novo) | `agents/base.py` (BaseAgent, AgentContext) + `agents/registry.py` (AgentRegistry) | Criar |
@@ -295,31 +302,31 @@ Princípio geral: **desacoplar o Roteador primeiro**, manter o sistema sempre ex
 - **Reversível**: sim — shims permitem rollback trocando só o import de volta.
 
 ### Fase 3 — Decompor `cognitive_os.py` (dispatcher + HITL + estado Redis)
-- **Objetivo**: eliminar o God Object central. Criar `application/runtime/dispatcher.py`, `services/persistence/redis_state.py`, e mover HITL/validação CPF-senha para `agents/sigaa/auth_flow.py` (mesmo que `agents/sigaa/` ainda não exista completo, criar o esqueleto mínimo aqui, já implementando `BaseAgent`/`AgentContext` de 0.2).
-- **Arquivos tocados**: `application/chain/cognitive_os.py` (esvaziado/deletado ao final da fase), `application/tasks/process_message_task.py` (passa a chamar `router.supervisor` + `application.runtime.dispatcher` diretamente), novo `agents/sigaa/auth_flow.py`, novo `services/persistence/redis_state.py`.
+- **Objetivo**: eliminar o God Object central. Criar `application/runtime/dispatcher.py`, `capabilities/persistence/redis_state.py`, e mover HITL/validação CPF-senha para `agents/sigaa/auth_flow.py` (mesmo que `agents/sigaa/` ainda não exista completo, criar o esqueleto mínimo aqui, já implementando `BaseAgent`/`AgentContext` de 0.2).
+- **Arquivos tocados**: `application/chain/cognitive_os.py` (esvaziado/deletado ao final da fase), `application/tasks/process_message_task.py` (passa a chamar `router.supervisor` + `application.runtime.dispatcher` diretamente), novo `agents/sigaa/auth_flow.py`, novo `capabilities/persistence/redis_state.py`.
 - **Critério de sucesso**: testes de `cognitive_os` migrados para `test_dispatcher.py` cobrindo os mesmos cenários; fluxo HITL de CPF/senha testado end-to-end (mock de Evolution API) confirma que a sessão de autenticação sobrevive ao redesenho do estado Redis; smoke E2E completo.
 - **Reversível**: parcialmente — é a fase de maior risco por tocar estado de sessão ativo em produção (Redis). Recomenda-se **deploy em canário** (feature flag ou % de tráfego) antes de rollout completo, já que há usuários com sessões HITL possivelmente "em voo" no Redis com o formato de chave antigo. Prever script de migração/compatibilidade de chaves Redis, ou aceitar que sessões em andamento no momento do deploy expiram e usuário reinicia o fluxo (aceitável dado TTL curto de HITL).
 
-### Fase 4 — Extrair `agents/academic_knowledge/` e `services/rag/`
+### Fase 4 — Extrair `agents/academic_knowledge/` e `capabilities/rag/`
 - **Objetivo**: consolidar RAG/Synthesis/Planner/Memory num agente coeso, registrado no Agent Registry como `AcademicKnowledgeAgent`.
-- **Arquivos tocados**: `infrastructure/services/rag_search_service.py`, `infrastructure/services/synthesis_service.py`, `application/chain/planner.py`, `application/workers/worker_memory_manager.py`, `application/workers/worker_synthesis.py` (emagrecido), `application/chain/reranker.py` → `services/rag/reranker.py`.
+- **Arquivos tocados**: `infrastructure/services/rag_search_service.py`, `infrastructure/services/synthesis_service.py`, `application/chain/planner.py`, `application/workers/worker_memory_manager.py`, `application/workers/worker_synthesis.py` (emagrecido), `application/chain/reranker.py` → `capabilities/rag/reranker.py`.
 - **Critério de sucesso**: testes de RAG existentes (unit + e2e) continuam verdes; comparação de qualidade de resposta (mesmas perguntas de avaliação em `tests/eval/`) antes/depois não regride; worker Celery `worker_synthesis` mantém mesmo contrato de entrada/saída (schema de payload) para não quebrar `router/contracts.py`/dispatcher já migrados nas Fases 2-3.
 - **Reversível**: sim, camada é isolada — rollback por commit de fase, worker mantém assinatura Celery estável durante toda a fase (troca só a implementação interna).
 
-### Fase 5 — Extrair `agents/sigaa/` e `services/sigaa/`
-- **Objetivo**: maior arquivo do projeto (`sigaa_agent.py`, 966 linhas) decomposto em services de scraping puras + agente de decisão/elegibilidade, registrado no Agent Registry como `SigaaAgent`.
-- **Arquivos tocados**: `infrastructure/scraping/implementations/sigaa_agent.py` (deletado ao final), `application/workers/worker_sigaa.py` (emagrecido), novo `agents/sigaa/service.py`, `agents/sigaa/eligibility.py`, `services/sigaa/scrape_*.py`.
+### Fase 5 — Extrair `agents/sigaa/` e `capabilities/sigaa/`
+- **Objetivo**: maior arquivo do projeto (`sigaa_agent.py`, 966 linhas) decomposto em capabilities de scraping puras + agente de decisão/elegibilidade, registrado no Agent Registry como `SigaaAgent`.
+- **Arquivos tocados**: `infrastructure/scraping/implementations/sigaa_agent.py` (deletado ao final), `application/workers/worker_sigaa.py` (emagrecido), novo `agents/sigaa/service.py`, `agents/sigaa/eligibility.py`, `capabilities/sigaa/scrape_*.py`.
 - **Critério de sucesso**: testes de avaliação SIGAA passam; teste de regressão específico comparando cálculo de elegibilidade antigo (dos dois lugares duplicados) vs novo cálculo único, usando dados de fixture reais de histórico/turmas; smoke test de scraping em ambiente de homologação do SIGAA (não em produção, dado custo/risco de automação Playwright contra site real) antes de promover a mudança.
 - **Reversível**: sim, mas é a fase de maior esforço de teste manual (Playwright contra site externo é frágil por natureza) — recomenda-se rodar em paralelo (shadow mode: nova implementação roda e loga resultado sem responder ao usuário) por alguns dias antes do cutover final.
 
-### Fase 6 — Consolidar `services/registry.py`, `services/messaging/`, `services/persistence/`, `agents/conversation/`, `agents/tickets/`
+### Fase 6 — Consolidar `capabilities/registry.py`, `capabilities/messaging/`, `capabilities/persistence/`, `agents/conversation/`, `agents/tickets/`
 - **Objetivo**: fechar as últimas duplicações (`crud_tools.py` vs `tool_registry.py`, `registration_funnel.py`, `worker_action.py`, `admin_tools.py`), registrando `ConversationAgent` e `TicketAgent` no Agent Registry.
 - **Arquivos tocados**: `domain/tools/crud_tools.py`, `domain/tools/admin_tools.py`, `domain/tools/gmail_tool.py`, `application/routing/registration_funnel.py`, `application/workers/worker_action.py`.
-- **Critério de sucesso**: testes de cadastro/registro passam; nenhuma service duplicada registrada duas vezes (checar log de startup do `services/registry.py` autodiscovery); smoke test de fluxo completo de cadastro de novo usuário via WhatsApp (staging).
+- **Critério de sucesso**: testes de cadastro/registro passam; nenhuma service duplicada registrada duas vezes (checar log de startup do `capabilities/registry.py` autodiscovery); smoke test de fluxo completo de cadastro de novo usuário via WhatsApp (staging).
 - **Reversível**: sim.
 
 ### Fase 7 — Limpeza final e remoção de shims
-- **Objetivo**: remover os shims de compatibilidade criados na Fase 2 (`application/routing/*.py` como re-exports), remover `domain/tools/` e `infrastructure/services/{rag_search_service,synthesis_service}.py` originais, atualizar `arquitetura_oraculo.md` para refletir o novo desenho de 3 camadas (router/agents/services) substituindo a descrição de "5 camadas cognitivas" antiga.
+- **Objetivo**: remover os shims de compatibilidade criados na Fase 2 (`application/routing/*.py` como re-exports), remover `domain/tools/` e `infrastructure/services/{rag_search_service,synthesis_service}.py` originais, atualizar `arquitetura_oraculo.md` para refletir o novo desenho de 3 camadas (router/agents/capabilities) substituindo a descrição de "5 camadas cognitivas" antiga.
 - **Critério de sucesso**: `grep -r "application.routing\|application.chain.cognitive_os\|infrastructure.services.rag_search_service\|infrastructure.services.synthesis_service" src/` retorna vazio (fora de testes históricos a serem também limpos); suite completa verde; `arquitetura_oraculo.md` atualizado e revisado.
 - **Reversível**: tecnicamente sim via git, mas é a fase "ponto sem volta" lógico — só executar depois de todas as fases anteriores estáveis em produção por período de bake (recomendado mínimo 1-2 semanas de observação sem incidentes por fase antes de avançar para a próxima).
 
