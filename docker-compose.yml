@@ -41,6 +41,11 @@ x-build: &build
 # Modelo unificado para todos os workers do Celery (evita duplicação massiva de volumes e dependências)
 x-worker-base: &worker-base
   <<: [*build, *restart, *logging, *app-env]
+  # DNS externo explícito: o resolver padrão do Docker no WSL2 falha para hosts
+  # fora da rede do compose (huggingface.co, sis.sig.uema.br, ghcr.io no build)
+  dns:
+    - 8.8.8.8
+    - 1.1.1.1
   volumes:
     - ./src:/app/src
     - ./dados:/app/dados
@@ -185,6 +190,9 @@ services:
 
   api:
     <<: [*build, *restart, *logging, *app-env]
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     container_name: oraculo_api
     profiles: ["app"]
     deploy:

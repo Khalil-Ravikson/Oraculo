@@ -117,6 +117,15 @@ async def _startup(settings) -> None:
     except Exception as exc:
         logger.warning("⚠️  Falha ao pré-aquecer componentes de IA: %s", exc)
 
+    # 2b. Agent Registry (Fase 2/5 do PLANO_REFATORACAO_SUPERVISOR.md)
+    try:
+        from src.agents.bootstrap import register_all_agents
+        from src.agents.registry import registry
+        register_all_agents()
+        logger.info("✅ [AGENT REGISTRY] Agentes disponíveis: %s", [a.name for a in registry.all()])
+    except Exception as exc:
+        logger.warning("⚠️  Falha ao registrar agentes: %s", exc)
+
     # 3. Gateway WhatsApp (Evolution API)
     try:
         from src.services.evolution_service import EvolutionService

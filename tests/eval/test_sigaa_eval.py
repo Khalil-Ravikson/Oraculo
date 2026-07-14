@@ -3,7 +3,7 @@ import pytest
 import asyncio
 from pathlib import Path
 from unittest.mock import patch
-from src.infrastructure.scraping.implementations.sigaa_agent import SIGAAAgent
+from src.capabilities.sigaa.browser import SIGAAAgent
 from src.application.workers.worker_sigaa import _run_notas, _run_indice, _run_historico, _run_turmas, _run_calendario
 
 class MockRedis:

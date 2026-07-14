@@ -1,17 +1,23 @@
 """
-src/infrastructure/scraping/implementations/sigaa_agent.py
-============================================================
-Agente de Automação Web para o portal SIGAA (JSF).
-Implementa o loop cognitivo de automação: Perceber -> Planejar -> Agir -> Verificar.
+src/capabilities/sigaa/browser.py
+====================================
+Ex `infrastructure/scraping/implementations/sigaa_agent.py` (Fase 5 do
+PLANO_REFATORACAO_SUPERVISOR.md, seção 2.3).
 
-Características:
-1. Playwright assíncrono para execução ágil e tratamento nativo de JSF/ViewState.
-2. Fallback resiliente para Selenium se o Playwright falhar ou não estiver disponível.
-3. Tratamento de ViewState do JSF pós-interações Ajax.
-4. Compartilhamento de sessão autenticada (cookies e storage) via Redis.
-5. Rotação de User-Agent, delays simulados (humano) e retry dinâmico com Tenacity.
-6. Limpeza agressiva de HTML/DOM para alimentar modelos de IA (Vision/DOM Reduzido).
-7. Engenharia de prompt detalhada com Chain-of-Thought (CoT), Few-Shot e Error Recovery.
+Automação Playwright pura do portal SIGAA (JSF) — SEM decisão de negócio.
+Cada `fluxo_*` devolve um `SIGAAResult` com dados crus; quem decide QUE
+MENSAGEM mostrar ao usuário (formatação, elegibilidade, cache) é
+`agents/sigaa/service.py`.
+
+Achados da varredura desta fase (não presentes no levantamento original):
+  - `limpar_dom()`, `SYSTEM_PROMPT` e `ERROR_RECOVERY_PROMPT` eram código
+    morto — zero chamadas em qualquer lugar do projeto (resquício de uma
+    versão anterior pensada para automação guiada por LLM; a implementação
+    real usa seletores Playwright determinísticos). Removidos nesta migração.
+  - A elegibilidade de matrícula (comparar histórico x estrutura curricular)
+    NÃO estava duplicada aqui — vivia inteira dentro de
+    `application/workers/worker_sigaa.py`, duplicada entre `_run_historico`
+    e `_run_turmas`. Consolidada em `agents/sigaa/eligibility.py`.
 """
 from __future__ import annotations
 
@@ -36,42 +42,6 @@ logger = logging.getLogger(__name__)
 SIGAA_BASE = "https://sis.sig.uema.br/sigaa"
 DOWNLOAD_DIR = Path("/tmp/sigaa_downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True, parents=True)
-
-# ── Engenharia de Prompt para Agente SIGAA ───────────────────────────────────
-
-SYSTEM_PROMPT = """Você é um navegador humano experiente automatizando o SIGAA (um sistema baseado em JSF).
-Siga sempre o ciclo estruturado de ação e justifique cada passo pensando em voz alta (Chain-of-Thought):
-
-1. PERCEBER: Analise o DOM limpo ou o print de tela atual. Quais botões, links e inputs estão visíveis?
-2. PLANEJAR: Qual é o próximo passo para atingir o objetivo? Por que escolher essa ação?
-3. AGIR: Execute a ação correspondente (preencher, clicar, submeter, rolar).
-4. VERIFICAR: A ação foi executada com sucesso? O ViewState mudou? A página atualizou como o esperado?
-5. CORRIGIR: Se ocorreu uma falha de carregamento ou comportamento inesperado, adote uma rota alternativa de recuperação.
-
----
-
-### EXEMPLO FEW-SHOT: Login no Portal SIGAA
-* OBJETIVO: Fazer login com o usuário "teste_aluno"
-* CICLO:
-  - PERCEBER: Vejo inputs com nomes 'user.login' e 'user.senha' e um botão submit 'input[type=submit]'.
-  - PLANEJAR: Preencher o login com o usuário, a senha com o valor adequado e clicar em entrar.
-  - AGIR: Preencher 'user.login' com 'teste_aluno', preencher 'user.senha' com '***' (senha mascarada) e clicar em entrar.
-  - VERIFICAR: Aguardar ciclo JSF finalizar. A URL mudou e agora vejo o painel com o ID '#menu-collapse'. Login efetuado.
-
-### EXEMPLO FEW-SHOT: Inscrição em Extensão (ViewState expirado)
-* OBJETIVO: Inscrever-se no evento
-* CICLO:
-  - PERCEBER: Vejo uma mensagem vermelha 'A página expirou' ou erro de ViewState após clicar.
-  - PLANEJAR: A sessão do JSF caiu. Devo forçar a recarga total da página, re-autenticar se necessário e navegar diretamente para o link.
-  - AGIR: Recarregar a página pública de consulta de extensão, buscar novamente o evento e tentar clicar no botão de inscrição.
-  - VERIFICAR: O sistema exibiu a tela de confirmação de inscrição sem erros. Sucesso!
-"""
-
-ERROR_RECOVERY_PROMPT = """Se você encontrar um erro na página, siga estes passos de recuperação:
-1. Erro 'Sessão Expirada': Limpe os cookies locais, realize o login novamente e reinicie o fluxo a partir da última URL conhecida.
-2. Botão Não Clicável / Sobreposto: Tente disparar o clique via JavaScript diretamente no elemento (page.evaluate) ou role a página para trazê-lo à visão.
-3. Timeout de Carregamento: Aguarde 5 segundos adicionais, force um reload e verifique a presença do ViewState atualizado.
-"""
 
 # ── Dataclasses de Controle ───────────────────────────────────────────────────
 
@@ -166,33 +136,7 @@ class SIGAAAgent:
         if self._playwright:
             await self._playwright.stop()
 
-    # ── Métodos Auxiliares e de Limpeza DOM ─────────────────────────────────────
-
-    def limpar_dom(self, html: str) -> str:
-        """
-        Remove ruídos do HTML do JSF para diminuir consumo de tokens da LLM.
-        Mantém apenas elementos interativos limpos.
-        """
-        soup = BeautifulSoup(html, "lxml")
-        
-        # Remover tags de apresentação e lógica inútil
-        for tag in soup(["script", "style", "svg", "path", "noscript", "iframe", "img"]):
-            tag.decompose()
-
-        # Remover atributos que inflam o tamanho
-        for tag in soup.find_all(True):
-            attrs_to_keep = ["id", "name", "value", "href", "class", "onclick", "type"]
-            keys = list(tag.attrs.keys())
-            for key in keys:
-                if key not in attrs_to_keep:
-                    del tag[key]
-
-        # Mantém apenas containers principais e interativos
-        elementos_interativos = []
-        for tag in soup.find_all(["input", "button", "a", "select", "form", "table", "tr", "td"]):
-            elementos_interativos.append(str(tag))
-
-        return "\n".join(elementos_interativos)
+    # ── Métodos Auxiliares ───────────────────────────────────────────────────
 
     async def _human_delay(self):
         """Simula tempo de reflexão humano entre ações."""
@@ -247,7 +191,7 @@ class SIGAAAgent:
         """Realiza a autenticação no portal SIGAA."""
         login = self.login or os.getenv("SIGAA_LOGIN", "")
         senha = self.senha or os.getenv("SIGAA_SENHA", "")
-        
+
         if not login or not senha:
             raise ValueError("As variáveis SIGAA_LOGIN e/ou SIGAA_SENHA não foram definidas.")
 
@@ -264,14 +208,14 @@ class SIGAAAgent:
             await self._wait_for_jsf_lifecycle(page)
             await self._human_delay()
 
-        # Chain of Thought explicito em logs estruturados
+        # Chain of Thought explicito em logs estruturados (sem expor credenciais)
         logger.info("🧠 [CoT] PERCEBER: Tela de Login. Inputs 'user.login' e 'user.senha' identificados.")
         logger.info("🧠 [CoT] PLANEJAR: Inserir credenciais mascarando inputs e submeter.")
-        
+
         await page.fill("input[name='user.login']", login)
         await page.fill("input[name='user.senha']", senha)
         await self._human_delay()
-        
+
         await page.click("input[type='submit']")
         await self._wait_for_jsf_lifecycle(page)
 
@@ -290,7 +234,7 @@ class SIGAAAgent:
         try:
             await page.wait_for_selector("#menu-collapse, .usuario-menu", timeout=8000)
             logger.info("🧠 [CoT] VERIFICAR: Menu principal carregado. Login realizado com sucesso.")
-            
+
             # Guardar cookies no Redis
             cookies = await self._context.cookies()
             await self._salvar_session_redis(cookies)
@@ -306,7 +250,7 @@ class SIGAAAgent:
             logger.info("🔄 Restaurando cookies de sessão do Redis...")
             await self._context.add_cookies(sess.cookies)
             return True
-        
+
         # Senão, faz login do zero
         return await self._realizar_login(page)
 
@@ -325,12 +269,12 @@ class SIGAAAgent:
         await self._init_playwright()
         page = await self._context.new_page()
         url_alvo = f"{SIGAA_BASE}/public/biblioteca/paginaDetalhesMateriaisPublica.jsf"
-        
+
         try:
             logger.info("🚀 [Biblioteca] Acessando página de busca pública...")
             await page.goto(url_alvo)
             await self._wait_for_jsf_lifecycle(page)
-            
+
             # Preenche filtros
             if autor:
                 logger.info("Preenchendo autor: %s", autor)
@@ -341,9 +285,9 @@ class SIGAAAgent:
             if assunto:
                 logger.info("Preenchendo assunto: %s", assunto)
                 await page.fill("input[id*='assunto']", assunto)
-                
+
             await self._human_delay()
-            
+
             # Submete o formulário
             logger.info("Submetendo formulário de busca da biblioteca...")
             await page.click("input[type='submit'], button[type='submit'], input[id*='buscar']")
@@ -353,7 +297,7 @@ class SIGAAAgent:
             obras = []
             linhas = page.locator("table.listagem tbody tr, table[id*='result'] tr")
             qtd = await linhas.count()
-            
+
             for i in range(min(qtd, 15)):
                 cols = await linhas.nth(i).locator("td").all_text_contents()
                 if cols and len(cols) >= 3:
@@ -398,7 +342,7 @@ class SIGAAAgent:
         await self._init_playwright()
         page = await self._context.new_page()
         url_alvo = f"{SIGAA_BASE}/public/extensao/consulta_extensao.jsf?aba=p-extensao"
-        
+
         try:
             # Garante login
             login_ok = await self._garantir_login(page)
@@ -408,12 +352,12 @@ class SIGAAAgent:
             logger.info("🚀 [Extensão] Acessando painel de extensão...")
             await page.goto(url_alvo)
             await self._wait_for_jsf_lifecycle(page)
-            
+
             # Buscar evento
             logger.info("Buscando evento de extensão: %s", nome_evento)
             await page.fill("input[id*='titulo'], input[name*='titulo']", nome_evento)
             await self._human_delay()
-            
+
             await page.click("input[value='Buscar'], input[type='submit']")
             await self._wait_for_jsf_lifecycle(page)
 
@@ -421,7 +365,7 @@ class SIGAAAgent:
             link_evento = page.locator(f"a:has-text('{nome_evento[:25]}'), table.listagem td a")
             if await link_evento.count() == 0:
                 return SIGAAResult(ok=False, error=f"Evento de extensão '{nome_evento}' não localizado.")
-            
+
             await link_evento.first.click()
             await self._wait_for_jsf_lifecycle(page)
             await self._human_delay()
@@ -463,7 +407,7 @@ class SIGAAAgent:
         await self._init_playwright()
         page = await self._context.new_page()
         url_alvo = f"{SIGAA_BASE}/public/processo_seletivo/lista.jsf?aba=p-processo&nivel={nivel}"
-        
+
         try:
             logger.info("🚀 [Processos Seletivos] Acessando lista pública...")
             await page.goto(url_alvo)
@@ -488,12 +432,12 @@ class SIGAAAgent:
                 link_edital = linhas.nth(i).locator("a[href*='pdf'], a:has-text('Edital'), a:has-text('EDITAL')")
                 edital_url = ""
                 edital_local = ""
-                
+
                 if await link_edital.count() > 0:
                     href = await link_edital.first.get_attribute("href")
                     if href:
                         edital_url = href if href.startswith("http") else f"{SIGAA_BASE}/{href.lstrip('/')}"
-                        
+
                         # Inicia o download de forma assíncrona
                         try:
                             async with page.expect_download(timeout=15000) as download_info:
@@ -565,7 +509,7 @@ class SIGAAAgent:
 
             # Live navigation
             await self._jscook_navigate(page, "menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ relatorioNotasAluno.gerarRelatorio }")
-            
+
             # Parsing notas table
             soup = BeautifulSoup(await page.content(), "lxml")
             notas = []
@@ -598,7 +542,7 @@ class SIGAAAgent:
                     html = f.read()
                 soup = BeautifulSoup(html, "lxml")
                 cr_val = "N/A"
-                
+
                 # Encontra o acronym ou td contendo CR:
                 target = soup.find(lambda tag: tag.name in ("acronym", "td", "span") and "CR:" in tag.text)
                 if target:
@@ -607,7 +551,7 @@ class SIGAAAgent:
                         next_td = parent_td.find_next_sibling("td")
                         if next_td:
                             cr_val = next_td.text.strip()
-                
+
                 return SIGAAResult(ok=True, data={"cr": cr_val, "ira": cr_val, "indicadores": ["CR", "IRA"]})
             except Exception as e:
                 return SIGAAResult(ok=False, error=str(e))
@@ -623,7 +567,7 @@ class SIGAAAgent:
             html = await page.content()
             soup = BeautifulSoup(html, "lxml")
             cr_val = "N/A"
-            
+
             # Encontra o acronym ou td contendo CR:
             target = soup.find(lambda tag: tag.name in ("acronym", "td", "span") and "CR:" in tag.text)
             if target:
@@ -632,7 +576,7 @@ class SIGAAAgent:
                     next_td = parent_td.find_next_sibling("td")
                     if next_td:
                         cr_val = next_td.text.strip()
-            
+
             return SIGAAResult(ok=True, data={"cr": cr_val, "ira": cr_val, "indicadores": ["CR", "IRA"]})
 
         except Exception as e:
@@ -679,7 +623,7 @@ class SIGAAAgent:
             logger.info("Acionando emissão do histórico PDF...")
             async with page.expect_download(timeout=20000) as download_info:
                 await self._jscook_navigate(page, "menu_form_menu_discente_j_id_jsp_1383391995_101_menu:A]#{ portalDiscente.historico }")
-            
+
             download = await download_info.value
             filepath = DOWNLOAD_DIR / f"historico_{int(time.time())}.pdf"
             await download.save_as(filepath)
@@ -805,7 +749,7 @@ class SIGAAAgent:
                 soup = BeautifulSoup(html, "lxml")
                 tables = soup.find_all("table")
                 classes = []
-                
+
                 for t in tables:
                     headers = [th.text.strip() for th in t.find_all("th")]
                     if any("Componente Curricular" in h for h in headers):
@@ -838,7 +782,7 @@ class SIGAAAgent:
             soup = BeautifulSoup(await page.content(), "lxml")
             tables = soup.find_all("table")
             classes = []
-            
+
             for t in tables:
                 headers = [th.text.strip() for th in t.find_all("th")]
                 if any("Componente Curricular" in h for h in headers):
@@ -916,13 +860,13 @@ class SIGAASeleniumFallback:
     def _init_driver(self):
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
-        
+
         options = Options()
         options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument(f"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        
+
         self.driver = webdriver.Chrome(options=options)
         self.driver.set_page_load_timeout(30)
 
@@ -935,18 +879,18 @@ class SIGAASeleniumFallback:
         try:
             self._init_driver()
             self.driver.get(f"{SIGAA_BASE}/public/biblioteca/paginaDetalhesMateriaisPublica.jsf")
-            
+
             if autor:
                 input_autor = self.driver.find_element("xpath", "//input[contains(@id, 'autor')]")
                 input_autor.send_keys(autor)
             if titulo:
                 input_titulo = self.driver.find_element("xpath", "//input[contains(@id, 'titulo')]")
                 input_titulo.send_keys(titulo)
-                
+
             btn_buscar = self.driver.find_element("xpath", "//input[@type='submit' or contains(@id, 'buscar')]")
             btn_buscar.click()
             time.sleep(3)  # Espera estática simples do Selenium
-            
+
             # Extrair resultados
             obras = []
             linhas = self.driver.find_elements("xpath", "//table[contains(@class, 'listagem')]/tbody/tr")
