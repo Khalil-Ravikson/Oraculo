@@ -1,0 +1,194 @@
+{% extends "hub/_base.html" %}
+{% block title %}Agentes — Oráculo UEMA{% endblock %}
+
+{% block content %}
+<style>
+  :root {
+    --bg: #090b0d; --surface: #0f1214; --surface2: #141719;
+    --border: #1e2225; --border-hover: #2e3235;
+    --accent: #ff6b35; --accent-dim: rgba(255,107,53,.1);
+    --green: #2eb872; --red: #e84040; --blue: #5a8dee;
+    --text: #c8d0d8; --muted: #5a6370;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  .header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(9,11,13,.92); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px; height: 58px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-icon { width: 30px; height: 30px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; display: grid; place-items: center; font-size: 14px; }
+  .brand-title { font-size: 14px; font-weight: 700; }
+  .brand-sub { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+  .back-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); padding: 5px 12px; border-radius: 5px; cursor: pointer; font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-decoration: none; transition: all .2s; }
+  .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .main { padding: 32px 28px; max-width: 1100px; margin: 0 auto; }
+
+  .section-label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  .notice {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--blue); border-radius: 8px;
+    padding: 12px 16px; margin-bottom: 24px;
+    font-size: 12px; color: var(--muted); line-height: 1.5;
+  }
+
+  .agents-grid {
+    display: grid; grid-template-columns: 1fr; gap: 12px;
+  }
+
+  .agent-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+
+  .agent-info { display: flex; align-items: center; gap: 14px; min-width: 0; }
+  .agent-icon { font-size: 22px; flex-shrink: 0; }
+  .agent-name { font-weight: 700; font-size: 14px; }
+  .agent-desc { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+  .agent-perms { font-family: var(--mono); font-size: 10px; color: var(--blue); margin-top: 6px; }
+
+  .agent-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+  .agent-status { font-family: var(--mono); font-size: 10px; letter-spacing: .04em; }
+  .agent-status.on  { color: var(--green); }
+  .agent-status.off { color: var(--red); }
+
+  /* Toggle switch */
+  .switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; cursor: pointer; inset: 0;
+    background: var(--border); border-radius: 22px; transition: .2s;
+  }
+  .slider::before {
+    content: ''; position: absolute; height: 16px; width: 16px;
+    left: 3px; bottom: 3px; background: var(--muted); border-radius: 50%;
+    transition: .2s;
+  }
+  input:checked + .slider { background: rgba(46,184,114,.25); }
+  input:checked + .slider::before { transform: translateX(18px); background: var(--green); }
+
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--surface); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 12px 18px;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--accent); z-index: 1000;
+    opacity: 0; transform: translateY(8px);
+    transition: all .3s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+</style>
+
+<header class="header">
+  <div class="brand">
+    <div class="brand-icon">🤖</div>
+    <div>
+      <div class="brand-title">Agentes</div>
+      <div class="brand-sub">Agent Registry</div>
+    </div>
+  </div>
+  <a href="/hub/" class="back-btn">← Hub</a>
+</header>
+
+<main class="main">
+  <div class="notice">
+    ℹ️ Estes agentes já implementam o contrato <code>BaseAgent</code> e estão registrados,
+    mas <strong>ainda não são o caminho quente de produção</strong> — cada capacidade
+    real (RAG, scraping SIGAA, funil de cadastro) continua sendo despachada diretamente
+    pelos workers Celery. Desligar um agente aqui desativa <code>can_execute()</code>
+    para quando o Supervisor passar a resolver por nome via este Registry.
+  </div>
+
+  <div class="section-label">// agent registry</div>
+  <div class="agents-grid" id="agents-grid">
+    <div style="color:var(--muted); font-family:var(--mono); font-size:12px;">Carregando...</div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+function toast(msg, type='ok') {
+  const el = document.getElementById('toast');
+  el.textContent = type === 'ok' ? '✅ ' + msg : '❌ ' + msg;
+  el.style.borderColor = type === 'ok' ? 'var(--green)' : 'var(--red)';
+  el.style.color = type === 'ok' ? 'var(--green)' : 'var(--red)';
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+const ICONS = {
+  academic_knowledge: '📚',
+  sigaa: '🎓',
+  conversation: '👋',
+  tickets: '🎫',
+};
+
+async function loadAgents() {
+  const grid = document.getElementById('agents-grid');
+  try {
+    const r = await fetch('/hub/agents/data');
+    const d = await r.json();
+    if (d.error) { grid.innerHTML = `<div style="color:var(--red)">${d.error}</div>`; return; }
+
+    grid.innerHTML = d.agentes.map(a => `
+      <div class="agent-card" data-name="${a.name}">
+        <div class="agent-info">
+          <div class="agent-icon">${ICONS[a.name] || '🤖'}</div>
+          <div>
+            <div class="agent-name">${a.name}</div>
+            <div class="agent-desc">${a.description}</div>
+            ${a.permissions && a.permissions.length ? `<div class="agent-perms">perms: ${a.permissions.join(', ')}</div>` : ''}
+          </div>
+        </div>
+        <div class="agent-right">
+          <span class="agent-status ${a.enabled ? 'on' : 'off'}">${a.enabled ? 'ATIVO' : 'DESATIVADO'}</span>
+          <label class="switch">
+            <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleAgent('${a.name}', this)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    grid.innerHTML = `<div style="color:var(--red)">Erro ao carregar agentes: ${e.message}</div>`;
+  }
+}
+
+async function toggleAgent(name, checkbox) {
+  const enabled = checkbox.checked;
+  try {
+    const r = await fetch(`/hub/agents/${name}/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    const d = await r.json();
+    if (d.error) { checkbox.checked = !enabled; toast(d.error, 'err'); return; }
+
+    const card = document.querySelector(`.agent-card[data-name="${name}"] .agent-status`);
+    card.textContent = enabled ? 'ATIVO' : 'DESATIVADO';
+    card.className = 'agent-status ' + (enabled ? 'on' : 'off');
+    toast(`Agente '${name}' ${enabled ? 'ativado' : 'desativado'}.`);
+  } catch (e) {
+    checkbox.checked = !enabled;
+    toast('Erro: ' + e.message, 'err');
+  }
+}
+
+loadAgents();
+</script>
+{% endblock %}

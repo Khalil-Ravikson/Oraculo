@@ -838,6 +838,69 @@ async def config_page(request: Request):
     )
 
 
+@router.get("/agents", response_class=HTMLResponse)
+async def agents_page(request: Request):
+    """Serve a página do catálogo de agentes (Agent Registry)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/agents.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/agents/data")
+async def agents_data(request: Request):
+    """Endpoint REST para alimentar o catálogo de agentes."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.agents.registry import registry
+    from src.capabilities.persistence.agent_config import status_de_todos
+    from src.infrastructure.redis_client import get_redis_text
+
+    agentes = registry.all()
+    status = status_de_todos(get_redis_text(), [a.name for a in agentes])
+
+    return {
+        "agentes": [
+            {
+                "name": a.name,
+                "description": a.description,
+                "permissions": a.permissions,
+                "enabled": status[a.name],
+            }
+            for a in agentes
+        ]
+    }
+
+
+class AgentToggleRequest(BaseModel):
+    enabled: bool
+
+
+@router.post("/agents/{name}/toggle")
+async def agents_toggle(request: Request, name: str, data: AgentToggleRequest):
+    """Liga/desliga um agente (admin:agent:{nome}:enabled no Redis)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.agents.registry import registry
+    from src.capabilities.persistence.agent_config import set_agent_enabled
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        registry.resolve(name)
+    except KeyError:
+        return {"error": f"Agente '{name}' não encontrado."}
+
+    set_agent_enabled(get_redis_text(), name, data.enabled)
+    return {"name": name, "enabled": data.enabled}
+
+
 @router.get("/eval", response_class=HTMLResponse)
 async def eval_page(request: Request):
     """Serve a página HTML do Dashboard de Avaliação."""

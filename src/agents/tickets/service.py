@@ -64,7 +64,8 @@ class TicketAgent:
         self._service = TicketService()
 
     def can_execute(self, context) -> bool:
-        return True
+        from src.capabilities.persistence.agent_config import is_agent_enabled
+        return is_agent_enabled(context.redis, self.name)
 
     async def execute(self, context):
         from src.agents.base import AgentResponse
