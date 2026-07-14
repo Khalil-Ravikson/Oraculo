@@ -1,96 +1,13 @@
 """
-RegistrationFunnel — captura nome e curso via conversa.
+SHIM DE COMPATIBILIDADE — Fase 6 do PLANO_REFATORACAO_SUPERVISOR.md.
 
-Estados no Redis (TTL 10min):
-  register:mode:{sender}  = "1"
-  register:step:{sender}  = "awaiting_name" | "awaiting_course"
-  register:name:{sender}  = <nome capturado>
+O RegistrationFunnel foi movido para `src/agents/conversation/registration.py`
+(SQL cru em `capabilities/persistence/registration_repository.py`, envio de
+botões em `capabilities/messaging/evolution_tool.py`). Remover na Fase 7,
+junto com os demais shims de `application/routing/`.
 """
 from __future__ import annotations
-import logging, re
-logger = logging.getLogger(__name__)
 
-_BOAS_VINDAS = (
-    "👋 Olá! Para usar o *Oráculo UEMA*, preciso de alguns dados.\n\n"
-    "Qual é o seu *nome completo*?"
-)
-_PERGUNTA_CURSO = "Perfeito, {nome}! Qual é o seu *curso* na UEMA?"
-_CADASTRO_OK = (
-    "✅ Cadastro realizado! Bem-vindo(a), *{nome}*!\n\n"
-    "Agora pode perguntar sobre calendário, editais, contatos ou suporte."
-)
+from src.agents.conversation.registration import RegistrationFunnel
 
-
-class RegistrationFunnel:
-
-    async def process(self, sender: str, text: str, push_name: str, redis) -> str:
-        """
-        Retorna a próxima mensagem a enviar, ou '' se o fluxo terminou.
-        """
-        step = redis.get(f"register:step:{sender}") or "start"
-
-        if step == "start":
-            redis.setex(f"register:mode:{sender}", 600, "1")
-            redis.setex(f"register:step:{sender}", 600, "awaiting_name")
-            return _BOAS_VINDAS
-
-        if step == "awaiting_name":
-            nome = text.strip().title()
-            if len(nome) < 3:
-                return "Por favor, informe seu nome completo."
-            redis.setex(f"register:name:{sender}", 600, nome)
-            redis.setex(f"register:step:{sender}", 600, "awaiting_course")
-            return _PERGUNTA_CURSO.format(nome=nome.split()[0])
-
-        if step == "awaiting_course":
-            nome  = redis.get(f"register:name:{sender}") or push_name or "Aluno"
-            curso = text.strip().title()
-            if len(curso) < 3:
-                return "Por favor, informe o nome do seu curso."
-
-            await self._salvar_usuario(sender, nome, curso)
-            
-            # Limpa estado de registro
-            for key in (f"register:mode:{sender}",
-                        f"register:step:{sender}",
-                        f"register:name:{sender}"):
-                redis.delete(key)
-
-            # 👇 CORREÇÃO: Iniciar o gateway aqui para mandar os botões
-            try:
-                from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
-                gateway = EvolutionAdapter()
-                await gateway.enviar_botoes(
-                    number=sender, # A variável correta é sender!
-                    title="Cadastro Concluído!",
-                    description=f"Bem-vindo(a), {nome.split()[0]}! O seu cadastro no curso de {curso} foi salvo. Os dados estão corretos?",
-                    buttons=[
-                        {"type": "reply", "displayText": "✅ Sim, corretos", "id": "btn_ok"},
-                        {"type": "reply", "displayText": "❌ Refazer", "id": "btn_refazer"},
-                    ]
-                )
-                return "" # Retornamos vazio porque a mensagem já foi enviada pelos botões acima
-            except Exception as e:
-                logger.error("Erro ao enviar botões: %s", e)
-                # Fallback: Se o botão falhar, manda texto normal
-                return _CADASTRO_OK.format(nome=nome.split()[0])
-
-    @staticmethod
-    async def _salvar_usuario(telefone: str, nome: str, curso: str) -> None:
-        try:
-            from src.infrastructure.database.session import AsyncSessionLocal
-            from sqlalchemy import text
-            async with AsyncSessionLocal() as db:
-                await db.execute(
-                    text("""
-                        INSERT INTO pessoas (telefone, nome, curso, role, status)
-                        VALUES (:tel, :nome, :curso, 'estudante', 'ativo')
-                        ON CONFLICT (telefone) DO UPDATE
-                        SET nome=EXCLUDED.nome, curso=EXCLUDED.curso
-                    """),
-                    {"tel": telefone, "nome": nome, "curso": curso},
-                )
-                await db.commit()
-            logger.info("✅ Usuário cadastrado via funil: %s", telefone[-6:])
-        except Exception as e:
-            logger.error("❌ RegistrationFunnel._salvar_usuario: %s", e)
+__all__ = ["RegistrationFunnel"]

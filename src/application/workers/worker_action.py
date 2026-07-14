@@ -1,19 +1,32 @@
+"""
+src/application/workers/worker_action.py
+===========================================
+Worker Celery de ações administrativas — emagrecido na Fase 6 do
+PLANO_REFATORACAO_SUPERVISOR.md (seção 2.6): só desempacota o evento e
+delega a decisão para `agents/tickets/service.py::TicketService`. SQL cru
+vive em `capabilities/persistence/ticket_repository.py`.
+
+Ver docstring de `agents/tickets/service.py` para o achado desta fase: hoje
+nada no roteamento vivo despacha `dispatch("action", ...)` — este worker
+está registrado no Celery/WorkerRegistry mas dormente. Mantido chamável
+exatamente como antes (mesmo nome de task, mesmas actions), só reorganizado.
+"""
 from __future__ import annotations
 import asyncio, logging
+
+from src.agents.tickets.service import TicketService
 from src.infrastructure.celery_app import celery_app
 from src.application.workers.registry import register
 
 logger = logging.getLogger(__name__)
 
-_HANDLERS: dict = {}
+_service = TicketService()
 
-
-def action_handler(name: str):
-    """Decorator para registrar handlers de ações."""
-    def decorator(fn):
-        _HANDLERS[name] = fn
-        return fn
-    return decorator
+_HANDLERS = {
+    "update_student_email": lambda args: _service.atualizar_email(args.get("matricula", ""), args.get("novo_email", "")),
+    "abrir_chamado_glpi":    lambda args: _service.abrir_chamado_glpi(args.get("titulo", "Chamado sem título"), args.get("user_id", "")),
+    "enviar_email":          lambda args: _service.enviar_email(args.get("destinatario", ""), args.get("assunto", ""), args.get("corpo", "")),
+}
 
 
 @register("action")
@@ -46,50 +59,6 @@ async def _run(event: dict) -> dict:
 
     _salvar(plan_id, step_id, payload)
     return payload
-
-
-# ── Handlers concretos ────────────────────────────────────────────────────────
-
-@action_handler("update_student_email")
-async def _update_email(args: dict) -> dict:
-    from src.infrastructure.database.session import AsyncSessionLocal
-    from sqlalchemy import text
-    matricula = args.get("matricula", "")
-    novo_email = args.get("novo_email", "")
-    if not matricula or not novo_email:
-        raise ValueError("matricula e novo_email obrigatórios")
-    async with AsyncSessionLocal() as db:
-        await db.execute(
-            text("UPDATE pessoas SET email=:e WHERE matricula=:m"),
-            {"e": novo_email, "m": matricula}
-        )
-        await db.commit()
-    return {"mensagem": f"✅ E-mail atualizado para {novo_email}"}
-
-
-@action_handler("abrir_chamado_glpi")
-async def _abrir_chamado(args: dict) -> dict:
-    # Integre com GLPI real via HTTP quando disponível
-    titulo  = args.get("titulo", "Chamado sem título")
-    user_id = args.get("user_id", "")
-    logger.info("📋 [GLPI] Chamado: '%s' | user=%s", titulo, user_id)
-    return {"mensagem": f"✅ Chamado '{titulo}' registrado. Acompanhe pelo GLPI."}
-
-
-@action_handler("enviar_email")
-async def _enviar_email(args: dict) -> dict:
-    dest    = args.get("destinatario", "")
-    assunto = args.get("assunto", "")
-    corpo   = args.get("corpo", "")
-    if not dest:
-        raise ValueError("destinatario obrigatório")
-    try:
-        from src.infrastructure.services.domain_service.gmail_service import get_gmail_service
-        svc    = get_gmail_service()
-        result = await svc.send(dest, assunto, corpo)
-        return {"mensagem": result}
-    except Exception as e:
-        raise RuntimeError(f"Email falhou: {e}")
 
 
 def _salvar(plan_id, step_id, data):

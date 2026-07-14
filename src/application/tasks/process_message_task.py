@@ -297,7 +297,7 @@ async def _handle_message(**kwargs) -> None:
     from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
     from src.application.routing.message_router import MessageRouter, DispatchTarget
     from src.application.routing.command_builder import CommandContext, dispatch_admin, dispatch_public
-    from src.application.routing.registration_funnel import RegistrationFunnel
+    from src.agents.conversation.registration import RegistrationFunnel
     from src.infrastructure.settings import settings 
 
     r          = get_redis_text()
