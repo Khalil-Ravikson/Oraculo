@@ -1,8 +1,8 @@
-# tests/unit/application/test_cognitive_os.py
+# tests/unit/application/test_dispatcher.py
 import pytest
 import json
 from unittest.mock import AsyncMock, patch, MagicMock
-from src.application.chain.cognitive_os import processar, OSResult
+from src.application.runtime.dispatcher import processar, OSResult
 
 class MockRedis:
     def __init__(self):
@@ -36,7 +36,7 @@ async def test_cognitive_os_sigaa_route_requires_auth_flow():
     session_id = "test_whatsapp_session"
     
     with patch("src.infrastructure.redis_client.get_redis_text", return_value=mock_redis), \
-         patch("src.application.routing.semantic_router.rotear", return_value=mock_decision):
+         patch("src.router.supervisor.rotear", return_value=mock_decision):
         
         # 1. First prompt: "qual meu CR?" -> Should prompt for CPF
         res = await processar("qual meu CR?", session_id, user_context)
@@ -101,7 +101,7 @@ async def test_cognitive_os_sigaa_route_with_active_session():
     session_id = "test_whatsapp_session"
     
     with patch("src.infrastructure.redis_client.get_redis_text", return_value=mock_redis), \
-         patch("src.application.routing.semantic_router.rotear", return_value=mock_decision), \
+         patch("src.router.supervisor.rotear", return_value=mock_decision), \
          patch("celery.chain") as mock_chain, \
          patch("src.application.workers.registry._REGISTRY") as mock_registry:
              

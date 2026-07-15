@@ -334,7 +334,7 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
                             yield _sse_step("synthesis", "running", "Autenticando e extraindo dados do SIGAA...")
                             t0 = _t.monotonic()
                             
-                            from src.application.chain.cognitive_os import _aguardar_resposta_final
+                            from src.application.runtime.dispatcher import _aguardar_resposta_final
                             final_data = await _aguardar_resposta_final(event["plan_id"], timeout=15.0)
                             synth_ms = _t.monotonic() - t0
                             
@@ -414,7 +414,7 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
             # ── 1. Router ─────────────────────────────────
             yield _sse_step("router", "running", "Classificando intenção…")
             t0 = _t.monotonic()
-            from src.application.routing.semantic_router import rotear
+            from src.router.supervisor import rotear
             decision = await rotear(msg, thread_id, {"role": "admin"})
             yield _sse_step("router", "ok",
                 f"→ {decision.rota} ({decision.confianca:.0%})",
@@ -530,7 +530,7 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
                         yield _sse_step("synthesis", "running", "Aguardando resposta do SIGAA...")
                         t0 = _t.monotonic()
                         
-                        from src.application.chain.cognitive_os import _aguardar_resposta_final
+                        from src.application.runtime.dispatcher import _aguardar_resposta_final
                         final_data = await _aguardar_resposta_final(plan_id, timeout=15.0)
                         synth_ms = _t.monotonic() - t0
                         
@@ -636,7 +636,7 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
             # ── 3. Dispatch ───────────────────────────────
             yield _sse_step("dispatch", "running", f"Despachando {len(plan.steps)} worker(s)…")
             t0 = _t.monotonic()
-            from src.application.chain.cognitive_os import _despachar_workers, _aguardar_resposta_final
+            from src.application.runtime.dispatcher import _despachar_workers, _aguardar_resposta_final
             await _despachar_workers(plan)
             yield _sse_step("dispatch", "ok", "Workers enfileirados (Celery)", _t.monotonic() - t0)
 
@@ -1485,7 +1485,7 @@ async def eval_query(request: Request):
     queue: asyncio.Queue = asyncio.Queue()
 
     async def _run():
-        from src.application.chain.cognitive_os import processar
+        from src.application.runtime.dispatcher import processar
         
         await queue.put(json.dumps({
             "tipo": "step_start", "step": "routing"

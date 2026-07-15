@@ -211,7 +211,7 @@ class IngestionService:
         """Registra metadados no Postgres de forma silenciosa."""
         try:
             if self._chunk_repo is None:
-                from src.infrastructure.services.rag_search_service import DocumentChunkRepository
+                from src.agents.academic_knowledge.service import DocumentChunkRepository
                 self._chunk_repo = DocumentChunkRepository()
             await self._chunk_repo.registrar_batch(chunks_info)
             logger.info("🗄️  Metadata Registry: %d chunks registrados no Postgres.", len(chunks_info))
