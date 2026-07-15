@@ -22,6 +22,14 @@ do service dormente. Resultado prático: `admin:gemini_blocked` e
 `admin:system_prompt`, configuráveis pelo hub admin, passam a valer de fato
 para as respostas do WhatsApp. Se isso não for desejado, é fácil reverter
 removendo o bloco "overrides administrativos" abaixo.
+
+Sprint 2 (Fase 8): a leitura do prompt customizado deixou de ser
+`r.get("admin:system_prompt")` cru — passa por
+`capabilities/persistence/prompt_config.py::obter_prompt_ativo`, que resolve
+em cascata Postgres (`agent_prompts`, versionado) → Redis legado
+(`admin:system_prompt`, mantido como fallback de transição) → hardcoded
+(`SYSTEM_SYNTHESIS`). `admin:gemini_blocked` continua lido cru — é kill
+switch, não prompt, fora de escopo desta fase.
 """
 from __future__ import annotations
 
@@ -77,17 +85,25 @@ class SynthesisService:
 
         # ── Overrides administrativos (kill switch / prompt override) ────────
         system = SYSTEM_SYNTHESIS
+        r = None
         try:
             from src.infrastructure.redis_client import get_redis_text
             r = get_redis_text()
             if r.get("admin:gemini_blocked") == "1":
                 return SynthesisResult(answer="🔧 Sistema em manutenção. Tente em instantes!")
-
-            sp_redis = r.get("admin:system_prompt")
-            if sp_redis:
-                system = sp_redis if isinstance(sp_redis, str) else sp_redis.decode()
         except Exception:
             pass
+
+        try:
+            from src.capabilities.persistence.prompt_config import obter_prompt_ativo
+            from src.infrastructure.database.session import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as session:
+                system = await obter_prompt_ativo(
+                    session, "academic_knowledge", fallback=SYSTEM_SYNTHESIS, redis=r,
+                )
+        except Exception as exc:
+            logger.warning("⚠️  [SYNTHESIS] Falha ao resolver prompt ativo, usando hardcoded: %s", exc)
 
         prompt = self._montar_prompt(chunks, plan_ctx)
 
