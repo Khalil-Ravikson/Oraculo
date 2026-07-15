@@ -208,16 +208,13 @@ async def metrics_stream(request: Request):
 
     
 
-class WebChatRequest(BaseModel):
-    message: str
-
 @router.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
     """Página do Simulador de Chat Web."""
     payload = _verificar_cookie(request)
     if not payload:
         return RedirectResponse("/hub/login", status_code=302)
-    # Cria o session_id igual ao que você usa no chat_send
+    # Cria o session_id igual ao que você usa no chat/stream
     session_id = f"web_session_{payload.sub}"
 
     return templates.TemplateResponse(
@@ -225,28 +222,6 @@ async def chat_page(request: Request):
         name="hub/chat.html",
         context={"request": request, "username": payload.sub,"session_id": session_id},
     )
-
-@router.post("/chat/send")
-async def chat_send(request: Request, data: WebChatRequest):
-    """Endpoint REST que o JS do frontend vai chamar."""
-    payload = _verificar_cookie(request)
-    if not payload:
-        return {"error": "Não autorizado"}
-    
-    from src.application.use_cases.simulate_web_chat import SimulateWebChatUseCase
-    
-    # ID da sessão único para este admin no simulador web
-    session_id = f"web_session_{payload.sub}" 
-    
-    use_case = SimulateWebChatUseCase()
-    resposta = await use_case.executar(
-        session_id=session_id, 
-        mensagem=data.message, 
-        admin_name=payload.sub
-    )
-    
-    return {"response": resposta}
-
 
 
 def _sse_step(step: str, status: str, detail: str, elapsed: float = 0, extra: dict | None = None) -> str:
@@ -704,32 +679,6 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
             
-@router.get("/audit/data")
-async def audit_data(request: Request):
-    """Endpoint REST para alimentar a tabela de Auditoria."""
-    payload = _verificar_cookie(request)
-    if not payload:
-        return {"error": "Não autorizado"}
-        
-    from src.application.use_cases.get_audit_logs import GetAuditLogsUseCase
-    use_case = GetAuditLogsUseCase()
-    # CORRECT: Added await
-    logs = await use_case.executar() 
-    return {"logs": logs}
-
-
-@router.get("/users/data")
-async def users_data(request: Request, role: str = ""):
-    """Endpoint REST para alimentar a tabela de Utilizadores."""
-    payload = _verificar_cookie(request)
-    if not payload:
-        return {"error": "Não autorizado"}
-        
-    from src.application.use_cases.get_users_list import GetUsersListUseCase
-    users = await GetUsersListUseCase().executar(role)
-    return {"users": users}
-
-
 # Adicionar em src/api/hub.py
 
 from pydantic import BaseModel
