@@ -80,6 +80,26 @@ async def test_curso_valido_salva_e_envia_botoes():
 
 
 @pytest.mark.asyncio
+async def test_curso_valido_com_falha_no_salvar_nao_confirma_e_preserva_estado():
+    """Sprint 3 (Fase 0) — se salvar_pessoa falhar (ex: IntegrityError), o
+    funil não pode confirmar sucesso nem limpar o estado do Redis."""
+    funnel = RegistrationFunnel()
+    redis = FakeRedis()
+    redis.setex("register:step:5599999999", 600, "awaiting_course")
+    redis.setex("register:name:5599999999", 600, "Joao Da Silva")
+
+    with patch(
+        "src.capabilities.persistence.registration_repository.salvar_pessoa",
+        new=AsyncMock(side_effect=RuntimeError("IntegrityError simulado")),
+    ):
+        resposta = await funnel.process("5599999999", "engenharia de computacao", "Fulano", redis)
+
+    assert "problema técnico" in resposta.lower()
+    assert "Cadastro realizado" not in resposta
+    assert redis.get("register:step:5599999999") == "awaiting_course"  # estado preservado
+
+
+@pytest.mark.asyncio
 async def test_curso_valido_fallback_texto_quando_botoes_falham():
     funnel = RegistrationFunnel()
     redis = FakeRedis()
