@@ -897,7 +897,7 @@ async def agents_toggle(request: Request, name: str, data: AgentToggleRequest):
     except KeyError:
         return {"error": f"Agente '{name}' não encontrado."}
 
-    set_agent_enabled(get_redis_text(), name, data.enabled)
+    await set_agent_enabled(get_redis_text(), name, data.enabled, admin=payload.sub)
     return {"name": name, "enabled": data.enabled}
 
 
