@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import logging
 
+from src.agents.base import AgentEnabledMixin
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,7 +51,7 @@ class TicketService:
             raise RuntimeError(f"Email falhou: {e}")
 
 
-class TicketAgent:
+class TicketAgent(AgentEnabledMixin):
     """
     BaseAgent mínimo (ver agents/base.py e agents/registry.py, Fase 2).
     Registrado no Agent Registry; ainda não é caminho quente de produção
@@ -62,10 +64,6 @@ class TicketAgent:
 
     def __init__(self) -> None:
         self._service = TicketService()
-
-    def can_execute(self, context) -> bool:
-        from src.capabilities.persistence.agent_config import is_agent_enabled
-        return is_agent_enabled(context.redis, self.name)
 
     async def execute(self, context):
         from src.agents.base import AgentResponse

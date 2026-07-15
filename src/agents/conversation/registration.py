@@ -19,6 +19,9 @@ Estados no Redis (TTL 10min):
 """
 from __future__ import annotations
 import logging
+
+from src.agents.base import AgentEnabledMixin
+
 logger = logging.getLogger(__name__)
 
 _BOAS_VINDAS = (
@@ -94,7 +97,7 @@ class RegistrationFunnel:
             logger.error("❌ RegistrationFunnel._salvar_usuario: %s", e)
 
 
-class ConversationAgent:
+class ConversationAgent(AgentEnabledMixin):
     """
     BaseAgent mínimo (ver agents/base.py e agents/registry.py, Fase 2).
     Registrado no Agent Registry, mas AINDA NÃO é o caminho quente de
@@ -111,10 +114,6 @@ class ConversationAgent:
 
     def __init__(self) -> None:
         self._funnel = RegistrationFunnel()
-
-    def can_execute(self, context) -> bool:
-        from src.capabilities.persistence.agent_config import is_agent_enabled
-        return is_agent_enabled(context.redis, self.name)
 
     async def execute(self, context):
         from src.agents.base import AgentResponse

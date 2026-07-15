@@ -50,3 +50,19 @@ class BaseAgent(Protocol):
 
     def can_execute(self, context: AgentContext) -> bool: ...
     async def execute(self, context: AgentContext) -> AgentResponse: ...
+
+
+class AgentEnabledMixin:
+    """`can_execute()` comum a todo agente concreto (Sprint 2, Fase 1).
+
+    Elimina a duplicação idêntica que existia em `academic_knowledge/service.py`,
+    `sigaa/service.py`, `conversation/registration.py` e `tickets/service.py`.
+    Não substitui `BaseAgent` (Protocol) — só fornece a implementação default
+    para quem herdar dele.
+    """
+
+    name: str
+
+    def can_execute(self, context: AgentContext) -> bool:
+        from src.capabilities.persistence.agent_config import is_agent_enabled
+        return is_agent_enabled(context.redis, self.name)
