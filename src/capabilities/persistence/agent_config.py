@@ -10,9 +10,13 @@ recém-registrados não fiquem desligados por padrão.
 
 Sprint 2 (Fase 5): `set_agent_enabled` passa a gravar também no catálogo
 Postgres (`agentes_catalogo`, via `AgentCatalogRepository.set_ativo`),
-best-effort — falha no Postgres não impede o toggle no Redis. A LEITURA
-(`is_agent_enabled`) continua 100% Redis nesta fase; o flip para
-Postgres-first é a Fase 6.
+best-effort — falha no Postgres não impede o toggle no Redis.
+
+Sprint 2 (Fase 6): `is_agent_enabled` (e `status_de_todos`, `can_execute()`)
+passam a ler o Postgres primeiro (fonte de verdade) — qualquer falha
+(Postgres fora do ar, linha ainda não upsertada) cai de volta na checagem de
+Redis, preservando "ativo por padrão". Isso tornou `is_agent_enabled` async;
+`AgentEnabledMixin.can_execute()` (agents/base.py) acompanhou a mudança.
 """
 from __future__ import annotations
 
@@ -25,7 +29,7 @@ def _chave(nome: str) -> str:
     return f"admin:agent:{nome}:enabled"
 
 
-def is_agent_enabled(redis, nome: str) -> bool:
+def _is_agent_enabled_redis(redis, nome: str) -> bool:
     """Ativo por padrão — só é desativado se a chave existir com valor '0'."""
     try:
         raw = redis.get(_chave(nome))
@@ -35,6 +39,27 @@ def is_agent_enabled(redis, nome: str) -> bool:
         return True
     valor = raw if isinstance(raw, str) else raw.decode()
     return valor != "0"
+
+
+async def is_agent_enabled(redis, nome: str) -> bool:
+    """Postgres é a fonte de verdade; cai para Redis se o Postgres falhar ou
+    se o agente ainda não tiver linha no catálogo (upsert não rodou)."""
+    try:
+        from src.infrastructure.database.session import AsyncSessionLocal
+        from src.infrastructure.repositories.agent_catalog_repository import AgentCatalogRepository
+
+        async with AsyncSessionLocal() as session:
+            repo = AgentCatalogRepository(session)
+            row = await repo.obter(nome)
+        if row is not None:
+            return row["ativo"]
+    except Exception as exc:
+        logger.warning(
+            "⚠️  [AGENT CATALOG] Falha ao ler catálogo Postgres de '%s', usando fallback Redis: %s",
+            nome, exc,
+        )
+
+    return _is_agent_enabled_redis(redis, nome)
 
 
 async def set_agent_enabled(redis, nome: str, enabled: bool, admin: str | None = None) -> None:
@@ -58,5 +83,5 @@ async def _set_ativo_catalogo_best_effort(nome: str, enabled: bool, admin: str |
         )
 
 
-def status_de_todos(redis, nomes: list[str]) -> dict[str, bool]:
-    return {nome: is_agent_enabled(redis, nome) for nome in nomes}
+async def status_de_todos(redis, nomes: list[str]) -> dict[str, bool]:
+    return {nome: await is_agent_enabled(redis, nome) for nome in nomes}

@@ -860,17 +860,31 @@ async def agents_data(request: Request):
     from src.agents.registry import registry
     from src.capabilities.persistence.agent_config import status_de_todos
     from src.infrastructure.redis_client import get_redis_text
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.agent_catalog_repository import AgentCatalogRepository
 
     agentes = registry.all()
-    status = status_de_todos(get_redis_text(), [a.name for a in agentes])
+    status = await status_de_todos(get_redis_text(), [a.name for a in agentes])
+
+    catalogo: dict[str, dict] = {}
+    try:
+        async with AsyncSessionLocal() as session:
+            catalogo = {row["nome"]: row for row in await AgentCatalogRepository(session).listar()}
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler catálogo Postgres de agentes: %s", exc)
 
     return {
         "agentes": [
             {
                 "name": a.name,
-                "description": a.description,
+                "description": catalogo.get(a.name, {}).get("descricao") or a.description,
                 "permissions": a.permissions,
                 "enabled": status[a.name],
+                "atualizado_em": (
+                    catalogo.get(a.name, {}).get("atualizado_em").isoformat()
+                    if catalogo.get(a.name, {}).get("atualizado_em") else None
+                ),
+                "atualizado_por": catalogo.get(a.name, {}).get("atualizado_por"),
             }
             for a in agentes
         ]
