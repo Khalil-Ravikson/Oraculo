@@ -1054,197 +1054,6 @@ async def eval_page(request: Request):
         context={"request": request, "username": payload.sub, "modelo": settings.GEMINI_MODEL},
     )
 # ─────────────────────────────────────────────────────────────────────────────
-# Endpoints
-# ─────────────────────────────────────────────────────────────────────────────
-
-from src.api.routers.admin.eval_api import EVAL_DATASET,_evaluate_single, _aggregate_results,_persist_eval_result,asdict,AsyncIterator
-
-@router.get("/dataset")
-async def get_dataset():
-    """Retorna o dataset de avaliação."""
-    return JSONResponse({"dataset": EVAL_DATASET, "total": len(EVAL_DATASET)})
-
-
-@router.post("/single")
-async def eval_single(request: Request):
-    """Avalia uma única pergunta. Rápido para o botão 'Testar'."""
-    try:
-        body = await request.json()
-        question = body.get("question", "").strip()
-        if not question:
-            return JSONResponse({"error": "question obrigatório"}, status_code=400)
-
-        # Cria item sintético
-        item = {
-            "id":       "custom",
-            "category": "CUSTOM",
-            "question": question,
-            "keywords": question.split()[:5],
-            "expected_source": None,
-        }
-        result = await _evaluate_single(item, session_id="eval_single")
-        return JSONResponse(asdict(result))
-
-    except Exception as e:
-        logger.exception("❌ [EVAL] /single falhou: %s", e)
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-# Fila global de progresso para SSE
-_eval_progress_queue: asyncio.Queue = asyncio.Queue(maxsize=500)
-_eval_running = False
-
-
-@router.post("/run")
-async def eval_run(request: Request):
-    """
-    Inicia avaliação completa em background.
-    Progresso disponível via GET /eval/stream (SSE).
-    """
-    global _eval_running
-    if _eval_running:
-        return JSONResponse({"error": "Avaliação já em andamento"}, status_code=409)
-
-    try:
-        body = await request.json()
-        ids = body.get("ids", None)   # None = todos
-    except Exception:
-        ids = None
-
-    dataset = EVAL_DATASET
-    if ids:
-        dataset = [d for d in EVAL_DATASET if d["id"] in ids]
-
-    # Executa em background task
-    asyncio.create_task(_run_eval_background(dataset))
-
-    return JSONResponse({
-        "ok":    True,
-        "total": len(dataset),
-        "msg":   "Avaliação iniciada. Acompanhe em /eval/stream"
-    })
-
-
-async def _run_eval_background(dataset: list[dict]) -> None:
-    global _eval_running
-    _eval_running = True
-    results = []
-
-    await _eval_progress_queue.put(json.dumps({
-        "type": "start", "total": len(dataset)
-    }))
-
-    for i, item in enumerate(dataset):
-        await _eval_progress_queue.put(json.dumps({
-            "type":     "progress",
-            "current":  i + 1,
-            "total":    len(dataset),
-            "question": item["question"][:60],
-        }))
-
-        result = await _evaluate_single(item)
-        results.append(result)
-
-        await _eval_progress_queue.put(json.dumps({
-            "type":       "result",
-            "id":         result.id,
-            "question":   result.question[:60],
-            "hit_rate":   result.hit_rate,
-            "mrr":        result.mrr,
-            "crag":       result.crag_score,
-            "faithfulness": result.faithfulness,
-            "relevancy":  result.answer_relevancy,
-            "latency_ms": result.latency_ms,
-            "error":      result.error,
-        }))
-
-        # Pequena pausa entre perguntas para não saturar a API
-        await asyncio.sleep(0.5)
-
-    # Calcula e salva agregado
-    run_result = _aggregate_results(results)
-    _persist_eval_result(run_result)
-
-    await _eval_progress_queue.put(json.dumps({
-        "type":       "done",
-        "run_id":     run_result.run_id,
-        "avg_hit":    run_result.avg_hit_rate,
-        "avg_mrr":    run_result.avg_mrr,
-        "avg_crag":   run_result.avg_crag,
-        "avg_faith":  run_result.avg_faithfulness,
-        "avg_relev":  run_result.avg_relevancy,
-        "avg_lat_ms": run_result.avg_latency_ms,
-    }))
-
-    _eval_running = False
-
-
-@router.get("/stream")
-async def eval_stream(request: Request):
-    """SSE: progresso da avaliação em tempo real."""
-    async def generator() -> AsyncIterator[str]:
-        while True:
-            if await request.is_disconnected():
-                break
-            try:
-                msg = await asyncio.wait_for(_eval_progress_queue.get(), timeout=15.0)
-                yield f"data: {msg}\n\n"
-            except asyncio.TimeoutError:
-                yield f"data: {json.dumps({'type': 'ping'})}\n\n"
-
-    return StreamingResponse(
-        generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-@router.get("/results")
-async def eval_results():
-    """Retorna os últimos resultados de avaliação."""
-    try:
-        from src.infrastructure.redis_client import get_redis_text
-        r = get_redis_text()
-        raw = r.lrange("eval:results", 0, 4)
-        results = [json.loads(item) for item in raw]
-        return JSONResponse({"results": results})
-    except Exception as e:
-        return JSONResponse({"results": [], "error": str(e)})
-
-
-# ADICIONAR — endpoint de eventos do calendário (usado pelo frontend)
-@router.get("/eventos")
-async def eval_eventos():
-    """Retorna eventos dos próximos 30 dias para o widget de calendário."""
-    try:
-        from src.rag.calendar_parser import buscar_eventos_proximos
-        eventos = buscar_eventos_proximos(dias_frente=30)
-        return JSONResponse({
-            "eventos": [
-                {
-                    "nome": e.nome,
-                    "data_inicio": e.data_inicio.strftime("%d/%m/%Y"),
-                    "data_fim": e.data_fim.strftime("%d/%m/%Y") if e.data_fim else None,
-                    "dias_restantes": e.dias_restantes,
-                    "categoria": e.categoria,
-                    "emoji": e.emoji,
-                }
-                for e in eventos
-            ]
-        })
-    except Exception as e:
-        logger.exception("❌ [EVAL] /eventos: %s", e)
-        return JSONResponse({"eventos": [], "error": str(e)})
-
-
-# ADICIONAR — renomear /run para /run-full (o frontend chama /eval/run-full)
-@router.post("/run-full")
-async def eval_run_full(request: Request):
-    """Alias de /run para compatibilidade com o frontend."""
-    return await eval_run(request)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Endpoints Integrados do ChunkViz (Controller)
 # ─────────────────────────────────────────────────────────────────────────────
 from src.api.routers.tools.chunkviz_tools import (
@@ -1459,13 +1268,19 @@ import asyncio
 import json
 
 @router.get("/eval/dataset")
-async def get_dataset():
+async def get_dataset(request: Request):
     """Retorna o dataset de avaliação."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     return JSONResponse({"dataset": EVAL_DATASET, "total": len(EVAL_DATASET)})
 
 @router.post("/eval/single")
 async def eval_single(request: Request):
     """Avalia uma única pergunta. Rápido para o botão 'Testar'."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         body = await request.json()
         question = body.get("question", "").strip()
@@ -1498,6 +1313,9 @@ async def eval_run(request: Request):
     Inicia avaliação completa em background.
     Progresso disponível via GET /eval/stream (SSE).
     """
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     global _eval_running
     if _eval_running:
         return JSONResponse({"error": "Avaliação já em andamento"}, status_code=409)
@@ -1592,6 +1410,10 @@ async def _run_eval_background(dataset: list[dict]) -> None:
 @router.get("/eval/stream")
 async def eval_stream(request: Request):
     """SSE: progresso da avaliação em tempo real."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+
     async def generator() -> AsyncIterator[str]:
         while True:
             if await request.is_disconnected():
@@ -1609,8 +1431,11 @@ async def eval_stream(request: Request):
     )
 
 @router.get("/eval/results")
-async def eval_results():
+async def eval_results(request: Request):
     """Retorna os últimos resultados de avaliação."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         from src.infrastructure.redis_client import get_redis_text
         r = get_redis_text()
@@ -1626,6 +1451,9 @@ async def eval_query(request: Request):
     SSE: executa UMA pergunta e emite eventos de cada step em tempo real.
     Consumido pelo pipeline view do dashboard.
     """
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         body = await request.json()
         pergunta = body.get("pergunta", "").strip()
@@ -1747,8 +1575,11 @@ async def eval_query(request: Request):
     )
 
 @router.get("/eval/eventos")
-async def eval_eventos():
+async def eval_eventos(request: Request):
     """Retorna eventos dos próximos 30 dias para o widget de calendário."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         from src.rag.calendar_parser import buscar_eventos_proximos
         eventos = buscar_eventos_proximos(dias_frente=30)
@@ -1772,4 +1603,7 @@ async def eval_eventos():
 @router.post("/eval/run-full")
 async def eval_run_full(request: Request):
     """Alias de /run para compatibilidade com o frontend."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     return await eval_run(request)
