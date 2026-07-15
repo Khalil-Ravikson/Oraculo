@@ -1314,8 +1314,10 @@ async def cv_upload(
     file: UploadFile = File(...),
     parser: str = Form("auto"),
 ):
-    _verificar_cookie(request) # Lança exception se não logado
-    
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+
     try:
         content = await file.read()
         meta = save_temp_file(file.filename, content, parser)
@@ -1343,7 +1345,9 @@ async def cv_get_page(
     file_id: str = Form(...),
     page: int = Form(0),
 ):
-    _verificar_cookie(request)
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         meta = load_temp_meta(file_id)
         pages, full_text = extract_document_pages(meta["path"], meta["ext"], meta["parser"])
@@ -1369,7 +1373,9 @@ class SimReq(BaseModel):
 
 @router.post("/chunkviz/simulate")
 async def cv_simulate(request: Request, body: SimReq):
-    _verificar_cookie(request)
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     if not body.text.strip():
         raise HTTPException(400, "Texto vazio")
         
@@ -1394,7 +1400,9 @@ class IngestReq(BaseModel):
 
 @router.post("/chunkviz/ingest")
 async def cv_ingest(request: Request, body: IngestReq):
-    _verificar_cookie(request)
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         from src.api.routers.tools.chunkviz_tools import load_temp_meta
         meta   = load_temp_meta(body.file_id)
@@ -1436,7 +1444,9 @@ async def cv_ingest(request: Request, body: IngestReq):
 
 @router.get("/chunkviz/task/{task_id}")
 async def cv_task_status(request: Request, task_id: str):
-    _verificar_cookie(request)
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         from src.infrastructure.celery_app import celery_app
         r = celery_app.AsyncResult(task_id)
@@ -1452,7 +1462,9 @@ async def cv_extract_url(
     request: Request,
     url: str = Form(...),
 ):
-    _verificar_cookie(request)
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         from src.infrastructure.scraping.implementations.generic_scraper import GenericHTTPScraper
         from src.infrastructure.scraping.base_scraper import ScrapeRequest
