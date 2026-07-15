@@ -915,6 +915,185 @@ async def agents_toggle(request: Request, name: str, data: AgentToggleRequest):
     return {"name": name, "enabled": data.enabled}
 
 
+class AgentDescricaoRequest(BaseModel):
+    descricao: str
+
+
+@router.post("/agents/{name}/descricao")
+async def agents_set_descricao(request: Request, name: str, data: AgentDescricaoRequest):
+    """Edita a descrição administrável do agente no catálogo Postgres (Sprint 2, Fase 9)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.agents.registry import registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.agent_catalog_repository import AgentCatalogRepository
+
+    try:
+        registry.resolve(name)
+    except KeyError:
+        return {"error": f"Agente '{name}' não encontrado."}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await AgentCatalogRepository(session).atualizar_descricao(name, data.descricao, admin=payload.sub)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao atualizar descrição de '%s': %s", name, exc)
+        return {"error": "Falha ao gravar no Postgres. Tente novamente."}
+
+    return {"name": name, "descricao": data.descricao}
+
+
+@router.get("/agents/{name}/prompt", response_class=HTMLResponse)
+async def agent_prompt_page(request: Request, name: str):
+    """Serve a página de edição/histórico de prompt de um agente."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/agent_prompt.html",
+        context={"request": request, "username": payload.sub, "agent_name": name},
+    )
+
+
+@router.get("/agents/{name}/prompt/data")
+async def agent_prompt_data(request: Request, name: str):
+    """Prompt ativo (Postgres/Redis legado/hardcoded) + histórico de versões."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.agents.registry import registry
+    from src.capabilities.persistence.prompt_config import historico, obter_prompt_ativo
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        agente = registry.resolve(name)
+    except KeyError:
+        return {"error": f"Agente '{name}' não encontrado."}
+
+    fallback = "(este agente não tem prompt de LLM próprio)"
+    if name == "academic_knowledge":
+        from src.agents.academic_knowledge.prompts import SYSTEM_SYNTHESIS
+        fallback = SYSTEM_SYNTHESIS
+    try:
+        async with AsyncSessionLocal() as session:
+            prompt_ativo = await obter_prompt_ativo(session, name, fallback=fallback, redis=get_redis_text())
+            versoes = await historico(session, name)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler prompt de '%s': %s", name, exc)
+        return {"error": "Falha ao ler o Postgres. Tente novamente."}
+
+    return {
+        "name": name,
+        "prompt_ativo": prompt_ativo,
+        "historico": [
+            {
+                "version": v["version"],
+                "active": v["active"],
+                "created_by": v["created_by"],
+                "created_at": v["created_at"].isoformat() if hasattr(v["created_at"], "isoformat") else v["created_at"],
+                "preview": v["prompt_text"][:200],
+            }
+            for v in versoes
+        ],
+    }
+
+
+class AgentPromptRequest(BaseModel):
+    prompt: str
+
+
+@router.post("/agents/{name}/prompt")
+async def agent_prompt_publicar(request: Request, name: str, data: AgentPromptRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.agents.registry import registry
+    from src.capabilities.persistence.prompt_config import publicar_novo_prompt
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        registry.resolve(name)
+    except KeyError:
+        return {"error": f"Agente '{name}' não encontrado."}
+
+    if len(data.prompt.strip()) < 20:
+        return {"error": "Prompt muito curto (mínimo 20 caracteres)."}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            nova = await publicar_novo_prompt(session, name, data.prompt, created_by=payload.sub)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao publicar prompt de '%s': %s", name, exc)
+        return {"error": "Falha ao gravar no Postgres. Tente novamente."}
+
+    return {"name": name, "version": nova.version}
+
+
+@router.post("/agents/{name}/prompt/reset")
+async def agent_prompt_resetar(request: Request, name: str):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.agents.registry import registry
+    from src.capabilities.persistence.prompt_config import resetar_para_padrao
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        registry.resolve(name)
+    except KeyError:
+        return {"error": f"Agente '{name}' não encontrado."}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await resetar_para_padrao(session, name, created_by=payload.sub)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao resetar prompt de '%s': %s", name, exc)
+        return {"error": "Falha ao gravar no Postgres. Tente novamente."}
+
+    return {"name": name, "reset": True}
+
+
+@router.get("/capabilities", response_class=HTMLResponse)
+async def capabilities_page(request: Request):
+    """Serve a página somente-leitura do catálogo de capabilities/tools."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/capabilities.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/capabilities/data")
+async def capabilities_data(request: Request):
+    """Lista as capabilities/tools registradas (autodiscovery de capabilities/registry.py)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.capabilities.registry import available
+
+    # Nenhuma das tools existentes tem consumidor vivo em produção hoje (ver
+    # débito técnico documentado em capabilities/tools/__init__.py) — o hub
+    # avisa isso explicitamente em vez de sugerir que são operacionais.
+    return {
+        "tools": [
+            {"name": nome, "sem_consumidor_producao": True}
+            for nome in available()
+        ]
+    }
+
+
 @router.get("/eval", response_class=HTMLResponse)
 async def eval_page(request: Request):
     """Serve a página HTML do Dashboard de Avaliação."""

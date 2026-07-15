@@ -60,6 +60,23 @@
   .agent-desc { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
   .agent-perms { font-family: var(--mono); font-size: 10px; color: var(--blue); margin-top: 6px; }
 
+  .agent-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .link-btn {
+    font-family: var(--mono); font-size: 10px; color: var(--blue);
+    background: none; border: none; cursor: pointer; padding: 0;
+    text-decoration: none;
+  }
+  .link-btn:hover { text-decoration: underline; }
+  .desc-edit { display: none; margin-top: 8px; gap: 6px; }
+  .desc-edit input {
+    flex: 1; background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px;
+  }
+  .desc-edit button {
+    font-family: var(--mono); font-size: 10px; padding: 6px 10px; border-radius: 6px;
+    cursor: pointer; border: 1px solid var(--accent); background: var(--accent-dim); color: var(--accent);
+  }
+
   .agent-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
   .agent-status { font-family: var(--mono); font-size: 10px; letter-spacing: .04em; }
   .agent-status.on  { color: var(--green); }
@@ -116,6 +133,10 @@
   <div class="agents-grid" id="agents-grid">
     <div style="color:var(--muted); font-family:var(--mono); font-size:12px;">Carregando...</div>
   </div>
+
+  <div style="margin-top:24px">
+    <a href="/hub/capabilities" class="back-btn" style="display:inline-block">🧰 Ver capabilities/tools →</a>
+  </div>
 </main>
 
 <div id="toast"></div>
@@ -145,21 +166,32 @@ async function loadAgents() {
     if (d.error) { grid.innerHTML = `<div style="color:var(--red)">${d.error}</div>`; return; }
 
     grid.innerHTML = d.agentes.map(a => `
-      <div class="agent-card" data-name="${a.name}">
-        <div class="agent-info">
-          <div class="agent-icon">${ICONS[a.name] || '🤖'}</div>
-          <div>
-            <div class="agent-name">${a.name}</div>
-            <div class="agent-desc">${a.description}</div>
-            ${a.permissions && a.permissions.length ? `<div class="agent-perms">perms: ${a.permissions.join(', ')}</div>` : ''}
+      <div class="agent-card" data-name="${a.name}" style="flex-direction:column; align-items:stretch;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:16px;">
+          <div class="agent-info">
+            <div class="agent-icon">${ICONS[a.name] || '🤖'}</div>
+            <div>
+              <div class="agent-name">${a.name}</div>
+              <div class="agent-desc" id="desc-${a.name}">${a.description}</div>
+              ${a.permissions && a.permissions.length ? `<div class="agent-perms">perms: ${a.permissions.join(', ')}</div>` : ''}
+              ${a.atualizado_por ? `<div class="agent-perms" style="color:var(--muted)">editado por ${a.atualizado_por} em ${a.atualizado_em ? new Date(a.atualizado_em).toLocaleString() : '-'}</div>` : ''}
+            </div>
+          </div>
+          <div class="agent-right">
+            <span class="agent-status ${a.enabled ? 'on' : 'off'}">${a.enabled ? 'ATIVO' : 'DESATIVADO'}</span>
+            <label class="switch">
+              <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleAgent('${a.name}', this)">
+              <span class="slider"></span>
+            </label>
           </div>
         </div>
-        <div class="agent-right">
-          <span class="agent-status ${a.enabled ? 'on' : 'off'}">${a.enabled ? 'ATIVO' : 'DESATIVADO'}</span>
-          <label class="switch">
-            <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleAgent('${a.name}', this)">
-            <span class="slider"></span>
-          </label>
+        <div class="agent-actions">
+          <button class="link-btn" onclick="toggleDescEdit('${a.name}')">✏️ editar descrição</button>
+          <a href="/hub/agents/${a.name}/prompt" class="link-btn">📝 prompt</a>
+        </div>
+        <div class="desc-edit" id="desc-edit-${a.name}">
+          <input type="text" id="desc-input-${a.name}" value="${a.description.replace(/"/g, '&quot;')}">
+          <button onclick="salvarDescricao('${a.name}')">Salvar</button>
         </div>
       </div>
     `).join('');
@@ -185,6 +217,29 @@ async function toggleAgent(name, checkbox) {
     toast(`Agente '${name}' ${enabled ? 'ativado' : 'desativado'}.`);
   } catch (e) {
     checkbox.checked = !enabled;
+    toast('Erro: ' + e.message, 'err');
+  }
+}
+
+function toggleDescEdit(name) {
+  const el = document.getElementById(`desc-edit-${name}`);
+  el.style.display = el.style.display === 'flex' ? 'none' : 'flex';
+}
+
+async function salvarDescricao(name) {
+  const descricao = document.getElementById(`desc-input-${name}`).value;
+  try {
+    const r = await fetch(`/hub/agents/${name}/descricao`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ descricao }),
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'err'); return; }
+    document.getElementById(`desc-${name}`).textContent = descricao;
+    document.getElementById(`desc-edit-${name}`).style.display = 'none';
+    toast(`Descrição de '${name}' atualizada.`);
+  } catch (e) {
     toast('Erro: ' + e.message, 'err');
   }
 }

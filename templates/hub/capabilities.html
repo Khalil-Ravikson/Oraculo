@@ -1,0 +1,99 @@
+{% extends "hub/_base.html" %}
+{% block title %}Capabilities — Oráculo UEMA{% endblock %}
+
+{% block content %}
+<style>
+  :root {
+    --bg: #090b0d; --surface: #0f1214; --surface2: #141719;
+    --border: #1e2225; --border-hover: #2e3235;
+    --accent: #ff6b35; --accent-dim: rgba(255,107,53,.1);
+    --green: #2eb872; --red: #e84040; --blue: #5a8dee;
+    --text: #c8d0d8; --muted: #5a6370;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  .header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(9,11,13,.92); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px; height: 58px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-icon { width: 30px; height: 30px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; display: grid; place-items: center; font-size: 14px; }
+  .brand-title { font-size: 14px; font-weight: 700; }
+  .brand-sub { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+  .back-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); padding: 5px 12px; border-radius: 5px; cursor: pointer; font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-decoration: none; transition: all .2s; }
+  .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .main { padding: 32px 28px; max-width: 900px; margin: 0 auto; }
+  .notice {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--blue); border-radius: 8px;
+    padding: 12px 16px; margin-bottom: 24px;
+    font-size: 12px; color: var(--muted); line-height: 1.5;
+  }
+  .section-label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  .tool-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px 20px; margin-bottom: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .tool-name { font-family: var(--mono); font-weight: 700; font-size: 13px; }
+  .tool-warn { font-family: var(--mono); font-size: 10px; color: var(--red); }
+</style>
+
+<header class="header">
+  <div class="brand">
+    <div class="brand-icon">🧰</div>
+    <div>
+      <div class="brand-title">Capabilities</div>
+      <div class="brand-sub">Tools Registry</div>
+    </div>
+  </div>
+  <a href="/hub/" class="back-btn">← Hub</a>
+</header>
+
+<main class="main">
+  <div class="notice">
+    ℹ️ Catálogo somente-leitura de <code>capabilities/registry.py</code> (autodiscovery de
+    <code>capabilities/tools/tool_*.py</code>). Nenhuma tool aqui tem consumidor vivo em
+    produção hoje — a rota "CRUD" do Supervisor ainda não despacha para um worker real
+    que as chame. Ver débito técnico documentado em <code>capabilities/tools/__init__.py</code>.
+  </div>
+
+  <div class="section-label">// tools registradas</div>
+  <div id="tools-list">
+    <div style="color:var(--muted); font-family:var(--mono); font-size:12px;">Carregando...</div>
+  </div>
+</main>
+
+<script>
+async function loadTools() {
+  const list = document.getElementById('tools-list');
+  try {
+    const r = await fetch('/hub/capabilities/data');
+    const d = await r.json();
+    if (d.error) { list.innerHTML = `<div style="color:var(--red)">${d.error}</div>`; return; }
+
+    list.innerHTML = d.tools.map(t => `
+      <div class="tool-card">
+        <span class="tool-name">${t.name}</span>
+        ${t.sem_consumidor_producao ? '<span class="tool-warn">SEM CONSUMIDOR EM PRODUÇÃO</span>' : ''}
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = `<div style="color:var(--red)">Erro ao carregar: ${e.message}</div>`;
+  }
+}
+loadTools();
+</script>
+{% endblock %}
