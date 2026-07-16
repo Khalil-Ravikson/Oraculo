@@ -340,6 +340,12 @@ async def _handle_message(**kwargs) -> None:
 
     # ── Funil de cadastro ─────────────────────────────────────────────────────
     if decision.target == DispatchTarget.REGISTER_MODE:
+        from src.capabilities.persistence.agent_config import is_agent_enabled
+        if not is_agent_enabled(r, "conversation"):
+            await gateway.enviar_mensagem(
+                chat_id, "🚧 O cadastro está temporariamente desativado. Tente novamente mais tarde."
+            )
+            return
         reply = await funnel.process(sender, text, push_name=kwargs["push_name"], redis=r)
         if reply:
             await gateway.enviar_mensagem(chat_id, reply)

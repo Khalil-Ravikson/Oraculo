@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git rm *)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/unit tests/integration -q)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(./venv/Scripts/python.exe -)",
+      "Bash(rmdir src/services/persistence)",
+      "Bash(mkdir -p src/capabilities/persistence src/capabilities/sigaa src/capabilities/rag src/capabilities/messaging)",
+      "Bash(./venv/Scripts/python.exe -c ' *)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/eval/test_sigaa_eval.py -q)",
+      "Bash(git ls-tree *)",
+      "Bash(cat .gitmodules)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/unit tests/integration tests/eval -q)",
+      "Bash(rmdir src/domain/tools)",
+      "Bash(./venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('src/api/routers/web/hub.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(python -m py_compile src/api/routers/web/hub.py)"
+    ]
+  }
+}

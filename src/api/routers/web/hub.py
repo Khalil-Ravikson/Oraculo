@@ -1278,8 +1278,9 @@ async def cv_extract_url(
             "file_id": file_id, "name": url, "ext": ".txt",
             "size_kb": len(doc.content)//1024, "path": file_path, "parser": "txt",
         }
-        # Chama a função lá do tools pra salvar o JSON
-        save_temp_file(file_id, str(meta).encode(), "txt") # Só pra constar a criação
+        # Persiste o JSON de metadados (mesmo formato que save_temp_file grava)
+        with open(os.path.join(TEMP_DIR, f"{file_id}.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f)
 
         return {
             "file_id":    file_id,
