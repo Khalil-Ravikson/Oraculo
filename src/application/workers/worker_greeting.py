@@ -28,18 +28,24 @@ def worker_greeting_task(self, event: dict) -> dict:
     nome = user_context.get("nome", "").strip()
     
     # ── Lógica de Resposta Rápida ──
+    _FERRAMENTAS = (
+        "\n\n🔧 *Ferramentas do usuário* (demonstração):\n"
+        "• !ytb — baixar vídeo do YouTube\n"
+        "• !sticker — criar figurinha"
+    )
+
     if nome and nome.lower() not in ["estudante", "guest", "unknown", "admin"]:
         resposta = (
             f"Olá, {nome}! 👋 Sou o Oráculo UEMA.\n\n"
             "Estou aqui para te ajudar com calendários, editais, sigaa, contatos e outras dúvidas institucionais.\n"
             "Como te posso ajudar hoje?"
-        )
+        ) + _FERRAMENTAS
     else:
         resposta = (
             "Olá! 👋 Sou o Oráculo UEMA.\n\n"
             "Estou aqui para te ajudar com calendários, editais, sigaa, contatos e outras dúvidas institucionais.\n"
             "Como te posso ajudar hoje?"
-        )
+        ) + _FERRAMENTAS
 
     logger.info("✅ [WORKER GREETING] Saudação gerada com sucesso.")
     

@@ -18,3 +18,18 @@ async def atualizar_email_por_matricula(matricula: str, novo_email: str) -> None
             {"e": novo_email, "m": matricula}
         )
         await db.commit()
+
+
+async def atualizar_email_por_telefone(telefone: str, novo_email: str) -> bool:
+    """Escopo por telefone (identidade do próprio remetente) — evita que
+    qualquer usuário atualize o e-mail de outra matrícula só por adivinhar o número."""
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from sqlalchemy import text
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            text("UPDATE pessoas SET email=:e WHERE telefone=:t"),
+            {"e": novo_email, "t": telefone}
+        )
+        await db.commit()
+        return result.rowcount > 0

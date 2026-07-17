@@ -34,6 +34,16 @@ class TicketService:
         await atualizar_email_por_matricula(matricula, novo_email)
         return {"mensagem": f"✅ E-mail atualizado para {novo_email}"}
 
+    async def atualizar_meu_email(self, telefone: str, novo_email: str) -> dict:
+        """Versão exposta ao usuário via !atualizaremail — escopo pelo próprio telefone."""
+        from src.capabilities.persistence.ticket_repository import atualizar_email_por_telefone
+        if not telefone or not novo_email:
+            raise ValueError("telefone e novo_email obrigatórios")
+        ok = await atualizar_email_por_telefone(telefone, novo_email)
+        if not ok:
+            return {"mensagem": "❌ Não encontrei seu cadastro para atualizar o e-mail."}
+        return {"mensagem": f"✅ E-mail atualizado para {novo_email}"}
+
     async def abrir_chamado_glpi(self, titulo: str, user_id: str = "") -> dict:
         # Integre com GLPI real via HTTP quando disponível
         logger.info("📋 [GLPI] Chamado: '%s' | user=%s", titulo, user_id)
@@ -59,7 +69,7 @@ class TicketAgent(AgentEnabledMixin):
     despachar "action" hoje).
     """
     name = "tickets"
-    description = "Ações administrativas: atualizar dados cadastrais, abrir chamado GLPI, enviar e-mail."
+    description = "Atualizar e-mail de cadastro (!atualizaremail). GLPI/envio de e-mail ficam fora de uso por ora."
     permissions: list[str] = []
 
     def __init__(self) -> None:

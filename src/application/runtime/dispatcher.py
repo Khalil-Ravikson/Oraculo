@@ -65,6 +65,17 @@ _OS_REQUESTS = Counter(
 RESPONSE_TIMEOUT_S = 15.0
 POLL_INTERVAL_S    = 0.2
 
+# Circuit-breaker por agente (liga/desliga em /hub/agents, ver agent_config.py).
+# GREETING e MEDIA_DOWNLOAD não são "agentes" (fast-paths utilitários) — ficam
+# sempre ligados. Rotas fora deste mapa também não são gateadas.
+_ROTA_PARA_AGENTE = {
+    "GERAL": "academic_knowledge", "CALENDARIO": "academic_knowledge",
+    "EDITAL": "academic_knowledge", "CONTATOS": "academic_knowledge",
+    "WIKI": "academic_knowledge",
+    "SIGAA": "sigaa",
+    "CRUD": "tickets",
+}
+
 
 @dataclass
 class OSResult:
@@ -175,6 +186,22 @@ async def processar(
         if not is_command and decision_rota:
             decision.rota = decision_rota
 
+        # ── Circuit-breaker por agente (liga/desliga em /hub/agents) ──────────
+        from src.capabilities.persistence.agent_config import is_agent_enabled
+        agente_da_rota = _ROTA_PARA_AGENTE.get(decision.rota)
+        if agente_da_rota and not is_agent_enabled(r, agente_da_rota):
+            ms = int((time.monotonic() - t0) * 1000)
+            _OS_LATENCY.observe(ms)
+            _OS_REQUESTS.labels(status="agent_disabled").inc()
+            return OSResult(
+                answer="🚧 Essa função está temporariamente desativada. Tente novamente mais tarde.",
+                plan_id="agent_disabled",
+                rota=decision.rota,
+                cache_hit=False,
+                total_ms=ms,
+                status="ok",
+            )
+
         # Cache HIT da Rota: roteador identificou uma intenção rápida ou já cacheadas
         if decision.cache_hit:
             _OS_REQUESTS.labels(status="cache_hit").inc()
@@ -221,7 +248,11 @@ async def processar(
                 "Oi! Em que posso ajudá-lo(a) hoje?",
                 "Olá! Pode perguntar sobre calendário, editais, contatos ou suporte. 🎓",
             ]
-            resposta = random.choice(saudacoes)
+            resposta = random.choice(saudacoes) + (
+                "\n\n🔧 *Ferramentas do usuário* (demonstração):\n"
+                "• !ytb — baixar vídeo do YouTube\n"
+                "• !sticker — criar figurinha"
+            )
 
             from src.memory.services.redis_memory_service import get_cognitive_memory
             mem = get_cognitive_memory()
