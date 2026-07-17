@@ -64,19 +64,6 @@ class MessageRouter:
         is_dev: bool = False
     ) -> RouterDecision:
 
-        # ── 0. TRAVA BETA (skip em dev) ───────────────────────────────────────────
-        if not is_dev:
-            if is_group and remote_jid != allowed_group_jid:
-                return RouterDecision(DispatchTarget.IGNORE, reason="grupo_estranho_ignorado")
-            if not is_group and not is_admin:
-                return RouterDecision(DispatchTarget.IGNORE, reason="privado_bloqueado_no_beta")
-
-        # ── 1. Gatilhos dentro do Grupo (só em prod/grupo real) ──────────────────
-        if is_group and not is_dev:
-            if not (text.startswith("$") or text.startswith("!") or
-                    self._RE_MENTION.search(text)):
-                return RouterDecision(DispatchTarget.IGNORE, reason="sem_trigger_grupo")
-
         # ── 0. TRAVA DE SEGURANÇA (MODO BETA) ─────────────────────────────────
         # Se a mensagem for num grupo, mas NÃO for o grupo oficial de testes -> BLOQUEIA
         if is_group and remote_jid != allowed_group_jid:

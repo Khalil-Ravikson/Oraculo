@@ -189,7 +189,7 @@ async def processar(
         # ── Circuit-breaker por agente (liga/desliga em /hub/agents) ──────────
         from src.capabilities.persistence.agent_config import is_agent_enabled
         agente_da_rota = _ROTA_PARA_AGENTE.get(decision.rota)
-        if agente_da_rota and not is_agent_enabled(r, agente_da_rota):
+        if agente_da_rota and not await is_agent_enabled(r, agente_da_rota):
             ms = int((time.monotonic() - t0) * 1000)
             _OS_LATENCY.observe(ms)
             _OS_REQUESTS.labels(status="agent_disabled").inc()
