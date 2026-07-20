@@ -112,7 +112,14 @@ class AdminCommandsUseCase:
 
     @_cmd(r'^[!/]prompt\s+reset$')
     async def _prompt_reset(self, m, admin_id: str) -> str:
-        self._del_redis("admin:system_prompt")
+        """Sprint 2 (Fase 8): grava no catálogo Postgres (`agent_prompts`,
+        agente `academic_knowledge`) em vez da chave Redis crua."""
+        from src.capabilities.persistence.prompt_config import resetar_para_padrao
+        from src.infrastructure.database.session import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            await resetar_para_padrao(session, "academic_knowledge", created_by=admin_id)
+            await session.commit()
         return "✅ System prompt restaurado para o padrão."
 
     @_cmd(r'^[!/]prompt\s+(.+)$')
@@ -120,7 +127,14 @@ class AdminCommandsUseCase:
         novo_prompt = m.group(1).strip()
         if len(novo_prompt) < 20:
             return "❌ Prompt muito curto (mínimo 20 chars)."
-        self._set_redis("admin:system_prompt", novo_prompt)
+
+        from src.capabilities.persistence.prompt_config import publicar_novo_prompt
+        from src.infrastructure.database.session import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            await publicar_novo_prompt(session, "academic_knowledge", novo_prompt, created_by=admin_id)
+            await session.commit()
+
         n_chars = len(novo_prompt)
         return (
             f"✅ *System prompt atualizado!*\n"

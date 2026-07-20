@@ -6,7 +6,7 @@
 
 ## 1. Visão Geral
 
-**Oráculo UEMA v5.1** — assistente acadêmico via WhatsApp (Evolution API) + portal admin FastAPI. Pipeline principal: **Cognitive OS** (multi-agente assíncrono sobre Celery + Redis Streams), substituindo o antigo `OracleChain` monolítico.
+**Oráculo UEMA v5.1** — assistente acadêmico via WhatsApp (Evolution API) + portal admin FastAPI. Pipeline principal: **Router (Supervisor) → Agents → Capabilities** (multi-agente assíncrono sobre Celery + Redis Streams), sucessor do antigo `OracleChain` monolítico e do God Object `CognitiveOS` (decomposto na refatoração Supervisor — ver seção 3).
 
 **Stack:** Python 3.12, FastAPI, Celery, PostgreSQL 16 (SQLAlchemy async), Redis Stack (RediSearch + RedisVL), Google Gemini (`google-genai`), LangChain (embeddings apenas).
 
@@ -30,7 +30,13 @@ Implementada em `src/memory/services/redis_memory_service.py` — `CognitiveMemo
 
 ---
 
-## 3. Clean Architecture (Organização de Código)
+## 3. Arquitetura de Três Camadas (Router → Agents → Capabilities) + Clean Architecture
+
+Desde a refatoração Supervisor (`PLANO_REFATORACAO_SUPERVISOR.md`, Fases 0-7), o antigo God Object `cognitive_os.py` e as três(+uma) implementações concorrentes de roteamento foram decompostos em três pacotes de topo-nível, ortogonais às camadas Clean Architecture:
+
+- **`router/`** — o Supervisor. Único ponto de decisão de "qual agente chamar" (5 camadas: regex → heurística → regex seeded → KNN Redis → fallback LLM). Nunca importa uma classe de agente diretamente — resolve por nome via `agents/registry.py`.
+- **`agents/`** — especialistas (`academic_knowledge`, `sigaa`, `conversation`, `tickets`), cada um implementando `BaseAgent`/`AgentContext` (`agents/base.py`) e registrado em `agents/registry.py`. Contém a lógica de decisão/negócio de cada domínio.
+- **`capabilities/`** — adapters de negócio atômicos e burros (scraping SIGAA, RAG/embeddings, mensageria Evolution, persistência SQL), consumidos pelos agentes. Não decidem nada.
 
 ```
 Oraculo/
@@ -40,25 +46,42 @@ Oraculo/
 │   │   ├── routers/admin/
 │   │   ├── chain_sse.py
 │   │   └── middleware/
-│   ├── application/            # Orquestração — casos de uso, workers, pipeline IA
-│   │   ├── chain/              # cognitive_os, planner, guardrails, reranker
-│   │   ├── routing/            # semantic_router, llm_orchestrator, message_router
-│   │   ├── workers/            # worker_*.py + registry.py (autodiscovery)
-│   │   ├── tasks/              # Celery tasks (process_message, ingestion, beat)
-│   │   ├── webhook/            # webhook_controller.py
-│   │   ├── commands/           # Comandos admin WhatsApp (!status, !cache clear)
+│   ├── router/                 # Supervisor: decide o agente, sem IO pesada nem regra de negócio
+│   │   ├── supervisor.py        # rotear() — 5 camadas
+│   │   ├── llm_fallback.py       # fallback Gemini Flash (classificação + orchestrate)
+│   │   ├── contracts.py          # ROTAS_VALIDAS, RouterDecision
+│   │   └── gatekeeper.py         # MessageRouter — gate de entrada regex puro
+│   ├── agents/                  # Especialistas — decisão de negócio por domínio
+│   │   ├── academic_knowledge/    # RAG + synthesis + planning + memory_summarizer
+│   │   ├── sigaa/                 # elegibilidade, auth_flow HITL, orquestra scraping
+│   │   ├── conversation/          # saudação, onboarding, funil de cadastro
+│   │   ├── tickets/               # abertura/consulta de chamados GLPI
+│   │   ├── base.py                # BaseAgent (contrato) + AgentContext
+│   │   └── registry.py            # AgentRegistry (resolve por nome)
+│   ├── capabilities/             # Adapters de negócio atômicos, sem decisão
+│   │   ├── sigaa/                  # scraping cru (Playwright)
+│   │   ├── rag/                    # retrieval, embeddings, reranker
+│   │   ├── messaging/               # Evolution API, Gmail tool
+│   │   └── persistence/             # redis_state, admin_config, repositories SQL
+│   ├── application/            # Orquestração fina — runtime, workers, pipeline IA
+│   │   ├── runtime/             # dispatcher.py (processar/_despachar_workers — ex cognitive_os)
+│   │   ├── chain/               # guardrails, planner (whitelist migrada p/ router/contracts.py)
+│   │   ├── workers/             # worker_*.py + registry.py (autodiscovery)
+│   │   ├── tasks/               # Celery tasks (process_message, ingestion, beat)
+│   │   ├── webhook/              # webhook_controller.py
+│   │   ├── commands/             # Comandos admin WhatsApp (!status, !cache clear)
 │   │   └── use_cases/
 │   ├── domain/                 # Entidades, enums, ports (ILLMProvider, vector_store)
-│   ├── infrastructure/         # Adapters concretos — DB, Redis, Gemini, Evolution
+│   ├── infrastructure/         # Adapters técnicos genéricos — DB, Redis, Gemini, Evolution
 │   │   ├── adapters/           # gemini_provider, evolution_adapter, parsers
 │   │   ├── database/           # models.py, session.py (async + NullPool)
 │   │   ├── repositories/
-│   │   ├── services/           # rag_search_service, router_service, synthesis
+│   │   ├── services/           # audio, db_connector, graph_extractor, ingestion (services de infra remanescentes)
 │   │   ├── redis_client.py     # índices RedisVL, busca_hibrida (sync p/ Celery)
 │   │   ├── celery_app.py
 │   │   └── message_stream.py   # Redis Streams journal
 │   ├── memory/                 # Ports + adapters da memória (legado + cognitiva)
-│   ├── rag/                    # embeddings, ingestion pipeline, query_transform
+│   ├── rag/                    # embeddings, ingestion pipeline
 │   └── main.py                 # Entry point FastAPI
 ├── migrations/                 # Alembic (async)
 ├── templates/hub/              # Jinja2 admin
@@ -68,6 +91,8 @@ Oraculo/
 ├── docker-compose.yml
 └── Dockerfile
 ```
+
+**Fluxo de decisão:** `application/tasks/process_message_task.py` → `router.supervisor.rotear()` (retorna nome do agente) → `agents.registry.resolve(nome)` → `agent.execute(context)` → `application/runtime/dispatcher.dispatch(...)` (monta chain Celery). Ver `PLANO_REFATORACAO_SUPERVISOR.md` para o histórico completo da migração (Fases 0-7).
 
 ---
 
@@ -157,13 +182,13 @@ processar_mensagem_task
     │ 2. Lock: lock:msg:{phone} (TTL 90s)
     │ 3. MemoryService.carregar_contexto()
     ▼
-CognitiveOS.processar()
+application/runtime/dispatcher.processar()   # ex CognitiveOS.processar()
     │ Guardrails input
-    │ HITL intercept (hitl:session:{sid})
-    │ LLMOrchestrator (LN) OU SemanticRouter (comandos !@$)
-    │   Router 5 camadas: regex L1 → heurística L2 → regex seeded L3 → KNN L4 → Flash L5
+    │ HITL intercept (hitl:session:{sid}) → agents/sigaa/auth_flow.py
+    │ router.llm_fallback.orchestrate() (LN) OU router.supervisor.rotear() (comandos !@$)
+    │   Supervisor 5 camadas: regex L1 → heurística L2 → regex seeded L3 → KNN L4 → Flash L5
     │ SemanticCache (cosine > 0.92)
-    │ Planner → DAG JSON
+    │ Planner (agents/academic_knowledge/planning.py) → DAG JSON
     │ WorkerRegistry.dispatch() → Celery workers especializados
     │ Poll Redis Stream final_responses (timeout 15s)
     │ Guardrails output
@@ -285,7 +310,7 @@ celery_app = Celery(
 
 **Ingestão:** `src/rag/ingestion/pipeline.py` → parser (PyMuPDF/RapidOCR) → chunker → embedding Gemini → `salvar_chunk()` Redis.
 
-**Retrieval:** `RAGSearchService.buscar()`:
+**Retrieval:** `agents/academic_knowledge/service.py` (`RAGSearchService.buscar()`, decisão) + `capabilities/rag/retrieval.py` (mecânica de busca/RRF):
 
 1. Query transform (Gemini Flash, opcional).
 2. `busca_hibrida()` — BM25 + KNN + RRF.

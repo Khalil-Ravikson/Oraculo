@@ -48,5 +48,24 @@ class BaseAgent(Protocol):
     description: str
     permissions: list[str]
 
-    def can_execute(self, context: AgentContext) -> bool: ...
+    async def can_execute(self, context: AgentContext) -> bool: ...
     async def execute(self, context: AgentContext) -> AgentResponse: ...
+
+
+class AgentEnabledMixin:
+    """`can_execute()` comum a todo agente concreto (Sprint 2, Fase 1).
+
+    Elimina a duplicação idêntica que existia em `academic_knowledge/service.py`,
+    `sigaa/service.py`, `conversation/registration.py` e `tickets/service.py`.
+    Não substitui `BaseAgent` (Protocol) — só fornece a implementação default
+    para quem herdar dele.
+
+    `can_execute()` é async desde a Sprint 2 Fase 6 — `is_agent_enabled` passou
+    a consultar o catálogo Postgres antes do fallback Redis.
+    """
+
+    name: str
+
+    async def can_execute(self, context: AgentContext) -> bool:
+        from src.capabilities.persistence.agent_config import is_agent_enabled
+        return await is_agent_enabled(context.redis, self.name)

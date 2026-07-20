@@ -208,16 +208,13 @@ async def metrics_stream(request: Request):
 
     
 
-class WebChatRequest(BaseModel):
-    message: str
-
 @router.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request):
     """Página do Simulador de Chat Web."""
     payload = _verificar_cookie(request)
     if not payload:
         return RedirectResponse("/hub/login", status_code=302)
-    # Cria o session_id igual ao que você usa no chat_send
+    # Cria o session_id igual ao que você usa no chat/stream
     session_id = f"web_session_{payload.sub}"
 
     return templates.TemplateResponse(
@@ -225,28 +222,6 @@ async def chat_page(request: Request):
         name="hub/chat.html",
         context={"request": request, "username": payload.sub,"session_id": session_id},
     )
-
-@router.post("/chat/send")
-async def chat_send(request: Request, data: WebChatRequest):
-    """Endpoint REST que o JS do frontend vai chamar."""
-    payload = _verificar_cookie(request)
-    if not payload:
-        return {"error": "Não autorizado"}
-    
-    from src.application.use_cases.simulate_web_chat import SimulateWebChatUseCase
-    
-    # ID da sessão único para este admin no simulador web
-    session_id = f"web_session_{payload.sub}" 
-    
-    use_case = SimulateWebChatUseCase()
-    resposta = await use_case.executar(
-        session_id=session_id, 
-        mensagem=data.message, 
-        admin_name=payload.sub
-    )
-    
-    return {"response": resposta}
-
 
 
 def _sse_step(step: str, status: str, detail: str, elapsed: float = 0, extra: dict | None = None) -> str:
@@ -334,7 +309,7 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
                             yield _sse_step("synthesis", "running", "Autenticando e extraindo dados do SIGAA...")
                             t0 = _t.monotonic()
                             
-                            from src.application.chain.cognitive_os import _aguardar_resposta_final
+                            from src.application.runtime.dispatcher import _aguardar_resposta_final
                             final_data = await _aguardar_resposta_final(event["plan_id"], timeout=15.0)
                             synth_ms = _t.monotonic() - t0
                             
@@ -414,7 +389,7 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
             # ── 1. Router ─────────────────────────────────
             yield _sse_step("router", "running", "Classificando intenção…")
             t0 = _t.monotonic()
-            from src.application.routing.semantic_router import rotear
+            from src.router.supervisor import rotear
             decision = await rotear(msg, thread_id, {"role": "admin"})
             yield _sse_step("router", "ok",
                 f"→ {decision.rota} ({decision.confianca:.0%})",
@@ -530,7 +505,7 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
                         yield _sse_step("synthesis", "running", "Aguardando resposta do SIGAA...")
                         t0 = _t.monotonic()
                         
-                        from src.application.chain.cognitive_os import _aguardar_resposta_final
+                        from src.application.runtime.dispatcher import _aguardar_resposta_final
                         final_data = await _aguardar_resposta_final(plan_id, timeout=15.0)
                         synth_ms = _t.monotonic() - t0
                         
@@ -636,7 +611,7 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
             # ── 3. Dispatch ───────────────────────────────
             yield _sse_step("dispatch", "running", f"Despachando {len(plan.steps)} worker(s)…")
             t0 = _t.monotonic()
-            from src.application.chain.cognitive_os import _despachar_workers, _aguardar_resposta_final
+            from src.application.runtime.dispatcher import _despachar_workers, _aguardar_resposta_final
             await _despachar_workers(plan)
             yield _sse_step("dispatch", "ok", "Workers enfileirados (Celery)", _t.monotonic() - t0)
 
@@ -704,32 +679,6 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
             
-@router.get("/audit/data")
-async def audit_data(request: Request):
-    """Endpoint REST para alimentar a tabela de Auditoria."""
-    payload = _verificar_cookie(request)
-    if not payload:
-        return {"error": "Não autorizado"}
-        
-    from src.application.use_cases.get_audit_logs import GetAuditLogsUseCase
-    use_case = GetAuditLogsUseCase()
-    # CORRECT: Added await
-    logs = await use_case.executar() 
-    return {"logs": logs}
-
-
-@router.get("/users/data")
-async def users_data(request: Request, role: str = ""):
-    """Endpoint REST para alimentar a tabela de Utilizadores."""
-    payload = _verificar_cookie(request)
-    if not payload:
-        return {"error": "Não autorizado"}
-        
-    from src.application.use_cases.get_users_list import GetUsersListUseCase
-    users = await GetUsersListUseCase().executar(role)
-    return {"users": users}
-
-
 # Adicionar em src/api/hub.py
 
 from pydantic import BaseModel
@@ -860,17 +809,31 @@ async def agents_data(request: Request):
     from src.agents.registry import registry
     from src.capabilities.persistence.agent_config import status_de_todos
     from src.infrastructure.redis_client import get_redis_text
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.agent_catalog_repository import AgentCatalogRepository
 
     agentes = registry.all()
-    status = status_de_todos(get_redis_text(), [a.name for a in agentes])
+    status = await status_de_todos(get_redis_text(), [a.name for a in agentes])
+
+    catalogo: dict[str, dict] = {}
+    try:
+        async with AsyncSessionLocal() as session:
+            catalogo = {row["nome"]: row for row in await AgentCatalogRepository(session).listar()}
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler catálogo Postgres de agentes: %s", exc)
 
     return {
         "agentes": [
             {
                 "name": a.name,
-                "description": a.description,
+                "description": catalogo.get(a.name, {}).get("descricao") or a.description,
                 "permissions": a.permissions,
                 "enabled": status[a.name],
+                "atualizado_em": (
+                    catalogo.get(a.name, {}).get("atualizado_em").isoformat()
+                    if catalogo.get(a.name, {}).get("atualizado_em") else None
+                ),
+                "atualizado_por": catalogo.get(a.name, {}).get("atualizado_por"),
             }
             for a in agentes
         ]
@@ -897,8 +860,187 @@ async def agents_toggle(request: Request, name: str, data: AgentToggleRequest):
     except KeyError:
         return {"error": f"Agente '{name}' não encontrado."}
 
-    set_agent_enabled(get_redis_text(), name, data.enabled)
+    await set_agent_enabled(get_redis_text(), name, data.enabled, admin=payload.sub)
     return {"name": name, "enabled": data.enabled}
+
+
+class AgentDescricaoRequest(BaseModel):
+    descricao: str
+
+
+@router.post("/agents/{name}/descricao")
+async def agents_set_descricao(request: Request, name: str, data: AgentDescricaoRequest):
+    """Edita a descrição administrável do agente no catálogo Postgres (Sprint 2, Fase 9)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.agents.registry import registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.agent_catalog_repository import AgentCatalogRepository
+
+    try:
+        registry.resolve(name)
+    except KeyError:
+        return {"error": f"Agente '{name}' não encontrado."}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await AgentCatalogRepository(session).atualizar_descricao(name, data.descricao, admin=payload.sub)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao atualizar descrição de '%s': %s", name, exc)
+        return {"error": "Falha ao gravar no Postgres. Tente novamente."}
+
+    return {"name": name, "descricao": data.descricao}
+
+
+@router.get("/agents/{name}/prompt", response_class=HTMLResponse)
+async def agent_prompt_page(request: Request, name: str):
+    """Serve a página de edição/histórico de prompt de um agente."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/agent_prompt.html",
+        context={"request": request, "username": payload.sub, "agent_name": name},
+    )
+
+
+@router.get("/agents/{name}/prompt/data")
+async def agent_prompt_data(request: Request, name: str):
+    """Prompt ativo (Postgres/Redis legado/hardcoded) + histórico de versões."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.agents.registry import registry
+    from src.capabilities.persistence.prompt_config import historico, obter_prompt_ativo
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        agente = registry.resolve(name)
+    except KeyError:
+        return {"error": f"Agente '{name}' não encontrado."}
+
+    fallback = "(este agente não tem prompt de LLM próprio)"
+    if name == "academic_knowledge":
+        from src.agents.academic_knowledge.prompts import SYSTEM_SYNTHESIS
+        fallback = SYSTEM_SYNTHESIS
+    try:
+        async with AsyncSessionLocal() as session:
+            prompt_ativo = await obter_prompt_ativo(session, name, fallback=fallback, redis=get_redis_text())
+            versoes = await historico(session, name)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler prompt de '%s': %s", name, exc)
+        return {"error": "Falha ao ler o Postgres. Tente novamente."}
+
+    return {
+        "name": name,
+        "prompt_ativo": prompt_ativo,
+        "historico": [
+            {
+                "version": v["version"],
+                "active": v["active"],
+                "created_by": v["created_by"],
+                "created_at": v["created_at"].isoformat() if hasattr(v["created_at"], "isoformat") else v["created_at"],
+                "preview": v["prompt_text"][:200],
+            }
+            for v in versoes
+        ],
+    }
+
+
+class AgentPromptRequest(BaseModel):
+    prompt: str
+
+
+@router.post("/agents/{name}/prompt")
+async def agent_prompt_publicar(request: Request, name: str, data: AgentPromptRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.agents.registry import registry
+    from src.capabilities.persistence.prompt_config import publicar_novo_prompt
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        registry.resolve(name)
+    except KeyError:
+        return {"error": f"Agente '{name}' não encontrado."}
+
+    if len(data.prompt.strip()) < 20:
+        return {"error": "Prompt muito curto (mínimo 20 caracteres)."}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            nova = await publicar_novo_prompt(session, name, data.prompt, created_by=payload.sub)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao publicar prompt de '%s': %s", name, exc)
+        return {"error": "Falha ao gravar no Postgres. Tente novamente."}
+
+    return {"name": name, "version": nova.version}
+
+
+@router.post("/agents/{name}/prompt/reset")
+async def agent_prompt_resetar(request: Request, name: str):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.agents.registry import registry
+    from src.capabilities.persistence.prompt_config import resetar_para_padrao
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        registry.resolve(name)
+    except KeyError:
+        return {"error": f"Agente '{name}' não encontrado."}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await resetar_para_padrao(session, name, created_by=payload.sub)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao resetar prompt de '%s': %s", name, exc)
+        return {"error": "Falha ao gravar no Postgres. Tente novamente."}
+
+    return {"name": name, "reset": True}
+
+
+@router.get("/capabilities", response_class=HTMLResponse)
+async def capabilities_page(request: Request):
+    """Serve a página somente-leitura do catálogo de capabilities/tools."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/capabilities.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/capabilities/data")
+async def capabilities_data(request: Request):
+    """Lista as capabilities/tools registradas (autodiscovery de capabilities/registry.py)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.capabilities.registry import available
+
+    # Nenhuma das tools existentes tem consumidor vivo em produção hoje (ver
+    # débito técnico documentado em capabilities/tools/__init__.py) — o hub
+    # avisa isso explicitamente em vez de sugerir que são operacionais.
+    return {
+        "tools": [
+            {"name": nome, "sem_consumidor_producao": True}
+            for nome in available()
+        ]
+    }
 
 
 @router.get("/eval", response_class=HTMLResponse)
@@ -911,197 +1053,6 @@ async def eval_page(request: Request):
         request=request, name="hub/eval.html",
         context={"request": request, "username": payload.sub, "modelo": settings.GEMINI_MODEL},
     )
-# ─────────────────────────────────────────────────────────────────────────────
-# Endpoints
-# ─────────────────────────────────────────────────────────────────────────────
-
-from src.api.routers.admin.eval_api import EVAL_DATASET,_evaluate_single, _aggregate_results,_persist_eval_result,asdict,AsyncIterator
-
-@router.get("/dataset")
-async def get_dataset():
-    """Retorna o dataset de avaliação."""
-    return JSONResponse({"dataset": EVAL_DATASET, "total": len(EVAL_DATASET)})
-
-
-@router.post("/single")
-async def eval_single(request: Request):
-    """Avalia uma única pergunta. Rápido para o botão 'Testar'."""
-    try:
-        body = await request.json()
-        question = body.get("question", "").strip()
-        if not question:
-            return JSONResponse({"error": "question obrigatório"}, status_code=400)
-
-        # Cria item sintético
-        item = {
-            "id":       "custom",
-            "category": "CUSTOM",
-            "question": question,
-            "keywords": question.split()[:5],
-            "expected_source": None,
-        }
-        result = await _evaluate_single(item, session_id="eval_single")
-        return JSONResponse(asdict(result))
-
-    except Exception as e:
-        logger.exception("❌ [EVAL] /single falhou: %s", e)
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-# Fila global de progresso para SSE
-_eval_progress_queue: asyncio.Queue = asyncio.Queue(maxsize=500)
-_eval_running = False
-
-
-@router.post("/run")
-async def eval_run(request: Request):
-    """
-    Inicia avaliação completa em background.
-    Progresso disponível via GET /eval/stream (SSE).
-    """
-    global _eval_running
-    if _eval_running:
-        return JSONResponse({"error": "Avaliação já em andamento"}, status_code=409)
-
-    try:
-        body = await request.json()
-        ids = body.get("ids", None)   # None = todos
-    except Exception:
-        ids = None
-
-    dataset = EVAL_DATASET
-    if ids:
-        dataset = [d for d in EVAL_DATASET if d["id"] in ids]
-
-    # Executa em background task
-    asyncio.create_task(_run_eval_background(dataset))
-
-    return JSONResponse({
-        "ok":    True,
-        "total": len(dataset),
-        "msg":   "Avaliação iniciada. Acompanhe em /eval/stream"
-    })
-
-
-async def _run_eval_background(dataset: list[dict]) -> None:
-    global _eval_running
-    _eval_running = True
-    results = []
-
-    await _eval_progress_queue.put(json.dumps({
-        "type": "start", "total": len(dataset)
-    }))
-
-    for i, item in enumerate(dataset):
-        await _eval_progress_queue.put(json.dumps({
-            "type":     "progress",
-            "current":  i + 1,
-            "total":    len(dataset),
-            "question": item["question"][:60],
-        }))
-
-        result = await _evaluate_single(item)
-        results.append(result)
-
-        await _eval_progress_queue.put(json.dumps({
-            "type":       "result",
-            "id":         result.id,
-            "question":   result.question[:60],
-            "hit_rate":   result.hit_rate,
-            "mrr":        result.mrr,
-            "crag":       result.crag_score,
-            "faithfulness": result.faithfulness,
-            "relevancy":  result.answer_relevancy,
-            "latency_ms": result.latency_ms,
-            "error":      result.error,
-        }))
-
-        # Pequena pausa entre perguntas para não saturar a API
-        await asyncio.sleep(0.5)
-
-    # Calcula e salva agregado
-    run_result = _aggregate_results(results)
-    _persist_eval_result(run_result)
-
-    await _eval_progress_queue.put(json.dumps({
-        "type":       "done",
-        "run_id":     run_result.run_id,
-        "avg_hit":    run_result.avg_hit_rate,
-        "avg_mrr":    run_result.avg_mrr,
-        "avg_crag":   run_result.avg_crag,
-        "avg_faith":  run_result.avg_faithfulness,
-        "avg_relev":  run_result.avg_relevancy,
-        "avg_lat_ms": run_result.avg_latency_ms,
-    }))
-
-    _eval_running = False
-
-
-@router.get("/stream")
-async def eval_stream(request: Request):
-    """SSE: progresso da avaliação em tempo real."""
-    async def generator() -> AsyncIterator[str]:
-        while True:
-            if await request.is_disconnected():
-                break
-            try:
-                msg = await asyncio.wait_for(_eval_progress_queue.get(), timeout=15.0)
-                yield f"data: {msg}\n\n"
-            except asyncio.TimeoutError:
-                yield f"data: {json.dumps({'type': 'ping'})}\n\n"
-
-    return StreamingResponse(
-        generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-@router.get("/results")
-async def eval_results():
-    """Retorna os últimos resultados de avaliação."""
-    try:
-        from src.infrastructure.redis_client import get_redis_text
-        r = get_redis_text()
-        raw = r.lrange("eval:results", 0, 4)
-        results = [json.loads(item) for item in raw]
-        return JSONResponse({"results": results})
-    except Exception as e:
-        return JSONResponse({"results": [], "error": str(e)})
-
-
-# ADICIONAR — endpoint de eventos do calendário (usado pelo frontend)
-@router.get("/eventos")
-async def eval_eventos():
-    """Retorna eventos dos próximos 30 dias para o widget de calendário."""
-    try:
-        from src.rag.calendar_parser import buscar_eventos_proximos
-        eventos = buscar_eventos_proximos(dias_frente=30)
-        return JSONResponse({
-            "eventos": [
-                {
-                    "nome": e.nome,
-                    "data_inicio": e.data_inicio.strftime("%d/%m/%Y"),
-                    "data_fim": e.data_fim.strftime("%d/%m/%Y") if e.data_fim else None,
-                    "dias_restantes": e.dias_restantes,
-                    "categoria": e.categoria,
-                    "emoji": e.emoji,
-                }
-                for e in eventos
-            ]
-        })
-    except Exception as e:
-        logger.exception("❌ [EVAL] /eventos: %s", e)
-        return JSONResponse({"eventos": [], "error": str(e)})
-
-
-# ADICIONAR — renomear /run para /run-full (o frontend chama /eval/run-full)
-@router.post("/run-full")
-async def eval_run_full(request: Request):
-    """Alias de /run para compatibilidade com o frontend."""
-    return await eval_run(request)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Endpoints Integrados do ChunkViz (Controller)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1121,8 +1072,10 @@ async def cv_upload(
     file: UploadFile = File(...),
     parser: str = Form("auto"),
 ):
-    _verificar_cookie(request) # Lança exception se não logado
-    
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+
     try:
         content = await file.read()
         meta = save_temp_file(file.filename, content, parser)
@@ -1150,7 +1103,9 @@ async def cv_get_page(
     file_id: str = Form(...),
     page: int = Form(0),
 ):
-    _verificar_cookie(request)
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         meta = load_temp_meta(file_id)
         pages, full_text = extract_document_pages(meta["path"], meta["ext"], meta["parser"])
@@ -1176,7 +1131,9 @@ class SimReq(BaseModel):
 
 @router.post("/chunkviz/simulate")
 async def cv_simulate(request: Request, body: SimReq):
-    _verificar_cookie(request)
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     if not body.text.strip():
         raise HTTPException(400, "Texto vazio")
         
@@ -1201,7 +1158,9 @@ class IngestReq(BaseModel):
 
 @router.post("/chunkviz/ingest")
 async def cv_ingest(request: Request, body: IngestReq):
-    _verificar_cookie(request)
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         from src.api.routers.tools.chunkviz_tools import load_temp_meta
         meta   = load_temp_meta(body.file_id)
@@ -1243,7 +1202,9 @@ async def cv_ingest(request: Request, body: IngestReq):
 
 @router.get("/chunkviz/task/{task_id}")
 async def cv_task_status(request: Request, task_id: str):
-    _verificar_cookie(request)
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         from src.infrastructure.celery_app import celery_app
         r = celery_app.AsyncResult(task_id)
@@ -1259,7 +1220,9 @@ async def cv_extract_url(
     request: Request,
     url: str = Form(...),
 ):
-    _verificar_cookie(request)
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         from src.infrastructure.scraping.implementations.generic_scraper import GenericHTTPScraper
         from src.infrastructure.scraping.base_scraper import ScrapeRequest
@@ -1278,9 +1241,8 @@ async def cv_extract_url(
             "file_id": file_id, "name": url, "ext": ".txt",
             "size_kb": len(doc.content)//1024, "path": file_path, "parser": "txt",
         }
-        # Persiste o JSON de metadados (mesmo formato que save_temp_file grava)
-        with open(os.path.join(TEMP_DIR, f"{file_id}.json"), "w", encoding="utf-8") as f:
-            json.dump(meta, f)
+        # Chama a função lá do tools pra salvar o JSON
+        save_temp_file(file_id, str(meta).encode(), "txt") # Só pra constar a criação
 
         return {
             "file_id":    file_id,
@@ -1306,13 +1268,19 @@ import asyncio
 import json
 
 @router.get("/eval/dataset")
-async def get_dataset():
+async def get_dataset(request: Request):
     """Retorna o dataset de avaliação."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     return JSONResponse({"dataset": EVAL_DATASET, "total": len(EVAL_DATASET)})
 
 @router.post("/eval/single")
 async def eval_single(request: Request):
     """Avalia uma única pergunta. Rápido para o botão 'Testar'."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         body = await request.json()
         question = body.get("question", "").strip()
@@ -1345,6 +1313,9 @@ async def eval_run(request: Request):
     Inicia avaliação completa em background.
     Progresso disponível via GET /eval/stream (SSE).
     """
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     global _eval_running
     if _eval_running:
         return JSONResponse({"error": "Avaliação já em andamento"}, status_code=409)
@@ -1439,6 +1410,10 @@ async def _run_eval_background(dataset: list[dict]) -> None:
 @router.get("/eval/stream")
 async def eval_stream(request: Request):
     """SSE: progresso da avaliação em tempo real."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+
     async def generator() -> AsyncIterator[str]:
         while True:
             if await request.is_disconnected():
@@ -1456,8 +1431,11 @@ async def eval_stream(request: Request):
     )
 
 @router.get("/eval/results")
-async def eval_results():
+async def eval_results(request: Request):
     """Retorna os últimos resultados de avaliação."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         from src.infrastructure.redis_client import get_redis_text
         r = get_redis_text()
@@ -1473,6 +1451,9 @@ async def eval_query(request: Request):
     SSE: executa UMA pergunta e emite eventos de cada step em tempo real.
     Consumido pelo pipeline view do dashboard.
     """
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         body = await request.json()
         pergunta = body.get("pergunta", "").strip()
@@ -1486,7 +1467,7 @@ async def eval_query(request: Request):
     queue: asyncio.Queue = asyncio.Queue()
 
     async def _run():
-        from src.application.chain.cognitive_os import processar
+        from src.application.runtime.dispatcher import processar
         
         await queue.put(json.dumps({
             "tipo": "step_start", "step": "routing"
@@ -1594,8 +1575,11 @@ async def eval_query(request: Request):
     )
 
 @router.get("/eval/eventos")
-async def eval_eventos():
+async def eval_eventos(request: Request):
     """Retorna eventos dos próximos 30 dias para o widget de calendário."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         from src.rag.calendar_parser import buscar_eventos_proximos
         eventos = buscar_eventos_proximos(dias_frente=30)
@@ -1619,4 +1603,6 @@ async def eval_eventos():
 @router.post("/eval/run-full")
 async def eval_run_full(request: Request):
     """Alias de /run para compatibilidade com o frontend."""
-    return await eval_run(request)
+    payload = _verificar_cookie(request)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Não autorizado")

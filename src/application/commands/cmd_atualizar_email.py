@@ -1,5 +1,5 @@
 """
-!atualizaremail seu@email.com — atualiza o e-mail do próprio cadastro.
+"!atualizaremail seu@email.com — atualiza o e-mail do próprio cadastro."
 
 Repõe o antigo agente "tickets" (dormente em produção — a rota CRUD nunca
 chegava a despachar `dispatch("action", ...)`) por uma única ação real e
@@ -21,7 +21,7 @@ class CmdAtualizarEmail(BaseCommand):
             return "❌ Use: !atualizaremail seu@email.com"
 
         from src.capabilities.persistence.agent_config import is_agent_enabled
-        if not is_agent_enabled(ctx.r, "tickets"):
+        if not await is_agent_enabled(ctx.r, "tickets"):
             return "🚧 Essa função está temporariamente desativada."
 
         from src.agents.tickets.service import TicketService

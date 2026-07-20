@@ -5,6 +5,13 @@ PLANO_REFATORACAO_SUPERVISOR.md — cobre especificamente os overrides
 administrativos (admin:gemini_blocked, admin:system_prompt) que antes só
 existiam na implementacao dormente e agora valem para o worker_synthesis
 real.
+
+Sprint 2 (Fase 8): a resolução de `admin:system_prompt` passa por
+`prompt_config.obter_prompt_ativo` (Postgres → Redis legado → hardcoded);
+`test_sintetizar_usa_system_prompt_override` continua cobrindo o caso
+"Redis legado" (Postgres inalcançável neste ambiente cai no fallback
+automaticamente); `test_sintetizar_usa_prompt_do_postgres_quando_ativo` cobre
+o caso "Postgres ativo" explicitamente.
 """
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -53,6 +60,47 @@ async def test_sintetizar_usa_system_prompt_override():
     assert result.answer == "resposta gerada"
     called_kwargs = mock_generate.call_args.kwargs
     assert called_kwargs["config"].system_instruction == "Prompt customizado"
+
+
+@pytest.mark.asyncio
+async def test_sintetizar_usa_prompt_do_postgres_quando_ativo(monkeypatch):
+    """Postgres manda mesmo se o Redis legado tiver um valor diferente."""
+    import src.agents.academic_knowledge.synthesis as synthesis_module
+    synthesis_module._client = None  # reseta o singleton do client (isolamento entre testes)
+
+    mock_redis = MagicMock()
+    mock_redis.get.side_effect = lambda key: (
+        "prompt legado (nao deveria ser usado)" if key == "admin:system_prompt" else None
+    )
+
+    async def _obter_fake(session, agent_name, fallback, redis=None):
+        return "prompt do Postgres"
+
+    monkeypatch.setattr(
+        "src.capabilities.persistence.prompt_config.obter_prompt_ativo", _obter_fake,
+    )
+
+    mock_response = MagicMock()
+    mock_response.text = "resposta gerada"
+    mock_response.usage_metadata = MagicMock(prompt_token_count=5, candidates_token_count=3)
+    mock_generate = AsyncMock(return_value=mock_response)
+    mock_aio = MagicMock(models=MagicMock(generate_content=mock_generate))
+
+    with patch("src.infrastructure.redis_client.get_redis_text", return_value=mock_redis), \
+         patch("google.genai.Client") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client.aio = mock_aio
+        mock_client_class.return_value = mock_client
+
+        with patch("src.infrastructure.settings.settings.GEMINI_API_KEY", "fake_key"):
+            result = await SynthesisService().sintetizar(
+                chunks=[{"content": "texto", "source": "doc.pdf"}],
+                plan_ctx={"query": "oi"},
+            )
+
+    assert result.ok is True
+    called_kwargs = mock_generate.call_args.kwargs
+    assert called_kwargs["config"].system_instruction == "prompt do Postgres"
 
 
 @pytest.mark.asyncio

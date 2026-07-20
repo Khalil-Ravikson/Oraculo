@@ -166,7 +166,13 @@ async def metrics(_: TokenPayload = Depends(require_admin_jwt)):
     # Flags de sistema
     manutencao = r.get("admin:maintenance_mode") == "1"
     api_bloq   = r.get("admin:gemini_blocked") == "1"
-    prompt_custom = bool(r.get("admin:system_prompt"))
+    try:
+        from src.capabilities.persistence.prompt_config import tem_override_ativo
+        from src.infrastructure.database.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            prompt_custom = await tem_override_ativo(session, "academic_knowledge", redis=r)
+    except Exception:
+        prompt_custom = bool(r.get("admin:system_prompt"))
 
     return {
         "redis_ok":       redis_ok(),
@@ -273,10 +279,19 @@ async def atualizar_user(
 async def system_flags(_: TokenPayload = Depends(require_admin_jwt)):
     from src.infrastructure.redis_client import get_redis_text
     r = get_redis_text()
+
+    from src.capabilities.persistence.prompt_config import tem_override_ativo
+    from src.infrastructure.database.session import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as session:
+            prompt_custom = await tem_override_ativo(session, "academic_knowledge", redis=r)
+    except Exception:
+        prompt_custom = bool(r.get("admin:system_prompt"))
+
     return {
         "manutencao":     r.get("admin:maintenance_mode") == "1",
         "gemini_bloq":    r.get("admin:gemini_blocked") == "1",
-        "prompt_custom":  r.get("admin:system_prompt") or "",
+        "prompt_custom":  prompt_custom,
     }
 
 
@@ -285,15 +300,20 @@ async def set_prompt(
     body:    PromptRequest,
     payload: TokenPayload = Depends(require_admin_jwt),
 ):
-    from src.infrastructure.redis_client import get_redis_text
-    r = get_redis_text()
+    """Sprint 2 (Fase 8): grava no catálogo versionado Postgres
+    (`agent_prompts`, agente `academic_knowledge` — hoje o único que consome
+    um system prompt de LLM) em vez da chave Redis crua `admin:system_prompt`."""
+    from src.capabilities.persistence.prompt_config import publicar_novo_prompt, resetar_para_padrao
+    from src.infrastructure.database.session import AsyncSessionLocal
 
-    if body.prompt:
-        r.set("admin:system_prompt", body.prompt)
-        msg = f"✅ System prompt atualizado ({len(body.prompt)} chars)."
-    else:
-        r.delete("admin:system_prompt")
-        msg = "✅ System prompt resetado para o padrão."
+    async with AsyncSessionLocal() as session:
+        if body.prompt:
+            await publicar_novo_prompt(session, "academic_knowledge", body.prompt, created_by=payload.sub)
+            msg = f"✅ System prompt atualizado ({len(body.prompt)} chars)."
+        else:
+            await resetar_para_padrao(session, "academic_knowledge", created_by=payload.sub)
+            msg = "✅ System prompt resetado para o padrão."
+        await session.commit()
 
     from src.infrastructure.adapters.redis_audit_log import RedisAuditLog
     await RedisAuditLog().registar(

@@ -224,6 +224,44 @@ class IntentRouter(Base):
     criado_em    = Column(DateTime(timezone=True), server_default=func.now())
     atualizado_em = Column(DateTime(timezone=True), onupdate=func.now())
 
+class AgenteCatalogo(Base):
+    """Catálogo administrável de agentes (Sprint 2, Fase 3).
+
+    `permissions` é espelho somente-leitura do código (populado por upsert em
+    `AgentCatalogRepository.upsert_from_code`, ver Fase 4) — não editável via
+    hub. `ativo`/`descricao` são o estado administrável de verdade.
+    """
+    __tablename__ = "agentes_catalogo"
+
+    id             = Column(Integer, primary_key=True)
+    nome           = Column(String(50), nullable=False, unique=True, index=True)
+    descricao      = Column(Text, nullable=True)
+    permissions    = Column(ARRAY(String), server_default="{}", nullable=False)
+    ativo          = Column(Boolean, server_default="true", nullable=False)
+    criado_em      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    atualizado_por = Column(String(100), nullable=True)
+
+
+class AgentPrompt(Base):
+    """Histórico versionado de prompts por agente (Sprint 2, Fase 7/8).
+
+    Nunca faz UPDATE do texto — sempre INSERT de uma nova versão. No máximo
+    1 linha `active=true` por `agent_name` (garantido por índice parcial
+    único no schema, migration 006). Sem FK para `agentes_catalogo.nome`
+    (deliberado, ver migration).
+    """
+    __tablename__ = "agent_prompts"
+
+    id           = Column(Integer, primary_key=True)
+    agent_name   = Column(String(50), nullable=False, index=True)
+    prompt_text  = Column(Text, nullable=False)
+    version      = Column(Integer, nullable=False)
+    active       = Column(Boolean, server_default="false", nullable=False)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_by   = Column(String(100), nullable=True)
+
+
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
 

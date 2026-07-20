@@ -1,0 +1,173 @@
+{% extends "hub/_base.html" %}
+{% block title %}Prompt — {{ agent_name }} — Oráculo UEMA{% endblock %}
+
+{% block content %}
+<style>
+  :root {
+    --bg: #090b0d; --surface: #0f1214; --surface2: #141719;
+    --border: #1e2225; --border-hover: #2e3235;
+    --accent: #ff6b35; --accent-dim: rgba(255,107,53,.1);
+    --green: #2eb872; --red: #e84040; --blue: #5a8dee;
+    --text: #c8d0d8; --muted: #5a6370;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  .header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(9,11,13,.92); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px; height: 58px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-icon { width: 30px; height: 30px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; display: grid; place-items: center; font-size: 14px; }
+  .brand-title { font-size: 14px; font-weight: 700; }
+  .brand-sub { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+  .back-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); padding: 5px 12px; border-radius: 5px; cursor: pointer; font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-decoration: none; transition: all .2s; }
+  .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .main { padding: 32px 28px; max-width: 900px; margin: 0 auto; }
+  .section-label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  textarea {
+    width: 100%; min-height: 260px; background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+    font-family: var(--mono); font-size: 12px; line-height: 1.5; resize: vertical;
+  }
+  .actions { display: flex; gap: 10px; margin-top: 14px; }
+  button {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .04em;
+    padding: 8px 16px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text); transition: all .2s;
+  }
+  button.primary { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+  button.danger { border-color: var(--red); color: var(--red); background: transparent; }
+  button:hover { border-color: var(--border-hover); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+  .badge-active { color: var(--green); font-family: var(--mono); font-size: 10px; }
+  .preview { color: var(--muted); font-size: 11px; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--surface); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 12px 18px;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--accent); z-index: 1000;
+    opacity: 0; transform: translateY(8px);
+    transition: all .3s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+</style>
+
+<header class="header">
+  <div class="brand">
+    <div class="brand-icon">📝</div>
+    <div>
+      <div class="brand-title">Prompt — {{ agent_name }}</div>
+      <div class="brand-sub">Histórico versionado</div>
+    </div>
+  </div>
+  <a href="/hub/agents" class="back-btn">← Agentes</a>
+</header>
+
+<main class="main">
+  <div class="section-label">// prompt ativo</div>
+  <div class="card">
+    <textarea id="prompt-text" placeholder="Carregando..."></textarea>
+    <div class="actions">
+      <button class="primary" onclick="publicar()">Publicar nova versão</button>
+      <button class="danger" onclick="resetar()">Resetar para o padrão</button>
+    </div>
+  </div>
+
+  <div class="section-label">// histórico de versões</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Versão</th><th>Status</th><th>Autor</th><th>Data</th><th>Preview</th></tr></thead>
+      <tbody id="historico-body">
+        <tr><td colspan="5" style="color:var(--muted)">Carregando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const AGENT_NAME = {{ agent_name | tojson }};
+
+function toast(msg, type='ok') {
+  const el = document.getElementById('toast');
+  el.textContent = type === 'ok' ? '✅ ' + msg : '❌ ' + msg;
+  el.style.borderColor = type === 'ok' ? 'var(--green)' : 'var(--red)';
+  el.style.color = type === 'ok' ? 'var(--green)' : 'var(--red)';
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+async function carregar() {
+  try {
+    const r = await fetch(`/hub/agents/${AGENT_NAME}/prompt/data`);
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'err'); return; }
+
+    document.getElementById('prompt-text').value = d.prompt_ativo;
+    document.getElementById('historico-body').innerHTML = d.historico.length
+      ? d.historico.map(v => `
+        <tr>
+          <td>v${v.version}</td>
+          <td>${v.active ? '<span class="badge-active">ATIVO</span>' : ''}</td>
+          <td>${v.created_by || '-'}</td>
+          <td>${v.created_at ? new Date(v.created_at).toLocaleString() : '-'}</td>
+          <td class="preview" title="${v.preview.replace(/"/g, '&quot;')}">${v.preview}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="5" style="color:var(--muted)">Nenhuma versão publicada — usando o prompt padrão hardcoded.</td></tr>';
+  } catch (e) {
+    toast('Erro ao carregar: ' + e.message, 'err');
+  }
+}
+
+async function publicar() {
+  const prompt = document.getElementById('prompt-text').value;
+  try {
+    const r = await fetch(`/hub/agents/${AGENT_NAME}/prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'err'); return; }
+    toast(`Prompt publicado (v${d.version}).`);
+    carregar();
+  } catch (e) {
+    toast('Erro: ' + e.message, 'err');
+  }
+}
+
+async function resetar() {
+  if (!confirm('Resetar para o prompt padrão? Isso desativa a versão customizada atual.')) return;
+  try {
+    const r = await fetch(`/hub/agents/${AGENT_NAME}/prompt/reset`, { method: 'POST' });
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'err'); return; }
+    toast('Prompt resetado para o padrão.');
+    carregar();
+  } catch (e) {
+    toast('Erro: ' + e.message, 'err');
+  }
+}
+
+carregar();
+</script>
+{% endblock %}

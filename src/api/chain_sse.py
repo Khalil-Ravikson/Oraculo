@@ -13,7 +13,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 # 🔥 Importamos o novo orquestrador do sistema
-from src.application.chain.cognitive_os import processar
+from src.application.runtime.dispatcher import processar
 
 logger = logging.getLogger(__name__)
 sse_router = APIRouter(prefix="/api/chain", tags=["chain-sse"])
@@ -33,10 +33,10 @@ async def stream_chain(
 
     async def event_generator():
         t0 = time.monotonic()
-        
+
         # 1. Evento de Início (Frontend mostra "Processando...")
         yield f"data: {json.dumps({'name': 'start', 'status': 'ok', 'detail': 'Iniciando Cognitive OS', 'latency_ms': 0})}\n\n"
-        
+
         try:
             # 2. Executa a inteligência
             result = await processar(
@@ -45,32 +45,32 @@ async def stream_chain(
                 user_context=user_context,
                 history=""
             )
-            
+
             latencia = int((time.monotonic() - t0) * 1000)
-            
+
             # 3. Evento de Resposta Pronta
             if getattr(result, "error", None):
                 payload = {
-                    "name": "generate", 
-                    "status": "error", 
-                    "detail": result.error, 
+                    "name": "generate",
+                    "status": "error",
+                    "detail": result.error,
                     "latency_ms": latencia
                 }
             else:
                 payload = {
-                    "name": "generate", 
-                    "status": "ok", 
-                    "detail": result.answer, 
+                    "name": "generate",
+                    "status": "ok",
+                    "detail": result.answer,
                     "latency_ms": latencia,
                     "data": {"route": getattr(result, "rota", "GERAL")}
                 }
-            
+
             yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                
+
         except Exception as e:
             logger.error(f"Erro no SSE Stream: {e}")
             yield f"data: {json.dumps({'name': 'error', 'status': 'error', 'detail': str(e), 'latency_ms': 0})}\n\n"
-            
+
         # 4. Evento Finalizador (Frontend fecha a conexão SSE)
         yield f"data: {json.dumps({'name': 'DONE', 'status': 'ok', 'detail': '', 'latency_ms': 0})}\n\n"
 

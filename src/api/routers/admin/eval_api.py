@@ -311,7 +311,7 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
 
     try:
         # 🔥 Usa o novo Cognitive OS em vez do Oracle Chain
-        from src.application.chain.cognitive_os import processar
+        from src.application.runtime.dispatcher import processar
         result = await processar(
             message=question,
             session_id=unique_session_id,
@@ -321,7 +321,7 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
 
         answer = result.answer
         if not answer and getattr(result, "plan_id", None):
-            from src.application.chain.cognitive_os import _aguardar_resposta_final
+            from src.application.runtime.dispatcher import _aguardar_resposta_final
             final_data = await _aguardar_resposta_final(result.plan_id, timeout=15.0)
             if final_data:
                 answer = final_data.get("answer", "")
@@ -404,7 +404,7 @@ async def _get_retrieved_chunks(question: str, route: str) -> list[str]:
     try:
         from src.rag.embeddings import get_embeddings
         # 🔥 Atualizado para puxar o normalizar do novo Service
-        from src.infrastructure.services.rag_search_service import _normalizar
+        from src.agents.academic_knowledge.service import _normalizar
         from src.infrastructure.redis_client import busca_hibrida
         import asyncio as _asyncio
 

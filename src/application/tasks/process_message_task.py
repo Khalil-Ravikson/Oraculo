@@ -124,7 +124,7 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
         mem_ctx = mem_svc.carregar_contexto(user_id=phone, session_id=phone, query=message)
         
         # ── Executa a chain (COGNITIVE OS) ─────────────────────────────────────
-        from src.application.chain.cognitive_os import processar as cognitive_processar
+        from src.application.runtime.dispatcher import processar as cognitive_processar
         
         t0 = time.monotonic()
         
@@ -295,7 +295,7 @@ def processar_mensagem_whatsapp(
 async def _handle_message(**kwargs) -> None:
     from src.infrastructure.redis_client import get_redis_text
     from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
-    from src.application.routing.message_router import MessageRouter, DispatchTarget
+    from src.router.gatekeeper import MessageRouter, DispatchTarget
     from src.application.routing.command_builder import CommandContext, dispatch_admin, dispatch_public
     from src.agents.conversation.registration import RegistrationFunnel
     from src.infrastructure.settings import settings 
@@ -340,12 +340,6 @@ async def _handle_message(**kwargs) -> None:
 
     # ── Funil de cadastro ─────────────────────────────────────────────────────
     if decision.target == DispatchTarget.REGISTER_MODE:
-        from src.capabilities.persistence.agent_config import is_agent_enabled
-        if not is_agent_enabled(r, "conversation"):
-            await gateway.enviar_mensagem(
-                chat_id, "🚧 O cadastro está temporariamente desativado. Tente novamente mais tarde."
-            )
-            return
         reply = await funnel.process(sender, text, push_name=kwargs["push_name"], redis=r)
         if reply:
             await gateway.enviar_mensagem(chat_id, reply)
@@ -387,7 +381,7 @@ async def _handle_message(**kwargs) -> None:
         mem_ctx = mem_svc.carregar_contexto(user_id=sender, session_id=sender, query=text)
 
         # ── CognitiveOS: ───────────────────────────────────────────────────────
-        from src.application.chain.cognitive_os import processar as cognitive_processar
+        from src.application.runtime.dispatcher import processar as cognitive_processar
         result_os = await cognitive_processar(
             message=text,
             session_id=sender,

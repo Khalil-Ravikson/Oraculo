@@ -24,6 +24,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.agents.base import AgentEnabledMixin
 from src.agents.academic_knowledge.query_transform import QueryTransformService
 from src.agents.academic_knowledge.synthesis import SynthesisService
 
@@ -386,7 +387,7 @@ def _source_para_titulo(source: str) -> str:
 # AcademicKnowledgeAgent — esqueleto BaseAgent (ver docstring do módulo)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class AcademicKnowledgeAgent:
+class AcademicKnowledgeAgent(AgentEnabledMixin):
     name = "academic_knowledge"
     description = "Responde perguntas acadêmicas via RAG (calendário, editais, contatos, wiki)."
     permissions: list[str] = []
@@ -394,10 +395,6 @@ class AcademicKnowledgeAgent:
     def __init__(self) -> None:
         self._rag = RAGSearchService()
         self._synthesis = SynthesisService()
-
-    def can_execute(self, context) -> bool:
-        from src.capabilities.persistence.agent_config import is_agent_enabled
-        return is_agent_enabled(context.redis, self.name)
 
     async def execute(self, context):
         from src.agents.base import AgentResponse

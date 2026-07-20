@@ -121,7 +121,7 @@ async def _startup(settings) -> None:
     try:
         from src.agents.bootstrap import register_all_agents
         from src.agents.registry import registry
-        register_all_agents()
+        await register_all_agents()
         logger.info("✅ [AGENT REGISTRY] Agentes disponíveis: %s", [a.name for a in registry.all()])
     except Exception as exc:
         logger.warning("⚠️  Falha ao registrar agentes: %s", exc)

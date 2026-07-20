@@ -20,6 +20,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.agents.base import AgentEnabledMixin
 from src.agents.sigaa import eligibility
 from src.capabilities.sigaa.browser import SIGAAAgent, SIGAASeleniumFallback
 
@@ -322,17 +323,13 @@ class SigaaService:
 # SigaaAgent — BaseAgent (ver agents/base.py e agents/registry.py, Fase 2)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class SigaaAgent:
+class SigaaAgent(AgentEnabledMixin):
     name = "sigaa"
     description = "Consulta dados acadêmicos do discente no SIGAA (notas, histórico, turmas, CR/IRA, estrutura curricular)."
     permissions: list[str] = []
 
     def __init__(self) -> None:
         self._service = SigaaService()
-
-    def can_execute(self, context) -> bool:
-        from src.capabilities.persistence.agent_config import is_agent_enabled
-        return is_agent_enabled(context.redis, self.name)
 
     async def execute(self, context):
         from src.agents.base import AgentResponse

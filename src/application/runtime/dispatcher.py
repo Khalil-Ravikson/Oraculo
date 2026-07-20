@@ -129,7 +129,7 @@ async def processar(
         is_command = message.startswith(("!", "@", "$"))
 
         if not is_command:
-            from src.application.routing.llm_orchestrator import orchestrate
+            from src.router.llm_fallback import orchestrate
             from src.memory.services.redis_memory_service import get_cognitive_memory
 
             mem = get_cognitive_memory()
@@ -179,12 +179,7 @@ async def processar(
             decision_rota = None  # deixa o Supervisor decidir
 
         # ── 1. Supervisor (só para comandos ou quando o Orchestrator pediu RAG) ──
-        # NOTA: importado via shim (application/routing/semantic_router.py), não
-        # diretamente de router.supervisor -- testes fazem
-        # patch("src.application.routing.semantic_router.rotear", ...) e isso só
-        # funciona se o import real passar por esse módulo (patch em atributo de
-        # módulo não afeta outro módulo que importou a mesma função antes do patch).
-        from src.application.routing.semantic_router import rotear
+        from src.router.supervisor import rotear
         decision = await rotear(message, session_id, user_context)
 
         # Orchestrator tem prioridade sobre o Supervisor para linguagem natural
@@ -194,7 +189,7 @@ async def processar(
         # ── Circuit-breaker por agente (liga/desliga em /hub/agents) ──────────
         from src.capabilities.persistence.agent_config import is_agent_enabled
         agente_da_rota = _ROTA_PARA_AGENTE.get(decision.rota)
-        if agente_da_rota and not is_agent_enabled(r, agente_da_rota):
+        if agente_da_rota and not await is_agent_enabled(r, agente_da_rota):
             ms = int((time.monotonic() - t0) * 1000)
             _OS_LATENCY.observe(ms)
             _OS_REQUESTS.labels(status="agent_disabled").inc()

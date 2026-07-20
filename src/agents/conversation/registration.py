@@ -19,6 +19,9 @@ Estados no Redis (TTL 10min):
 """
 from __future__ import annotations
 import logging
+
+from src.agents.base import AgentEnabledMixin
+
 logger = logging.getLogger(__name__)
 
 _BOAS_VINDAS = (
@@ -59,7 +62,15 @@ class RegistrationFunnel:
             if len(curso) < 3:
                 return "Por favor, informe o nome do seu curso."
 
-            await self._salvar_usuario(sender, nome, curso)
+            sucesso = await self._salvar_usuario(sender, nome, curso)
+            if not sucesso:
+                # Não limpa o estado do Redis nem confirma sucesso: a próxima
+                # mensagem do usuário reprocessa este mesmo passo, tentando
+                # salvar de novo (Sprint 3, Fase 0 — ver registration_repository.py).
+                return (
+                    "⚠️ Tivemos um problema técnico ao salvar seu cadastro. "
+                    "Por favor, envie o nome do seu curso novamente."
+                )
 
             # Limpa estado de registro
             for key in (f"register:mode:{sender}",
@@ -85,16 +96,18 @@ class RegistrationFunnel:
                 return _CADASTRO_OK.format(nome=nome.split()[0])
 
     @staticmethod
-    async def _salvar_usuario(telefone: str, nome: str, curso: str) -> None:
+    async def _salvar_usuario(telefone: str, nome: str, curso: str) -> bool:
         from src.capabilities.persistence.registration_repository import salvar_pessoa
         try:
             await salvar_pessoa(telefone, nome, curso)
             logger.info("✅ Usuário cadastrado via funil: %s", telefone[-6:])
+            return True
         except Exception as e:
             logger.error("❌ RegistrationFunnel._salvar_usuario: %s", e)
+            return False
 
 
-class ConversationAgent:
+class ConversationAgent(AgentEnabledMixin):
     """
     BaseAgent mínimo (ver agents/base.py e agents/registry.py, Fase 2).
     Registrado no Agent Registry, mas AINDA NÃO é o caminho quente de
@@ -111,10 +124,6 @@ class ConversationAgent:
 
     def __init__(self) -> None:
         self._funnel = RegistrationFunnel()
-
-    def can_execute(self, context) -> bool:
-        from src.capabilities.persistence.agent_config import is_agent_enabled
-        return is_agent_enabled(context.redis, self.name)
 
     async def execute(self, context):
         from src.agents.base import AgentResponse
