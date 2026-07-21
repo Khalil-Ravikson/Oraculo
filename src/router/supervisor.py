@@ -80,6 +80,15 @@ _RE_SIGAA = re.compile(
     r'(sigaa|biblioteca|acervo|livro|obra|marc|inscrever|inscrição|processo seletivo|edital sigaa|concurso uema|nota|média|cr\b|ira\b|histórico|turmas|grade|matéria|integraliza|grade curricular|estrutura curricular|sala|professor|complementar)',
     re.I
 )
+# Abertura de chamado/ticket em linguagem livre (item 1 da rodada de testes de
+# ponta-a-ponta — antes só alcançável via !atualizaremail). Mesmo padrão do
+# regex de SIGAA acima: fast-path L1, sem gastar tokens do Flash.
+_RE_TICKET_ABERTURA = re.compile(
+    r'(abrir?\s+(um\s+)?(ticket|chamado)|preciso\s+(de\s+)?(um\s+)?(ticket|chamado)|'
+    r'quero\s+(abrir|fazer)\s+(um\s+)?(ticket|chamado)|registrar\s+(um\s+)?chamado|'
+    r'suporte\s+t[ée]cnico|problema\s+(no|com)\s+.*sistema)',
+    re.I
+)
 
 
 def _regex_rapido(query: str) -> str | None:
@@ -90,6 +99,8 @@ def _regex_rapido(query: str) -> str | None:
         return "MEDIA_DOWNLOAD"
     if _RE_GREETING.match(query.strip()):
         return "GREETING"
+    if _RE_TICKET_ABERTURA.search(query):
+        return "TICKET_ABERTURA"
     if _RE_SIGAA.search(query):
         return "SIGAA"
     return None
@@ -229,6 +240,11 @@ def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) 
             return {"steps": ["insta_download"], "url": match_insta.group(1)}
         return {"steps": ["ytb_download"], "url": query}
 
+    if rota == "TICKET_ABERTURA":
+        # Fast-path próprio em dispatcher.py (agents/tickets/ticket_flow.py) —
+        # nunca chega ao Planner/crud_confirm.
+        return {"steps": ["ticket_abertura"]}
+
     if rota == "SIGAA":
         from src.application.use_cases.sigaa_use_cases import SIGAAUseCase
         uc = SIGAAUseCase()
@@ -251,7 +267,10 @@ def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) 
         "EDITAL":      {"steps": ["rag_search"], "doc_type": "edital",     "k": 10},
         "CONTATOS":    {"steps": ["rag_search"], "doc_type": "contatos",   "k": 6},
         "WIKI":        {"steps": ["rag_search"], "doc_type": "wiki_ctic",  "k": 6},
-        "CRUD":        {"steps": ["crud_confirm"],                         "k": 0},
+        # dispatcher.py intercepta CRUD antes do Planner (agents/tickets/crud_tool.py)
+        # — "crud_confirm" nunca existiu de verdade, ver notas.md.
+        "CRUD":        {"steps": ["crud_tool"],                            "k": 0},
+        "TICKET_ABERTURA": {"steps": ["ticket_abertura"],                  "k": 0},
         "GREETING":    {"steps": ["greeting"],                             "k": 0},
         "GERAL":       {"steps": ["rag_search"], "doc_type": "geral",      "k": 6},
         "SIGAA":       {"steps": ["sigaa_biblioteca"],                     "k": 0},

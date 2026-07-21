@@ -33,3 +33,33 @@ async def atualizar_email_por_telefone(telefone: str, novo_email: str) -> bool:
         )
         await db.commit()
         return result.rowcount > 0
+
+
+async def atualizar_setor_e_telefone(
+    telefone_atual: str, novo_centro: str | None = None, novo_telefone: str | None = None
+) -> bool:
+    """Escopo pelo telefone atual do remetente (mesmo cuidado de
+    `atualizar_email_por_telefone`). Usado pela CRUD tool de teste
+    (`agents/tickets/crud_tool.py`) — gateada por `DEV_TEST_NO_DB_WRITE` no
+    chamador, esta função só faz a escrita real quando de fato invocada."""
+    if not novo_centro and not novo_telefone:
+        return False
+
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from sqlalchemy import text
+
+    sets, params = [], {"t": telefone_atual}
+    if novo_centro:
+        sets.append("centro = :centro")
+        params["centro"] = novo_centro
+    if novo_telefone:
+        sets.append("telefone = :novo_telefone")
+        params["novo_telefone"] = novo_telefone
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            text(f"UPDATE pessoas SET {', '.join(sets)} WHERE telefone = :t"),
+            params,
+        )
+        await db.commit()
+        return result.rowcount > 0

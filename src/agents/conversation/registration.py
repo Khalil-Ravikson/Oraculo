@@ -37,9 +37,17 @@ _CADASTRO_OK = (
 
 class RegistrationFunnel:
 
-    async def process(self, sender: str, text: str, push_name: str, redis) -> str:
+    async def process(self, sender: str, text: str, push_name: str, redis, chat_id: str | None = None) -> str:
         """
         Retorna a próxima mensagem a enviar, ou '' se o fluxo terminou.
+
+        `chat_id`: JID de entrega (grupo homologado ou 1:1). Em grupo, NUNCA é
+        igual a `sender` (o JID do remetente individual) — e com o novo
+        addressing @lid do WhatsApp, montar um JID a partir do número do
+        remetente pra enviar direto pra ele quebra com "exists:false"
+        (Evolution não reconhece o LID como número de telefone real). Todo
+        envio deve ir para `chat_id`, igual ao resto do funil já faz via
+        `gateway.enviar_mensagem(chat_id, reply)` em process_message_task.py.
         """
         step = redis.get(f"register:step:{sender}") or "start"
 
@@ -81,7 +89,7 @@ class RegistrationFunnel:
             try:
                 from src.capabilities.messaging.evolution_tool import enviar_botoes_confirmacao
                 await enviar_botoes_confirmacao(
-                    number=sender,
+                    number=chat_id or sender,
                     title="Cadastro Concluído!",
                     description=f"Bem-vindo(a), {nome.split()[0]}! O seu cadastro no curso de {curso} foi salvo. Os dados estão corretos?",
                     buttons=[
@@ -119,7 +127,11 @@ class ConversationAgent(AgentEnabledMixin):
     Supervisor passar a resolver por Agent Registry em vez de rota crua).
     """
     name = "conversation"
-    description = "Saudação, boas-vindas e funil de cadastro de novos usuários."
+    description = (
+        "Saudação, boas-vindas e funil de cadastro de novos usuários. "
+        "🧪 Rodada de testes: com settings.DEV_TEST_NO_DB_WRITE ativo, o cadastro final "
+        "grava JSON em dados/tmp/cadastro_dev/ em vez de INSERT/UPDATE real em `pessoas`."
+    )
     permissions: list[str] = []
 
     def __init__(self) -> None:
@@ -135,5 +147,6 @@ class ConversationAgent(AgentEnabledMixin):
             text=conversation.get("query", ""),
             push_name=identity.get("nome", ""),
             redis=context.redis,
+            chat_id=conversation.get("chat_id"),
         )
         return AgentResponse(answer=resposta or "")

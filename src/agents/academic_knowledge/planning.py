@@ -52,7 +52,6 @@ Sua única responsabilidade é decompor uma intenção de usuário em um plano d
 - "synthesis": Gera a resposta final em linguagem natural sintetizando os resultados. Args: {max_tokens: int, tone: str?}
   - "max_tokens": tamanho máximo da resposta (padrão: 512).
   - "tone": tom da resposta (opcional: "gentil", "formal").
-- "crud_confirm": Solicita confirmação manual (HITL) para alteração de dados cadastrais. Args: {action: str, description: str}
 - "greeting": Responde saudações, agradecimentos ou meta-perguntas de capacidades imediatamente. Args: {}
 </workers_disponiveis>
 
@@ -60,9 +59,8 @@ Sua única responsabilidade é decompor uma intenção de usuário em um plano d
 1. Dependências: O worker "synthesis" deve SEMPRE ter em "depends_on" o identificador do step "rag_search" correspondente (ex: se "rag_search" é "s1", "synthesis" deve ser "s2" com depends_on=["s1"]).
 2. Restrição: Não invente outros workers. Use estritamente a lista acima.
 3. Rota GREETING: Gere apenas um step com worker "greeting" (sem synthesis subsequente).
-4. Rota CRUD: Gere apenas um step com worker "crud_confirm".
-5. Consultas RAG Clássicas: Crie um plano com dois steps sequenciais: s1 ("rag_search") e s2 ("synthesis", dependendo de "s1").
-6. Responda estritamente com um objeto JSON válido, sem cercas de código markdown (```json) e sem comentários.
+4. Consultas RAG Clássicas: Crie um plano com dois steps sequenciais: s1 ("rag_search") e s2 ("synthesis", dependendo de "s1").
+5. Responda estritamente com um objeto JSON válido, sem cercas de código markdown (```json) e sem comentários.
 </regras_de_planejamento>
 </system_instruction>"""
 
@@ -72,13 +70,11 @@ class StepArgsSchema(BaseModel):
     k: int | None = Field(default=None, description="Quantidade de chunks para retornar")
     max_tokens: int | None = Field(default=None, description="Quantidade maxima de tokens na sintese")
     tone: str | None = Field(default=None, description="Tom da resposta (ex: 'gentil', 'formal')")
-    action: str | None = Field(default=None, description="Acao a ser executada no CRUD")
-    description: str | None = Field(default=None, description="Descricao amigavel da operacao CRUD")
 
 
 class PlanStepSchema(BaseModel):
     id: str = Field(description="Identificador unico do passo (ex: 's1', 's2')")
-    worker: str = Field(description="Nome do worker (ex: 'rag_search', 'synthesis', 'crud_confirm', 'greeting')")
+    worker: str = Field(description="Nome do worker (ex: 'rag_search', 'synthesis', 'greeting')")
     args: StepArgsSchema = Field(default_factory=StepArgsSchema, description="Argumentos especificos passados para o worker")
     depends_on: list[str] = Field(default_factory=list, description="Lista de IDs de passos dos quais este depende")
 
@@ -140,8 +136,14 @@ async def criar_plano(
         _PLANNER_LATENCY.observe(ms)
         return plan
 
-    if rota == "CRUD":
-        plan = _plano_crud(query, session_id, user_context, history, fatos or [])
+    if rota in ("CRUD", "TICKET_ABERTURA"):
+        # Defesa em profundidade: dispatcher.py intercepta essas duas rotas
+        # ANTES do Planner (agents/tickets/ticket_flow.py e crud_tool.py) —
+        # chegar aqui não deveria acontecer no fluxo normal. Não existe (nunca
+        # existiu) worker "crud_confirm" real; se cair aqui mesmo assim,
+        # responde com "greeting" (sempre válido) em vez de referenciar um
+        # worker fantasma — ver notas.md.
+        plan = _plano_simples(rota, query, session_id, user_context, history, fatos or [])
         ms = int((time.monotonic() - t0) * 1000)
         _PLANNER_LATENCY.observe(ms)
         return plan
@@ -295,23 +297,6 @@ def _plano_simples(
                  "history": history, "fatos": fatos},
     )
 
-
-def _plano_crud(
-    query: str, session_id: str,
-    user_context: dict, history: str, fatos: list[str],
-) -> ExecutionPlan:
-    return ExecutionPlan(
-        plan_id=str(uuid.uuid4()),
-        session_id=session_id,
-        rota="CRUD",
-        steps=[{
-            "id": "s1", "worker": "crud_confirm",
-            "args": {"action": "detectar_crud", "description": query[:100]},
-            "depends_on": [],
-        }],
-        context={"query": query, "user_context": user_context,
-                 "history": history, "fatos": fatos},
-    )
 
 def _plano_media(
     query: str, session_id: str,

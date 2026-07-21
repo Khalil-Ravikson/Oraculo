@@ -74,6 +74,7 @@ _ROTA_PARA_AGENTE = {
     "WIKI": "academic_knowledge",
     "SIGAA": "sigaa",
     "CRUD": "tickets",
+    "TICKET_ABERTURA": "tickets",
 }
 
 
@@ -122,6 +123,20 @@ async def processar(
         hitl_result = await handle_hitl_continuation(message, session_id, user_context, r)
         if hitl_result is not None:
             return hitl_result
+
+        # ── 0a. Continuação de rascunho de ticket/CRUD (agents/tickets/) ──────
+        # Chaves próprias (ticket_draft:*, crud_update_draft:*), checadas antes
+        # do roteamento normal — mesmo padrão do HITL do SIGAA acima, mas sem
+        # colidir com hitl:session:*.
+        from src.agents.tickets.ticket_flow import handle_ticket_continuation
+        ticket_result = await handle_ticket_continuation(message, session_id, user_context, r)
+        if ticket_result is not None:
+            return ticket_result
+
+        from src.agents.tickets.crud_tool import handle_crud_continuation
+        crud_result = await handle_crud_continuation(message, session_id, user_context, r)
+        if crud_result is not None:
+            return crud_result
 
         # ── 0b. Fast Path: comandos explícitos ───────────────────────────────
         # ! @ $ → vai direto pro router semântico existente (sem gastar tokens no LLM)
@@ -172,6 +187,10 @@ async def processar(
                 decision_rota = "SIGAA"
             elif orch_decision.action == "call_media":
                 decision_rota = "MEDIA_DOWNLOAD"
+            elif orch_decision.action == "call_ticket":
+                decision_rota = "TICKET_ABERTURA"
+            elif orch_decision.action == "call_crud_update":
+                decision_rota = "CRUD"
             else:
                 # call_rag → usa route_hint do orquestrador
                 decision_rota = orch_decision.route_hint or "GERAL"
@@ -184,7 +203,17 @@ async def processar(
 
         # Orchestrator tem prioridade sobre o Supervisor para linguagem natural
         if not is_command and decision_rota:
+            # BUG corrigido: antes só `decision.rota` era trocado, e o
+            # `dag_hint` ficava com o valor calculado para a rota ORIGINAL do
+            # Supervisor (ex: rota virava "GERAL" mas o hint ainda dizia
+            # {"steps": ["ticket_abertura"]}). O Planner (Gemini Pro) recebia
+            # rota e hint contraditórios e "resolvia" sozinho escolhendo um
+            # worker da sua whitelist que nem existe de verdade — daí o erro
+            # "Falha ao localizar worker crud_confirm no registry". Rota e
+            # hint têm que mudar juntos.
+            from src.router.supervisor import _dag_hint_para_rota
             decision.rota = decision_rota
+            decision.dag_hint = _dag_hint_para_rota(decision_rota, message)
 
         # ── Circuit-breaker por agente (liga/desliga em /hub/agents) ──────────
         from src.capabilities.persistence.agent_config import is_agent_enabled
@@ -332,6 +361,22 @@ async def processar(
                 _OS_REQUESTS.labels(status="ok").inc()
                 return sigaa_result
             # None → hitl_confirmed=True, cai pro Planner normal abaixo
+
+        # ── Fast-Path TICKET_ABERTURA (funil de chamado, agents/tickets/) ─────
+        if decision.rota == "TICKET_ABERTURA":
+            from src.agents.tickets.ticket_flow import start_ticket_abertura
+            ticket_start_result = await start_ticket_abertura(decision, message, session_id, user_context, r, t0)
+            _OS_LATENCY.observe(ticket_start_result.total_ms)
+            _OS_REQUESTS.labels(status="ok").inc()
+            return ticket_start_result
+
+        # ── Fast-Path CRUD (CRUD tool de teste, agents/tickets/crud_tool.py) ──
+        if decision.rota == "CRUD":
+            from src.agents.tickets.crud_tool import start_crud_update
+            crud_start_result = await start_crud_update(decision, message, session_id, user_context, r, t0)
+            _OS_LATENCY.observe(crud_start_result.total_ms)
+            _OS_REQUESTS.labels(status="ok").inc()
+            return crud_start_result
 
         # ── 2. Planner ────────────────────────────────────────────────────────
         from src.application.chain.planner import criar_plano

@@ -23,6 +23,52 @@ RESULTS_TTL            = 120
 HITL_SESSION_TTL       = 300
 AUTH_TOKEN_TTL         = 300
 
+# Rascunho do funil de tickets (agents/tickets/ticket_flow.py) — chave própria
+# para não colidir com hitl:session:* do SIGAA. TTL mais longo (18min) porque
+# o funil tem mais passos que a autenticação SIGAA. O marker sobrevive um
+# pouco mais que o draft só para permitir avisar o usuário na mensagem
+# seguinte quando o rascunho expira em silêncio (diferente do HITL do SIGAA).
+TICKET_DRAFT_TTL        = 1080  # 18 min
+TICKET_DRAFT_MARKER_TTL = 1140  # 19 min
+
+
+async def get_ticket_draft(r: Any, session_id: str) -> dict | None:
+    raw = await asyncio.to_thread(r.get, f"ticket_draft:{session_id}")
+    if not raw:
+        return None
+    return json.loads(raw if isinstance(raw, str) else raw.decode())
+
+
+async def set_ticket_draft(r: Any, session_id: str, data: dict, ttl: int = TICKET_DRAFT_TTL) -> None:
+    payload = json.dumps(data, ensure_ascii=False)
+    await asyncio.to_thread(r.setex, f"ticket_draft:{session_id}", ttl, payload)
+    await asyncio.to_thread(r.setex, f"ticket_draft_marker:{session_id}", TICKET_DRAFT_MARKER_TTL, "1")
+
+
+async def delete_ticket_draft(r: Any, session_id: str) -> None:
+    await asyncio.to_thread(r.delete, f"ticket_draft:{session_id}")
+    await asyncio.to_thread(r.delete, f"ticket_draft_marker:{session_id}")
+
+
+async def ticket_draft_expirou(r: Any, session_id: str) -> bool:
+    """True se existe um marker órfão (draft já sumiu por TTL, marker ainda vivo)."""
+    return bool(await asyncio.to_thread(r.exists, f"ticket_draft_marker:{session_id}"))
+
+
+async def get_crud_draft(r: Any, session_id: str) -> dict | None:
+    raw = await asyncio.to_thread(r.get, f"crud_update_draft:{session_id}")
+    if not raw:
+        return None
+    return json.loads(raw if isinstance(raw, str) else raw.decode())
+
+
+async def set_crud_draft(r: Any, session_id: str, data: dict, ttl: int = TICKET_DRAFT_TTL) -> None:
+    await asyncio.to_thread(r.setex, f"crud_update_draft:{session_id}", ttl, json.dumps(data, ensure_ascii=False))
+
+
+async def delete_crud_draft(r: Any, session_id: str) -> None:
+    await asyncio.to_thread(r.delete, f"crud_update_draft:{session_id}")
+
 
 async def get_hitl_session(r: Any, session_id: str) -> dict | None:
     raw = await asyncio.to_thread(r.get, f"hitl:session:{session_id}")

@@ -28,9 +28,23 @@ from __future__ import annotations
 
 async def salvar_pessoa(telefone: str, nome: str, curso: str) -> None:
     from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.settings import settings
     from sqlalchemy import text
 
     email_sintetico = f"{telefone}@whatsapp.oraculo.local"
+
+    # Bloqueio temporário de escrita real (rodada de testes ponta-a-ponta via
+    # WhatsApp) — ver notas_regras_negocio_chunkviz.md e dev_dump.py. Religa
+    # sozinho quando DEV_TEST_NO_DB_WRITE voltar a False.
+    if settings.DEV_TEST_NO_DB_WRITE:
+        from src.capabilities.persistence.dev_dump import salvar_json_dev
+        salvar_json_dev("cadastro_dev", telefone, {
+            "telefone": telefone,
+            "nome": nome,
+            "curso": curso,
+            "email_sintetico": email_sintetico,
+        })
+        return
 
     async with AsyncSessionLocal() as db:
         await db.execute(

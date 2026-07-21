@@ -13,14 +13,14 @@ from dataclasses import dataclass
 
 # ── Rotas válidas ──────────────────────────────────────────────────────────────
 ROTAS_VALIDAS = frozenset({
-    "CALENDARIO", "EDITAL", "CONTATOS", "WIKI", "CRUD", "GREETING", "GERAL", "MEDIA_DOWNLOAD", "SIGAA"
+    "CALENDARIO", "EDITAL", "CONTATOS", "WIKI", "CRUD", "TICKET_ABERTURA", "GREETING", "GERAL", "MEDIA_DOWNLOAD", "SIGAA"
 })
 
 # ── Workers Celery válidos para o Planner ──────────────────────────────────────
 # Fonte única de verdade (Fase 4): antes vivia duplicada como whitelist embutida
 # no prompt de application/chain/planner.py (_SYSTEM_PLANNER) e como set solto
 # em _planejar_com_pro. Agora agents/academic_knowledge/planning.py importa daqui.
-VALID_WORKERS = frozenset({"rag_search", "synthesis", "crud_confirm", "greeting"})
+VALID_WORKERS = frozenset({"rag_search", "synthesis", "greeting"})
 
 
 @dataclass

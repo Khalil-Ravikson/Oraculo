@@ -319,7 +319,12 @@ async def _handle_message(**kwargs) -> None:
     # ── Contexto do usuário ───────────────────────────────────────────────────
     user_data      = await _get_user_data(sender)
     is_admin       = _is_admin(sender, r)
-    is_registered  = user_data is not None
+    # Rodada de testes: DEV_TEST_SKIP_REGISTRATION libera qualquer remetente
+    # a pular o funil de cadastro (ver settings.py) — sem isso, com
+    # DEV_TEST_NO_DB_WRITE ligado, ninguém "vira registrado" de verdade
+    # (o SELECT abaixo nunca encontra a linha em `pessoas`) e o gatekeeper
+    # força REGISTER_MODE pra sempre, num loop sem saída.
+    is_registered  = True if settings.DEV_TEST_SKIP_REGISTRATION else (user_data is not None)
     in_reg_mode    = r.get(f"register:mode:{sender}") == "1"
     
     allowed_group  = settings.ALLOWED_GROUP_ID
@@ -340,7 +345,7 @@ async def _handle_message(**kwargs) -> None:
 
     # ── Funil de cadastro ─────────────────────────────────────────────────────
     if decision.target == DispatchTarget.REGISTER_MODE:
-        reply = await funnel.process(sender, text, push_name=kwargs["push_name"], redis=r)
+        reply = await funnel.process(sender, text, push_name=kwargs["push_name"], redis=r, chat_id=chat_id)
         if reply:
             await gateway.enviar_mensagem(chat_id, reply)
         return
@@ -364,6 +369,8 @@ async def _handle_message(**kwargs) -> None:
             "curso": user_data.get("curso", "") if user_data else "Instituição",
             "role":  user_data.get("role", "student") if user_data else "guest",
             "chat_id": chat_id,
+            "has_media": kwargs.get("has_media", False),
+            "media_type": kwargs.get("media_type", ""),
         }
 
         # ── Humanização: simula "digitando..." no grupo ───────────────────────

@@ -15,7 +15,8 @@
       "Bash(./venv/Scripts/python.exe -m pytest tests/unit tests/integration tests/eval -q)",
       "Bash(rmdir src/domain/tools)",
       "Bash(./venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('src/api/routers/web/hub.py', encoding='utf-8'\\).read\\(\\)\\)\")",
-      "Bash(python -m py_compile src/api/routers/web/hub.py)"
+      "Bash(python -m py_compile src/api/routers/web/hub.py)",
+      "Bash(venv/Scripts/python.exe -m py_compile src/router/llm_fallback.py src/application/runtime/dispatcher.py src/router/contracts.py src/router/supervisor.py src/agents/academic_knowledge/planning.py src/agents/conversation/registration.py src/application/tasks/process_message_task.py src/agents/tickets/rbac.py src/infrastructure/settings.py)"
     ]
   }
 }

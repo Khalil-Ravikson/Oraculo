@@ -69,7 +69,13 @@ class TicketAgent(AgentEnabledMixin):
     despachar "action" hoje).
     """
     name = "tickets"
-    description = "Atualizar e-mail de cadastro (!atualizaremail). GLPI/envio de e-mail ficam fora de uso por ora."
+    description = (
+        "Atualizar e-mail de cadastro (!atualizaremail); funil de abertura de chamado "
+        "('quero abrir um ticket') e CRUD de setor/telefone ('quero atualizar meu setor'). "
+        "🧪 Rodada de testes: GLPI real não existe ainda — chamado/CRUD gravam JSON local em "
+        "dados/tmp/ em vez de abrir chamado de verdade ou gravar no Postgres (ver "
+        "settings.DEV_TEST_NO_DB_WRITE). Envio de e-mail real segue fora de uso."
+    )
     permissions: list[str] = []
 
     def __init__(self) -> None:

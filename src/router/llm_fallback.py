@@ -47,7 +47,7 @@ _FLASH_TOKENS = Counter(
 
 class RoutingDecision(BaseModel):
     """Esquema Pydantic para validação estruturada da decisão de roteamento pelo Gemini."""
-    rota: str = Field(description="A rota: CALENDARIO, EDITAL, CONTATOS, WIKI, CRUD, GREETING, SIGAA, ou GERAL")
+    rota: str = Field(description="A rota: CALENDARIO, EDITAL, CONTATOS, WIKI, CRUD, TICKET_ABERTURA, GREETING, SIGAA, ou GERAL")
     confianca: float = Field(description="Nível de certeza da decisão (0.0 a 1.0)")
     motivo: str = Field(description="Justificativa breve da decisão (máx 60 caracteres)")
 
@@ -61,7 +61,8 @@ Sua única responsabilidade é analisar a mensagem de entrada e classificá-la e
 - EDITAL: Dúvidas sobre o PAES, editais de vestibular, número de vagas, cotas (AC, BR-PPI, PcD, etc.), documentos exigidos ou isenção de taxa.
 - CONTATOS: Pedidos de telefone, e-mail, ramal ou contatos de setores da UEMA (ex: CTIC, PROG, reitoria, secretarias de cursos).
 - WIKI: Informações sobre uso do SIGAA (recuperar senha, erro de acesso), rede Wi-Fi, laboratórios ou infraestrutura de sistemas.
-- CRUD: Pedidos do usuário para atualizar ou alterar seus próprios dados pessoais de cadastro (ex: "quero mudar meu telefone", "alterar curso").
+- CRUD: Pedidos do usuário para atualizar ou alterar seus próprios dados pessoais de cadastro (ex: "quero mudar meu telefone", "alterar curso", "atualizar meu setor").
+- TICKET_ABERTURA: Pedidos para abrir/registrar um chamado ou ticket de suporte técnico (ex: "quero abrir um chamado", "preciso de um ticket", "problema no sistema, preciso de suporte"). Diferente de CRUD: aqui o usuário quer relatar um problema/pedido novo, não alterar seu próprio cadastro.
 - GREETING: Saudações puras (ex: "olá", "bom dia"), agradecimentos (ex: "obrigado", "valeu"), ou perguntas sobre sua própria identidade e capacidades (ex: "como você pode me ajudar?", "quem é você?", "o que você faz?").
 - SIGAA: Consultas a dados acadêmicos pessoais do discente no SIGAA, incluindo notas, média, histórico escolar, coeficiente de rendimento (CR), índice de rendimento acadêmico (IRA), turmas do semestre, salas de aula, horários, professores, carga horária e estrutura curricular.
 - GERAL: Perguntas fora do escopo oficial da UEMA, conversas informais ou mensagens totalmente ambíguas que não se encaixam em nenhuma outra rota.
@@ -169,7 +170,7 @@ def _regex_fallback(query: str) -> str:
 # 2. Classificador de ação de alto nível (ex llm_orchestrator.py)
 # ─────────────────────────────────────────────────────────────────────────────
 
-ACTIONS = ["reply_direct", "call_rag", "call_sigaa", "check_status", "call_media"]
+ACTIONS = ["reply_direct", "call_rag", "call_sigaa", "check_status", "call_media", "call_ticket", "call_crud_update"]
 
 
 class OrchestratorDecision(BaseModel):
@@ -187,6 +188,8 @@ Analise a mensagem e decida a ação correta:
 - call_sigaa: notas, histórico, turmas, CR, IRA, estrutura curricular
 - check_status: usuário pergunta sobre andamento, solicita o resultado de uma tarefa/requisição anterior, ou faz referência à 'requisição anterior'.
 - call_media: usuário pede para baixar um vídeo, áudio, criar sticker, ou processar mídia
+- call_ticket: usuário quer ABRIR um chamado/ticket de suporte técnico novo (ex: "quero abrir um chamado", "preciso de um ticket", "problema no sistema, preciso de suporte"). Diferente de call_crud_update: aqui é um problema/pedido NOVO, não uma alteração do próprio cadastro.
+- call_crud_update: usuário quer ATUALIZAR/ALTERAR seus próprios dados de cadastro já existentes (ex: "quero mudar meu telefone", "atualizar meu setor", "alterar meu centro"). Diferente de call_ticket: aqui não há problema técnico a relatar, só um dado a corrigir.
 
 Você é uma API. RETORNE EXCLUSIVAMENTE UM JSON VÁLIDO obedecendo ao schema exigido. NÃO RETORNE MARKDOWN, NEM TEXTO EXPLICATIVO."""
 

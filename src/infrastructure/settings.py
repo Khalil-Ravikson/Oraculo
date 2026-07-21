@@ -18,6 +18,20 @@ class Settings(BaseSettings):
     DEV_MODE:      bool = False
     LOG_LEVEL:     str  = "INFO"
 
+    # Bloqueio temporário e reversível de escrita real no Postgres durante
+    # testes de ponta a ponta de cadastro/tickets/CRUD via WhatsApp — ver
+    # notas_regras_negocio_chunkviz.md. Enquanto True, os caminhos gateados
+    # gravam em JSON local (dados/tmp/...) em vez de fazer INSERT/UPDATE real.
+    # Default True enquanto durar a rodada de testes; religar via .env.
+    DEV_TEST_NO_DB_WRITE: bool = True
+
+    # Segunda flag da mesma rodada de testes: libera QUALQUER remetente a usar
+    # a IA/ticket/CRUD sem precisar concluir o funil de cadastro (que hoje só
+    # "conta" como registrado se cair no Postgres de verdade — coisa que
+    # DEV_TEST_NO_DB_WRITE bloqueia, criando um loop sem saída no funil).
+    # Também opt-in via .env, default False (produção normal exige cadastro).
+    DEV_TEST_SKIP_REGISTRATION: bool = False
+
     # ── Banco de Dados ────────────────────────────────────────────
     DATABASE_URL:  str  
     REDIS_URL:     str  = "redis://redis:6379/0"
