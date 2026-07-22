@@ -1225,31 +1225,37 @@ async def cv_extract_url(
         raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         from src.infrastructure.scraping.implementations.generic_scraper import GenericHTTPScraper
+        from src.infrastructure.scraping.implementations.dokuwiki import DokuWikiScraper
         from src.infrastructure.scraping.base_scraper import ScrapeRequest
 
-        result = await GenericHTTPScraper().scrape(ScrapeRequest(url=url, doc_type="web"))
+        # Roteia pelo domínio, igual ScrapingService._resolve(): wiki CTIC usa
+        # o scraper especializado (do=export_raw), qualquer outra URL cai no
+        # scraper genérico (fallback).
+        scraper = DokuWikiScraper() if "ctic.uema.br" in url else GenericHTTPScraper()
+        doc_type = "wiki_ctic" if isinstance(scraper, DokuWikiScraper) else "web"
+
+        result = await scraper.scrape(ScrapeRequest(url=url, doc_type=doc_type))
         if not result.ok or not result.document:
             raise HTTPException(500, f"Scraping falhou: {result.error}")
 
         doc = result.document
-        file_id   = hashlib.md5(url.encode()).hexdigest()[:16]
-        file_path = os.path.join(TEMP_DIR, f"{file_id}.txt")
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(doc.content)
-
-        meta = {
-            "file_id": file_id, "name": url, "ext": ".txt",
-            "size_kb": len(doc.content)//1024, "path": file_path, "parser": "txt",
-        }
-        # Chama a função lá do tools pra salvar o JSON
-        save_temp_file(file_id, str(meta).encode(), "txt") # Só pra constar a criação
+        # save_temp_file gera o próprio file_id (hash do conteúdo) e persiste
+        # o .json de metadados — não escrever o arquivo/hash manualmente aqui
+        # de novo (bug antigo: chamava save_temp_file(file_id, ...) sem
+        # extensão, o que sempre estourava "Formato '' não suportado").
+        meta = save_temp_file(f"{doc.title or 'pagina'}.txt", doc.content.encode("utf-8"), "txt")
+        if doc_type == "wiki_ctic":
+            meta["wiki_metadata"] = doc.metadata
+            with open(os.path.join(TEMP_DIR, f"{meta['file_id']}.json"), "w") as f:
+                json.dump(meta, f)
 
         return {
-            "file_id":    file_id,
+            "file_id":    meta["file_id"],
             "title":      doc.title,
             "text":       doc.content[:10000],
             "total_chars": len(doc.content),
             "word_count": doc.word_count,
+            "wiki_metadata": doc.metadata if doc_type == "wiki_ctic" else None,
         }
     except Exception as e:
         logger.exception("Scraping fail")

@@ -61,6 +61,31 @@ e `capabilities/registry.py`, mas nunca removido da whitelist).
   deveria acontecer — ele intercepta as duas rotas antes do Planner), agora
   cai num plano `greeting` inofensivo em vez de referenciar um worker fantasma.
 
+### Variante do bug encontrada depois (2026-07-21, fechando a rodada) — ainda não corrigida
+
+Ticket funcionou via texto livre ("Iniciar cadastro"), CRUD não (mensagem
+"Crud"). Causa: quando `orchestrate()` **falha** (exceção/JSON inválido —
+acontece com frequência alta, ver logs cheios de `❌ [ORCHESTRATOR] JSON
+Inválido: 'Here is'`), o except handler retorna um fallback HARDCODED
+(`action="call_rag", route_hint="GERAL"`). Esse fallback é tratado pelo
+`dispatcher.py` como se fosse uma decisão real do Orquestrador — e por isso
+**sempre sobrescreve** a classificação do Supervisor, mesmo quando o
+Supervisor acertou (`rota=CRUD conf=1.00` no log, apagado por baixo do
+"GERAL" de emergência). Resultado: cai no Planner genérico, que também
+falha, e a mensagem nunca chega no `crud_tool.py`/`ticket_flow.py`.
+
+Distinção que falta no código: "Orquestrador decidiu X" (deve poder
+sobrescrever o Supervisor) vs. "Orquestrador falhou e isto é só um valor de
+emergência" (NÃO deveria sobrescrever nada — deveria deixar o Supervisor
+decidir sozinho). Hoje os dois casos são indistinguíveis pro `dispatcher.py`
+porque o fallback usa o mesmo formato de uma decisão válida. Fix sugerido
+(não aplicado ainda, propositalmente — é candidato natural pro plano de
+unificação dos classificadores da próxima conversa, não outro remendo
+pontual): os except handlers de `orchestrate()` deveriam sinalizar falha de
+forma distinguível (ex: `action="orchestrator_failed"`), e o `dispatcher.py`
+tratar esse caso como `decision_rota = None` (não sobrescreve nada) em vez
+de forçar "GERAL".
+
 ### O que NÃO foi feito (decisão consciente, não é dívida esquecida)
 
 Não fundi os dois classificadores (Orquestrador + Supervisor) num só. Isso
@@ -270,3 +295,49 @@ esforço:
    verdade. Isso não afeta o funcionamento, mas mascara sinais reais de
    problema (não dá pra saber se um worker está realmente doente ou é só
    ruído do healthcheck errado).
+
+### 5.5 Painel admin único (`/hub`) — levantamento factual (2026-07-21)
+
+Usuário perguntou "o que são Router/Orquestrador no painel, posso ter um
+painel pra eles" — levantamento do que EXISTE hoje (não é proposta, é
+estado atual confirmado no código):
+
+**Já existe e funciona:**
+- `/hub` (`src/api/routers/web/hub.py`, login por cookie) — dashboard,
+  liga/desliga por agente (`/hub/agents`, grava Postgres+Redis via
+  `agent_config.py`), edição de prompt versionado por agente, gestão de
+  usuários, audit log, simulador de chat, dashboard de avaliação RAG,
+  chunkviz.
+- `/hub/capabilities` só LISTA tools registradas em `capabilities/registry.py`
+  — nenhuma tem consumidor vivo em produção hoje (decorativa).
+- Catálogo de agentes é híbrido: lista de 4 agentes é HARDCODED em
+  `agents/bootstrap.py` (autodiscovery seria "especulativo" pra só 4
+  agentes, por comentário do próprio arquivo); Postgres (`agentes_catalogo`)
+  só guarda enabled/disabled + prompt editável, não decide QUAIS agentes
+  existem.
+
+**Duplicação a limpar:** existe uma segunda API admin paralela
+(`src/api/routers/admin/*`, auth por header `X-Admin-Key` estático, não
+cookie) com funcionalidade sobreposta (usuários, audit, métricas de novo).
+Dois sistemas de auth/admin fazendo parte da mesma coisa.
+
+**NÃO existe hoje (gap real, não é só percepção do usuário):**
+- Nenhum toggle de Router (`router/supervisor.py`) nem do Orquestrador
+  (`router/llm_fallback.py::orchestrate()`) — só existe liga/desliga por
+  AGENTE. Faz sentido a confusão: são peças de infraestrutura do pipeline
+  sem representação nenhuma no painel hoje, e são literalmente os "2
+  cérebros" do problema documentado na seção 5.1.
+- RBAC (`ContextoPermissao`/`_PERMISSOES` em `domain/permissions.py`) é
+  dicionário fixo no código-fonte — nenhuma tela edita isso.
+- Redis: RedisInsight já roda (container separado, porta 8001) mas não
+  está integrado/logado no hub — aba separada sem SSO.
+- Postgres: nenhum admin, nem embutido nem separado (só `psql`).
+- Logs: nenhuma visão centralizada no hub (ver 5.4 acima).
+
+**Proposta pra próxima conversa (não decidida):** avaliar se `/hub` vira o
+"ponto de ignição" único de verdade — unificar com `admin_api.py` (não dois
+sistemas de auth), dar visibilidade real ao Router/Orquestrador (nem que
+seja só um painel de leitura mostrando qual decidiu o quê por mensagem,
+antes mesmo de ter toggle), trazer RBAC pra dentro do painel como
+configuração editável, e embutir/linkar Redis+Postgres+logs no mesmo lugar
+em vez de ferramentas espalhadas.

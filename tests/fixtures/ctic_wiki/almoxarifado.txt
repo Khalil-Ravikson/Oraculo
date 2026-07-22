@@ -1,0 +1,148 @@
+====== Módulo Almoxarifado ======
+
+\\
+O módulo Almoxarifado atende as demandas do Coordenação de Bens e Suprimentos (CBS), dando suporte à Divisão de  Almoxarifado dando suporte aos seus estoques e as requisições por eles atendidas. O atendimento de uma requisição provoca baixa no estoque. Através desse módulo é possível emitir relatórios, cadastrar materiais, gerenciar as requisições e estoques.
+
+Esta página descreve o módulo Almoxarifado detalhadamente e lista todas as suas operações, manuais de utilização e vídeos-aula.
+
+**Apresentação do Módulo:** {{ ::apresentacao_sipac_-_almoxarifado_-_versao_completa.pdf |}} 
+
+**Playlist no Youtube:** https://www.youtube.com/playlist?list=PLJBZXHlj3hKNiH8Cm-nSxljqLc9u5OWpN
+
+===== Perfis Envolvidos =====
+
+  * **Gestor de Almoxarifado:** Gerencia o controle de estoque do almoxarifado. Tem permissão de dar entradas no estoque (via nota fiscal, nota de fornecimento, entrada avulsa) e saídas (atendimento de requisição, saída avulsa).
+  * **Diretor Material:** Permite que o usuário tenha acesso ao saldo de determinado material em qualquer um dos almoxarifados existentes. Responsável pela parte de cadastro de materiais, à qual o gestor não tem acesso.
+  * **Auditor do Almoxarifado:** Permite que o usuário tenha acesso apenas aos relatórios e consultas do módulo de almoxarifado e não às operações de movimentação.
+
+===== Manuais do Gestor de Almoxarifado =====
+
+Para acessar o Módulo Almoxarifado através do perfil de Gestor de Almoxarifado, faça login no [[http://sis.sig.uema.br/sipac/| SIGUEMA Administrativo]], em seguida, clique em: “**Módulos**”;
+
+{{ :acesso_modulo.png?nolink |}}
+
+Em seguida, aparecerá o seguinte painel: 
+
+{{ :modulos_sipac.png?nolink&800 |}}
+
+Por fim, clique em “**Almoxarifado**” e você será direcionado para outra página, que irá variar de acordo com o perfil em que você está acessando.
+
+===== Perfil Gestor de Material =====
+
+==== Aba Estoque ====
+
+Nesta aba são realizadas diversas operações de Estoque como: Bloqueio de Material, Manutenção do Estoque, Cadastro de Nota Fiscal, Recebimento e Estorno de Nota de Fornecimento, Cadastro de Requisições, Registro de Saída Avulsa, além de consultas a Empenhos, Notas Fiscais, Requisições, entre outras consultas.
+
+|  ^  Nome   ^  Finalidade  ^  Caminho no Sistema  ^
+^  1  |  [[ Transferir Estoque do Material ]]  |  Permitir ajustar a quantidade de um determinado material no estoque. ** Esta funcionalidade está desativada no módulo.** |  Módulos -> Almoxarifado -> Estoque -> Estoque -> Transferir Estoque do Material.   |
+^  2  |  [[ Bloquear Material ]]  |  Impedir que um determinado material seja solicitado ao almoxarifado.  |  Módulos → Almoxarifado → Estoque → Estoque → Bloquear Material.   |
+^  3  |  [[ Manutenção do Estoque ]]  |  Gerenciar os materiais existentes no estoque do almoxarifado.   |  Módulos → Almoxarifado → Estoque → Estoque → Manutenção do Estoque.  |
+^  4  |  [[ Cadastrar Nota Fiscal ]]  |  Realizar a inserção do registro de uma nota fiscal recebida pelo almoxarifado.  |  Módulos → Almoxarifado → Estoque → Estoque → Nota Fiscal → Cadastrar.   |
+^  5  |  [[ Listar/Alterar Notas Fiscais ]]  |  Realizar alterações nas datas de cadastro de uma determinada nota fiscal inserida no sistema.   |  Módulos → Almoxarifado → Estoque → Estoque → Nota Fiscal → Listar/Alterar.  |
+^  6   |  [[ Ajustar Nota Fiscal ]]  |  Realizar alterações nos dados registrados referentes à uma nota fiscal inserida no sistema.   |  Módulos → Almoxarifado → Estoque → Estoque → Nota Fiscal → Ajustar.  |
+^  7  |  [[ Complementar Entrada de Material na Nota Fiscal ]]  |  Permitir o registro de entrega de um determinado material em uma data posterior à data exibida na nota fiscal.   |  Módulos → Almoxarifado → Estoque → Estoque → Nota Fiscal → Complementar Entrada de Material na Nota Fiscal.  |
+^  8  |  [[ Cadastrar Invoice ]]  | 	Inserção do Registro de invoices no sistema.  |  Módulos → Almoxarifado → Estoque → Estoque → Invoice → Cadastrar.  |
+^  9  |  [[ Listar/Alterar Invoice ]]  |  Alteração dos dados dos registros de invoices já inseridos no sistema.  |  Módulos → Almoxarifado → Estoque → Invoice → Listar/Alterar  |
+^  10  |  [[ Registrar Entrada Avulsa ]]  |  Permite a inserção de itens sem necessidade de informar uma requisição associada.  |  Módulos → Almoxarifado → Estoque → Entrada Avulsa → Registrar Entrada Avulsa  |
+^  11  |  [[ Imprimir Comprovante de Entrada Avulsa ]]  |  Imprimir Comprovante de entrada avulsa. |  Módulos → Almoxarifado → Estoque → Entrada Avulsa → Imprimir Comprovante  |
+^  12  |  [[ Registrar Saída Avulsa ]]  |  Permite o registro de saída de itens que não servem mais para atendimento ou saída especial.  |  Módulos → Almoxarifado → Estoque → Estoque → Saída Avulsa (Perda, Consumo Imediato, etc.) → Registrar Saída Avulsa.  |
+^  13  |  [[ Imprimir Comprovante Saída Avulsa ]]  |  Imprimir comprovante de saída avulsa.  |  Módulos → Almoxarifado → Estoque → Estoque → Saída Avulsa (Perda, Consumo Imediato, etc.) → Imprimir Comprovante.  |
+^  14  |  [[ Receber/Estornar Nota de Fornecimento ]]  |  Desfazer o registro indevido de uma nota de recebimento.   |   Módulos → Almoxarifado → Estoque → Estoque → Receber/Estornar Nota de Fornecimento.  |
+^ 11  |  [[ Cadastrar Requisição ]]  |  Inserir o registro de requisições.  |  Módulos → Almoxarifado → Estoque → Estoque → Requisição de material → Cadastrar Requisição.   |
+^ 15  |  [[ Modificar Requisição Existente ]]  |  Alterar os dados referente às requisições já inseridas no sistema.   |  Módulos → Almoxarifado → Estoque → Estoque → Requisição de Material → Modificar Requisição Existente.  |
+^ 16  |  [[ Acompanhar Requisições Enviadas ]]  |  Visualizar os dados referentes às requisições já inseridas no sistema.  |  Módulos → Almoxarifado → Estoque → Estoque → Requisição de Material → Acompanhar Requisição Enviada  |
+^ 17  |  [[ Consulta de Empenhos ]]  |  Visualizar os dados referentes aos empenhos já inseridos no sistema.  |   Módulos → Almoxarifado → Estoque → Consultas → Consulta de Empenhos.  |
+^ 18  |  [[ Consulta de Notas Fiscais ]]  |  Visualizar os dados referentes às notas fiscais já inseridas no sistema.  |  Módulos → Almoxarifado → Estoque → Consultas → Consulta de Notas Fiscais.  |
+^ 19  |  [[ Consulta de Processo de Compra Após a Licitação ]]  |  Visualizar os dados referentes aos processos de compra após a licitação já inseridos no sistema.  |  Módulos → Almoxarifado → Estoque → Consulta → Consulta de Processo de Compra Após a Licitação.  |
+^ 20  |  [[ Consulta de Requisições ]]  |  Visualizar os dados referentes às requisições já inseridas no sistema.  |  Módulos → Almoxarifado → Estoque → Consultas → Consulta de Requisições.  |
+
+
+==== Aba Requisições ====
+
+Nesta aba, são realizados todos os procedimentos referentes a requisições de materiais.como: Atendimento das requisições, alteração dos atendimentos, autorizações de atendimentos, retorno de requisições para o usuário de origem, alteração da unidade de medida para o atendimento, emissão dos comprovantes de atendimento e devolução de material.
+
+|  ^  Nome   ^  Finalidade  ^  Caminho no Sistema  ^
+^  1   |  [[ Acompanhar Reqs Enviadas ]]  |  Permitir que o usuário acompanhe e gerencie as requisições de materiais relacionadas ao almoxarifado.  |  Módulos → Almoxarifado → Requisições → Material/Requisições → Acompanhar Requisições Enviadas.  |
+^  2   |  [[ Alterar Destino da Requisição ]]  |  Alterar o destino de uma determinada requisição.  |  Módulos → Almoxarifado → Requisições → Material/Requisições → Alterar Destino da Requisição.  |
+^  3   |  [[ Alterar Unidade do Atendimento ]]  |  Alterar a unidade destino de uma determinada requisição.  |  Módulos → Almoxarifado → Requisições → Material/Requisições → Alterar Unidade do Atendimento.  |
+^   ​4  ​| ​ [[ Retornar Requisição ]]  |  Realizar o retorno de uma requisição ao usuário solicitante.  ​ |  Módulos → Almoxarifado → Requisições → Material/​Requisições → Retornar Requisição. ​  | 
+^   ​5  ​| ​ [[ Enviar Requisições ]]  |  Permitir que o usuário envie uma requisição de material que está em sua unidade de lotação para outra unidade da Instituição.  ​ |  Material/Requisições → Protocolo → Enviar Requisições ​  | 
+^   ​6  ​| ​ [[ Registrar Recebimento de Requisições ]]  |  Permitir que o usuário registre o recebimento de uma requisição de material que foi enviada por outra unidade da Instituição para a sua unidade de lotação.  ​ |  Material/Requisições → Protocolo → Registrar Recebimento.  | 
+^  7   |  [[ Alterar Atendimento ]]  |  Permite alterar as informações de atendimento de materiais em uma determinada requisição, informações essas associadas à quantidade de itens requisitados. Também é possível estornar o atendimento ou mudar o material do atendimento, conforme desejado.   |  Módulos → Almoxarifado → Requisições → Atendimento de Requisições → Alterar Atendimento.  |
+^  8   |  [[ Atendimento de Requisições - Almoxarifado ]]  |  Realizar o atendimento das requisições enviadas.  |  Módulos → Almoxarifado → Requisições → Atendimento de Requisições → Atendimento de Requisições.  |
+^  9   |  [[ Atendimento de Requisições de Devolução de Material ]]  |  Realizar o Atendimento de Requisições do tipo DEVOLUÇÃO DE MATERIAL.  |  Módulos → Almoxarifado → Requisições → Atendimento de Requisições → Atendimento de Requisições de Devolução de Material.  |
+^  10   |  [[ Autorização de Atendimento]]  |  Autorizar o atendimento de requisições destinadas ao seu setor.  |  Atendimento de Requisições → Autorização de Atendimento  |
+^  11   |  [[ Comprovante de Atendimento de Requisições ]]  |  Visualizar o comprovante do atendimento de uma determinada requisição.  |  Módulos → Almoxarifado → Requisições → Atendimento de Requisições → Comprovante → Atendimento.  |
+^  12   |  [[ Comprovante de Atendimento de Devolução ]]  |  Visualizar o comprovante de devolução de uma determinada requisição.  |  Módulos → Almoxarifado → Requisições → Atendimento de Requisições → Comprovante → Devolução.  |
+
+==== Aba Relatórios ====
+
+Nesta aba é possível emitir os mais diversos tipos de relatórios, como os relatórios de Materiais mais Solicitados, Estoque Mínimo, relatórios de Movimentação, extrato de movimentações, Movimentação por Material, Entradas por Nota Fiscal, e relatórios Gerais como relatórios de Consumo, Etiquetas de Prateleiras, de Devoluções, entre outros.
+
+|  ^  Nome   ^  Finalidade  ^  Caminho no Sistema  ^
+^  1   |  [[Relatório de Entradas por Nota Fiscal/Invoice  ]]  |  Criação de um relatório relacionando todos os materiais que entraram no almoxarifado do usuário através de notas fiscais.  | Movimentação → Entradas Por Nota Fiscal/Invoice  |
+^  2   |  [[ Entradas/Saídas Avulsas ]]  |  Criação de um relatório relacionando todas as entradas e saídas avulsas de materiais em relação ao almoxarifado do usuário.  |  Movimentação → Entradas/Saídas Avulsas  |
+^  3   |  [[Relatório do Extrato de Movimentação ]]  | Criação de um relatório relacionando todas as movimentações um determinado material ou grupo de material num período de tempo.  | Movimentação → Extrato de Movimentação   |
+^  ​4  ​| ​ [[ Relatório de Movimentação por Grupo do Material ]]  |  Criação de um relatório relacionando todas as movimentações um grupo de material no almoxarifado do usuário.  ​ |  ​Movimentação → Movimentação por Grupo do Material  | 
+^  ​5  ​| ​ [[ Relatório de Movimentação por Material ]]  |  Criação de um relatório relacionando todas as movimentações de um determinado material ou grupo de material ​ |   Movimentação → Movimentação por Material​  | 
+^  ​6  ​| ​ [[ Relatório de Movimentações Estornadas ]]  | Criação de um relatório relacionando todas as movimentações de material no almoxarifado do usuário.  ​ |  Movimentação → Movimentações Estornadas  | 
+^  7   |  [[ Relatório de Notas de Fornecimento]]  | Criação de um relatório relacionando as notas de recebimento referentes ao almoxarifado do usuário.   |  Movimentação → Notas de Fornecimento  |
+^  8   |  [[ Relatório de Oferta e Demanda de Materiais em Estoque ]]  |  Demanda de Materiais em Estoque	Criação de um relatório relacionando as ofertas e demandas de materiais referentes ao almoxarifado do usuário.  | Movimentação → Oferta e Demanda de Materiais em Estoque  |
+^  9   |  [[ Relatório de Entradas]]  | Criação de um relatório relacionando as entradas de material referentes ao almoxarifado do usuário.  |  Movimentação → Relatório de Entradas  |
+^  10   |  [[Relatório de Requisições Atend./Negadas ]]  | Criação de um relatório relacionando as requisições atendidas e negadas pelo almoxarifado do usuário.   |   Movimentação → Requisições Atend./Negadas |
+^  11   |  [[ 	Relatório de Movimentação do Almoxarifado - RMA Analítico ]]  | Criação de um relatório relacionando todas as movimentações de material no almoxarifado de forma analítica.   | Movimentação → RMA Analítico  |
+^  12   |  [[ Relatório de Movimentação do Almoxarifado - RMA Sintético ]]  |  Criação de um relatório relacionando todas as movimentações de material no almoxarifado de forma sintética.  |  Movimentação → RMA Sintético  |
+^  13   |  [[ Relatório de Saídas por Perdas]]  | Criação de um relatório relacionando todas as saídas por perdas do almoxarifado do usuário.  |  Movimentação → Saídas por Perdas  |
+^  14  ​| ​ [[ Relatório de Estoque Mínimo ]]  |  Criação de um relatório relacionando todos os materiais em estoque mínimo no almoxarifado do usuário.  ​ |  ​Material → Estoque Mínimo  | 
+^  15  ​| ​ [[ Relatório de Fornecedores do Material ]]  | Criação de um relatório relacionando todos os fornecedores de um determinado material.  ​ |  Material → Fornecedores do Material ​  | 
+^  16  ​| ​ [[ Relatório de Histórico de Entradas ]]  |  Criação de um relatório relacionando todas os valores das entradas de um determinado material. ​ |  Material → Histórico de Entradas  | 
+^  17   |  [[Relatório de Estoque Inventário ]]  |  Essa operação permite que o usuário visualize um relatório relacionando todos os itens existentes no estoque.  |  Material → Inventário  |
+^  18   |  [[ Relatório de Materiais a Vencer ]]  | Criação de um relatório relacionando todos os materiais com prazo de validade prestes a se extinguir.  |  Material → Materiais a Vencer |
+^  19   |  [[ Relatório de Materiais em Garantia]]  | Permitir que o usuário visualize um relatório contendo os materiais que possuem garantia com vencimento dentro em um determinado período.  |   Material → Materiais em Garantia |
+^  20   |  [[Relatório de Materiais em Ponto de Pedido ]]  | Permitir que o usuário liste os materiais que atingiram o ponto de pedido.   | Material → Materiais em Ponto de Pedido   |
+^  21   |  [[ Relatório de Materiais do Fornecedor ]]  |  Criação de um relatório relacionando todos os materiais fornecidos por um determinado fornecedor.  | Material → Materiais do Fornecedor  |
+^  22   |  [[ Relatório de Materiais Mais Solicitados ]]  |  Criação de um relatório relacionando os materiais mais solicitados ao almoxarifado do usuário.  |  Material → Materiais Mais Solicitados  |
+^  23   |  [[Relatório de Materiais Solicitados ]]  | Permite que sejam listados os itens que foram solicitados ao almoxarifado do usuário.  | Material → Materiais Solicitados   |
+^  24  ​| ​ [[ Relatório de Materiais Não Movimentados ]]  |   Criação de um relatório relacionando os materiais que não sofreram movimentação recentemente. ​ | Material → Materiais Não Movimentados ​  | 
+^  25  ​| ​ [[ 	Relatório de Material Sem Saldo ]]  | Criação de um relatório relacionando todos os materiais sem saldo no almoxarifado do usuário.  ​ |  Material → Material Sem Saldo ​  | 
+^  26  ​| ​ [[ Relatório de Preços de um Material ]]  |  Criação de um relatório relacionando os preços de um determinado material. ​ |  Material → Preços de um Material  | 
+^  27   |  [[Relatório da Situação de um Material ]]  |  Emitir um relatório da situação de um material, contendo a descrição e a quantidade de compras desse material.  |  Material → Situação de um Material  |
+^  28   |  [[ Total Solicitado e Atendido por Unidade ]]  | Criação de um relatório relacionando os materiais solicitados e atendidos pelo almoxarifado do usuário.  | Material → Total Solicitado e Atendido por Unidade  |
+^  29   |  [[Relatório de Comprovante de Atendimento ]]  | Emitir um comprovante de atendimento de uma determinada requisição de material.  |  Atendimento → Comprovante de Atendimento  |
+^  30   |  [[ Relatório de Comprovante de Devolução]]  |  Emitir um comprovante de atendimento de uma determinada requisição de devolução de material.  |  Atendimento → Comprovante de Devolução  |
+^  31   |  [[ Relatório de Demandas Reprimidas ]]  |  Permitir que o usuário visualize um relatório contendo a quantidade e valor de materiais que deixaram de ser atendidos.  | Atendimento → Demandas Reprimidas  |
+^  32   |  [[Despesas da Unidade  ]]  |  Criação de um relatório relacionando às despesas das unidades da instituição com o almoxarifado do usuário.  | Gerais/Unidade → Unidade → Despesas da Unidade   |
+^  33   |  [[Relatório de Devoluções da Unidade ]]  | Criação de um relatório relacionando todas as devoluções de material de uma determinada unidade da instituição.  |  Gerais/Unidade → Unidade → Devoluções da Unidade  |
+^  34  ​| ​ [[ Requisições Atendidas por Unidade ]]  |  Criação de um relatório relacionando todas as requisições atendidas pelo almoxarifado para as unidades da instituição.  ​ | Gerais/Unidade → Unidade → Reqs. Atendidas por Unidade ​  | 
+^  35  ​| ​ [[ Relatório Sintético de Despesas por Unidade ]]  |  Criação de um relatório relacionando os totais das despesas das outras unidades para com o almoxarifado do usuário. ​ |   Unidades → Sintético de Despesas por Unidade​  | 
+^  36  ​| ​ [[ Relatório de Unidades Devedoras ]]  |  Criação de um relatório relacionando as pendências de uma determinada unidade para com o almoxarifado do usuário. ​ |  Gerais/Unidade → Unidade → Unidades Devedoras  | 
+^  37   |  [[ Relatório de Análise de Consumo por Material]]  | Criação de um relatório contendo os materiais consumidos e suas requisições relacionadas.   |  Gerais/Unidade → Análise de Consumo por Material  |
+^  38   |  [[ Relatório de Consumo por Unidades ]]  | Criação de um relatório relacionando os materiais e as quantidades consumidas pelas unidades da instituição.  |  Gerais/Unidade → Relatório de Consumo por Unidades |
+^  39   |  [[Relatório de Consumo ]]  |  Criação de um relatório relacionando os materiais consumidos pela unidade do usuário. | Gerais/Unidade → Relatório de Consumo   |
+^  40   |  [[ Correções Financeiras]]  |  Criação de um relatório contendo as correções financeiras de um grupo ou determinado material num período de tempo.  |  Gerais/Unidade → Correções Financeiras  |
+^  41   |  [[ Gerar Etiquetas de Prateleira]]  |  Permite a geração das etiquetas de prateleiras.  |  Gerais → Etiquetas de Prateleira |
+^  42   |  [[ Requisições Atendidas x Pagas]]  |  Criação de um relatório relacionando todas as requisições atendidas e pagas para uma determinada unidade da instituição.|  Gerais → Requisições Atendidas x Pagas  |
+
+
+
+
+==== Aba Cadastros ====
+|  ^  Nome   ^  Finalidade  ^  Caminho no Sistema  ^
+^  1  |  [[ Cadastrar Pessoa Física/Jurídica ]]  |  Inserir os registros de pessoas físicas/jurídicas.   |  Módulos → Almoxarifado → Cadastros → Pessoa Física/Jurídica → Cadastrar Pessoa Física/Jurídica.   |
+^  2  |  [[ Listar Pessoa Física/Jurídica ]]  |  Visualizar os registros de pessoas físicas/jurídicas já inseridos no sistema.  |  Módulos → Almoxarifado → Cadastros → Pessoa Física/Jurídica → Listar Pessoa Física/Jurídica.   |
+^  3  |  [[ Cadastrar Grupo de Material ]]  |  Inserir o registro dos grupos de materiais a serem utilizados no sistema.   |  Módulos → Almoxarifado → Cadastros → Grupo de Material → Cadastrar Grupo de Material.   |
+^  4  |  [[ Listar/Alterar Grupo de Material ]]  |  Visualizar os dados dos grupos de materiais já inseridos no sistema.   |  Módulos → Almoxarifado → Cadastros → Grupo de Material → Listar Grupo de Material.   |
+^  5  |  [[ Cadastrar Material ]]  |  Inserir o registro dos materiais a serem utilizados no sistema.  |  Módulos → Almoxarifado → Cadastros → Materiais → Cadastrar Materiais.   |
+^  6  |  [[ Listar/Alterar Material ]]  |  Visualizar os dados dos materiais já inseridos no sistema.   |  Módulos → Almoxarifado → Cadastros → Materiais → Listar Materiais.   |
+^  7  |  [[ Solicitar Cadastro de Material ]]  |  Solicitar a inserção de um material no sistema.   |  Módulos → Almoxarifado → Cadastros → Materiais → Solicitar Cadastro de Material.   |
+^  8  |  [[ Solicitar Atualização de Preço ]]  |  Solicitar atualização do preço de um determinado material já inserido no sistema.   |  Módulos → Almoxarifado → Cadastros → Materiais → Solic. Atual. Preço de Material.   |
+^  9  |  [[ Restringir Pedido de Material por Unidade ]]  |  Realizar restrições de período de material em relação a uma unidade.   |   Módulos → Almoxarifado → Cadastros → Permissões → Restringir Pedido de Material por Unidade.   |
+^  10  |  [[ Restringir Pedidos da Unidade ]]  |  Permitir que o usuário restrinja as requisições de uma determinada unidade da Instituição.   |  Módulos → Almoxarifado → Cadastros → Permissões → Restringir Pedidos da Unidade.   |
+^  11  |  [[ Cadastrar/Listar Período de Bloqueio de Requisição ]]  |  Esta funcionalidade permite ao usuário definir períodos de bloqueios de requisição de materiais.   |  Módulos → Almoxarifado → Cadastros → Cadastrar Período de Bloqueio de Requisições → Cadastrar/Listar.   |
+
+
+
+**Dúvidas?** Entre em contato com o nosso suporte através do email: [[helpdesk@proinfra.uema.br]].
+\\
+\\
+[[start| << Voltar para a Página Inicial do SIGUEMA]]

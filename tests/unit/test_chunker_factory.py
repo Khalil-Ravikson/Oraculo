@@ -147,7 +147,9 @@ class TestChunkerFactory:
         chunker = ChunkerFactory.for_doc_type("geral")
         assert chunker.name == "recursive"
 
-    def test_for_doc_type_wiki_sem_embeddings_retorna_recursive(self):
-        """Sem embeddings, wiki deve usar recursive, não semantic."""
+    def test_for_doc_type_wiki_ctic_retorna_markdown(self):
+        """wiki_ctic usa markdown: o scraper DokuWiki converte wikitext em
+        Markdown real (headers/tabelas), então não há motivo para pagar o
+        custo de embeddings extras do chunker semantic."""
         chunker = ChunkerFactory.for_doc_type("wiki_ctic", embeddings=None)
-        assert chunker.name == "recursive"
+        assert chunker.name == "markdown"

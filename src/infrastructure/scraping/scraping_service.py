@@ -194,7 +194,16 @@ class ScrapingService:
                     doc_type=document.doc_type,
                     embedding=emb,
                     chunk_index=i,
-                    metadata={**chunk.metadata, "title": document.title, "scraped_at": document.scraped_at},
+                    metadata={
+                        # Taxonomia do documento (sistema/modulo/setor/tipo_doc) tem
+                        # prioridade — chunk.metadata é sobre o chunk (chunk_index,
+                        # header_context), não sobre a fonte.
+                        **chunk.metadata,
+                        **{k: v for k, v in document.metadata.items()
+                           if k in ("sistema", "modulo", "setor", "tipo_doc", "eixo", "ano", "campus")},
+                        "title": document.title,
+                        "scraped_at": document.scraped_at,
+                    },
                 )
 
             logger.info("📚 RAG: %d chunks ingeridos de %s", len(chunks), document.url)
@@ -222,7 +231,7 @@ def build_default_scraping_service(
     from .retry import RetryConfig, RetryPolicy
     from .implementations.wikipedia_scraper import WikipediaScraper
     from .implementations.generic_scraper import GenericHTTPScraper
-    from .implementations.uema_wiki_scraper import UEMAWikiScraper
+    from .implementations.dokuwiki import DokuWikiScraper
     # Componentes compartilhados
     anti_block = AntiBlockManager(AntiBlockConfig(min_delay_s=0.3, max_delay_s=1.5))
     retry = RetryPolicy(RetryConfig(max_attempts=3))
@@ -237,9 +246,16 @@ def build_default_scraping_service(
         from .queue import ScrapeQueueProducer
         queue = ScrapeQueueProducer(amqp_url)
 
+    graph_store = None
+    if redis_client:
+        from .implementations.dokuwiki.hierarchy import RedisGraphStore
+        graph_store = RedisGraphStore(redis_client)
+
     service = ScrapingService(queue=queue, max_concurrency=5)
     service.register(_mk(WikipediaScraper))
-    
+
     service.register(_mk(GenericHTTPScraper), fallback=True)
-    service.register(UEMAWikiScraper(anti_block=anti_block, retry_policy=retry, cache=cache))
+    service.register(DokuWikiScraper(
+        anti_block=anti_block, retry_policy=retry, cache=cache, graph_store=graph_store,
+    ))
     return service

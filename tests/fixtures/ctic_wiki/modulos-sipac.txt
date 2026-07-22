@@ -1,0 +1,19 @@
+===== SigUema Administrativo - SIPAC =====    
+
+O SIPAC informatiza os fluxos da área administrativa através da informatização de todo o orçamento distribuído no âmbito interno e das requisições que demandam este orçamento (Material, Passagens, Diárias, Suprimento de Fundos, Auxílio Financeiro, prestações de serviço pessoa física e jurídica, etc). Informatiza também os almoxarifados (centrais e setoriais), todo o controle patrimonial, as compras e licitações, o controle de atas e pedidos em registros de preços, o acompanhamento de entrega de empenhos (liquidação), o controle de obras e manutenções de bens imóveis, a aquisição de livros pela biblioteca, o controle dos contratos e convênios celebrados, o fluxo de processos e documentos eletrônicos, o registro e pagamento de bolsistas. .
+
+|  ^  Nome   ^  Finalidade  ^ 
+^ 1  |  [[Almoxarifado]]  |  O módulo Almoxarifado dá suporte ao Almoxarifado da Coordenação de Bens e Suprimentos (CBS) da UEMA,  controlando seus estoques e as requisições por ele atendida. O atendimento de uma requisição provoca baixa no estoque. Através desse módulo também são emitidos relatórios e cadastrados materiais.	  |
+^ 2  |  [[Catálogo de Materiais]]  |  Através deste módulo é possível cadastrar materiais, solicitar um cadastro de material, bem como atender, negar ou retornar essas solicitações.  |
+^ 3  |  [[Compras e Licitações]]  |  O módulo Compras oferece, aos usuários dos setores que realizam compras, operações que permitem o controle de compras e de licitações, o cadastro dos itens adquiridos através das mesmas, bem como a emissão de relatórios.  |
+^ 4  |  [[Contratos]]  | O módulo Contratos abrange atividades relacionadas aos contratos que são celebrados entre a UEMA e prestadores de serviços e de materiais. São envolvidas nesse módulo atividades como: detalhes contratuais, documentação, controle de movimentação e de pagamento, além de visualização de consultas e relatórios. | 
+^ 5  |  [[Orçamento]]  |  O módulo Sistema Orçamentário visa integrar as atividades de administração com as de execução orçamentária da UEMA.  | 
+^ 6  |  [[Patrimônio Móvel]]  |  O Sistema de Patrimônio tem como objetivo controlar os bens da UEMA.  |
+^ 7  |  [[Protocolo]]  |  O Sistema de Protocolos suporta as atividades relacionadas à manutenção de processos e de documentos, suas movimentações, armazenamento e relatórios.  |
+^ 8  |  [[Atendimento de Requisições]]  |  O módulo Atendimento de Requisições oferece aos setores da UEMA operações para que sejam acompanhadas e liberadas as requisições de materiais, diárias, suprimentos de fundos, hospedagem, passagem, materiais informacionais, biblioteca, serviços e auxílio financeiro, facilitando a operação e o controle dessas requisições.  |
+
+[[https://ctic.uema.br/wiki/doku.php?id=start| Voltar para a tela inicial do Wiki]]
+
+[[https://sis.sig.uema.br/| Voltar para o site do SIGUEMA]]
+
+[[http://www.uema.br/| Ir para o site da UEMA]]

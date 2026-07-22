@@ -27,6 +27,14 @@ ALGORITMO SVS-VAMANA:
   ATENÇÃO: requer drop e re-ingestão se havia índice HNSW.
     redis-cli FT.DROPINDEX idx:rag:chunks DD
     redis-cli FT.DROPINDEX idx:tools DD
+
+MIGRAÇÃO — campos `sistema`/`modulo` (taxonomia wiki CTIC, adicionados para
+permitir filtro por sistema institucional ex. "SIPAC" na busca híbrida):
+  Alterar campos TAG em IndexSchema não é suficiente sozinho — o RediSearch
+  não faz ALTER de schema. É necessário recriar o índice:
+    redis-cli FT.DROPINDEX idx:rag:chunks DD   # apaga o índice E os documentos (DD)
+    (reingerir tudo em seguida — os campos novos default para "Geral"/"Geral"
+    em chunks já existentes que não foram reingeridos)
 """
 from __future__ import annotations
 
@@ -74,6 +82,8 @@ def _schema_chunks() -> IndexSchema:
             {"name": "tipo_doc",    "type": "tag"},   # Edital|Calendario|Resolucao|Manual|Contatos|Noticia
             {"name": "ano",         "type": "tag"},   # 2024|2025|2026
             {"name": "campus",      "type": "tag"},   # Sao_Luis|Bacabal|Imperatriz|Balsas|Caxias|Todos
+            {"name": "sistema",     "type": "tag"},   # SIPAC|SIGUEMA|Geral — sistema institucional (wiki CTIC)
+            {"name": "modulo",      "type": "tag"},   # Almoxarifado|Compras|... — módulo dentro do sistema
             # ----------------------
             {"name": "label",       "type": "text"},
             {"name": "indexed_at",  "type": "numeric"},
@@ -231,6 +241,8 @@ def salvar_chunk(chunk_id, content, source, doc_type, embedding,
         "tipo_doc":    meta.get("tipo_doc", doc_type.capitalize()),
         "ano":         meta.get("ano", "2026"),
         "campus":      meta.get("campus", "Todos"),
+        "sistema":     meta.get("sistema", "Geral"),
+        "modulo":      meta.get("modulo", "Geral"),
         "label":       meta.get("label", ""),
         "indexed_at":  int(__import__("time").time()),
     }

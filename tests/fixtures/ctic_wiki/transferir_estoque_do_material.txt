@@ -1,0 +1,39 @@
+====== Transferir Estoque do Material ======
+
+| **Sistema** | SIPAC |
+| **Módulo**  | Almoxarifado |
+| **Usuário** | Responsável pelo Almoxarifado |
+| **Perfil**  | Gestor de Almoxarifado ou Gestor Geral de Almoxarifado |
+
+
+Esta funcionalidade permitirá ao gestor de almoxarifado ajustar a quantidade de um determinado material no estoque, geralmente quando há materiais similares que estão cadastrados com códigos diferentes, para manter a organização do estoque e facilitar o atendimento das requisições.
+
+A transferência de estoque consiste na transferência do saldo de um material para outro material do mesmo grupo.
+
+Para realizar esta operação, o usuário deverá acessar o //SIPAC -> Módulos -> Almoxarifado -> Estoque -> Estoque -> Transferir Estoque do Material//.
+
+A seguinte tela será exibida:
+
+{{ :transferir-estoque-material.png?nolink |}}
+
+Caso desista da operação, clique em //**Cancelar**//. O sistema exibirá uma janela de confirmação. Esta operação será válida para todas as telas que apresentarem esta função.
+
+Para retornar para o menu principal do módulo Almoxarifado, clique em **Almoxarifado**.
+
+Para realizar a troca de materiais, o usuário deverá inserir os códigos do //Material Anterior// e do //Novo Material//.
+
+Caso deseje buscar algum material, o usuário deverá clicar no ícone da **Lupa**.
+
+Após inserir os códigos do //Material Anterior// e do //Novo Material//, o usuário poderá transferir o estoque do material. Para realizar esta operação, clique em //**Trocar Material**//.
+
+A seguinte tela será exibida:
+
+{{ :transferir-estoque-material-trocar-material.png?nolink |}}
+
+Para concluir a operação, clique em //**Confirmar**//.
+
+O sistema exibirá a seguinte mensagem de sucesso:
+
+{{ :transferir-estoque-material-mensagem-sucesso.png?nolink |}}
+
+**Bom Trabalho!**

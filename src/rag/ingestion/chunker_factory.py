@@ -273,7 +273,7 @@ class ChunkerFactory:
 
         calendario/edital → markdown (estrutura hierárquica preservada)
         contatos          → recursive (dados tabulares simples)
-        wiki_ctic         → semantic (documentação técnica)
+        wiki/wiki_ctic    → markdown (wikitext convertido já tem headers/tabelas reais)
         geral             → recursive
         """
         if doc_type == "calendario":
@@ -290,8 +290,7 @@ class ChunkerFactory:
             
         if doc_type in ("wiki", "wiki_ctic"):
             kwargs.setdefault("chunk_size", 400)
-            if embeddings:
-                return ChunkerFactory.get("semantic", embeddings_model=embeddings, **kwargs)
-            return ChunkerFactory.get("recursive", **kwargs)
-            
+            return ChunkerFactory.get("markdown", **kwargs)
+
+
         return ChunkerFactory.get("recursive", **kwargs)
