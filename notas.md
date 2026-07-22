@@ -341,3 +341,130 @@ seja só um painel de leitura mostrando qual decidiu o quê por mensagem,
 antes mesmo de ter toggle), trazer RBAC pra dentro do painel como
 configuração editável, e embutir/linkar Redis+Postgres+logs no mesmo lugar
 em vez de ferramentas espalhadas.
+
+---
+
+## 6. Scraping do wiki CTIC (DokuWiki) — reformulação completa (2026-07-22)
+
+> Ver `arquitetura_oraculo.md` seção 11 pra visão arquitetural permanente.
+> Aqui fica o histórico "como chegamos nisso" — bugs achados, decisões e o
+> que ainda falta.
+
+### Motivação
+
+Scraper anterior (BeautifulSoup sobre o HTML **renderizado** de
+`ctic.uema.br/wiki`, um DokuWiki) perdia hierarquia, quebrava tabelas em
+texto corrido, ignorava PDFs anexados, e tinha um bug que crashava
+(`context_label=` passado pro construtor de `ScrapedDocument`, mas
+`context_label` é `@property` derivada, não campo do dataclass —
+`TypeError` em runtime). Também existia uma SEGUNDA classe `UEMAWikiScraper`
+morta/duplicada em `generic_scraper.py`, nunca registrada em lugar nenhum.
+
+### Descoberta-chave: DokuWiki tem export nativo
+
+Testado manualmente contra o site real antes de programar qualquer coisa:
+- `doku.php?id={page}&do=export_raw` → devolve o **wikitext-fonte** da
+  página (sintaxe `======`, `^|^`, `{{ }}`, `[[ ]]`), sem nav/sidebar/rodapé
+  nenhum. Muito mais limpo que raspar HTML renderizado.
+- `doku.php?do=index` → lista TODAS as páginas do wiki numa página só
+  (namespaces majoritariamente flat — a maioria dos page_ids não tem
+  hierarquia embutida, ex.: `almoxarifado`, `transferir_estoque_do_material`
+  soltos, sem `sipac:almoxarifado:...`).
+
+Consequência: a hierarquia (Portal → SIPAC → Almoxarifado → Tutorial) só
+existe no **grafo de links** entre páginas, não no page_id — daí o módulo
+`hierarchy.py` (ver arquitetura).
+
+### O que foi implementado
+
+Novo subpacote `src/infrastructure/scraping/implementations/dokuwiki/`
+(`scraper.py`, `wikitext.py`, `hierarchy.py`, `media.py`, `discovery.py`) —
+substitui o antigo `uema_wiki_scraper.py` (deletado) e a duplicata morta em
+`generic_scraper.py` (removida). Registrado em
+`scraping_service.py::build_default_scraping_service()` no lugar do antigo.
+
+`ChunkerFactory.for_doc_type("wiki_ctic")` mudou de `semantic` (custava 1
+embedding por sentença) para `markdown` (`MarkdownHeaderTextSplitter`) — o
+wikitext convertido já tem headers/tabelas reais, não precisa detectar
+breakpoint semântico.
+
+Schema Redis `idx:rag:chunks` ganhou campos TAG `sistema`/`modulo`
+(`redis_client.py::_schema_chunks()`), usados pra filtrar retrieval por
+sistema institucional (ex: "responder só com contexto do SIPAC"). **Migração
+ainda NÃO rodada** — precisa `FT.DROPINDEX idx:rag:chunks DD` + recriar
+índice + reingestão completa, é destrutivo, fica esperando autorização
+explícita antes de rodar em qualquer ambiente com dado real.
+
+### Bug real achado só ao testar ao vivo (não previsto no plano)
+
+`ScrapingService._ingest_to_rag()` só repassava `chunk.metadata` (dados do
+chunker: `chunk_index`, `header_context`) pra `salvar_chunk()` — a taxonomia
+do **documento** (`sistema`/`modulo`/`setor`/`tipo_doc`, calculada pelo
+scraper) nunca chegava no Redis, ficava presa no meio do caminho. Sem esse
+fix, o filtro por `sistema="SIPAC"` teria zero efeito (tudo cairia no
+default "Geral"). Corrigido.
+
+### Bug de encoding achado só ao testar ao vivo
+
+`httpx` não detecta corretamente o charset da resposta de `do=export_raw`
+(o header `Content-Type` não declara), e sem isso ele adivinha errado —
+acentos viravam `M�dulo`/`Usu�rio` no conteúdo ingerido. Forçado
+`r.encoding = "utf-8"` explicitamente em `DokuWikiScraper.fetch()`. **Se
+algum dado acentuado aparecer bagunçado no futuro, checar isso primeiro
+antes de suspeitar de outra coisa** — e checar se é mojibake real ou só o
+terminal Windows (cp1252) exibindo errado (aconteceu as duas vezes nesta
+sessão, causas diferentes).
+
+### Decisão consciente: PDFs anexados NÃO são baixados/parseados
+
+Testado contra `almoxarifado` (tem PDF "Apresentação do Módulo" anexado) —
+usuário confirmou 2026-07-22 que os PDFs do wiki CTIC até agora são slides
+de apresentação (pouco texto extraível, conteúdo procedural já coberto pela
+própria página wiki). Decisão: em vez de baixar+parsear (`ParserFactory`),
+o texto do chunk só ganha um link Markdown clicável direto pro arquivo
+(`[Anexo PDF: nome.pdf](https://.../lib/exe/fetch.php?media=...)`), pro
+usuário abrir manualmente se quiser. `media.py` ficou só com
+`build_media_url()` (monta a URL) — a função de download+parse
+(`baixar_e_extrair_pdf`) e o método `DokuWikiScraper.baixar_anexos_pdf()`
+foram escritos e depois REMOVIDOS quando essa decisão saiu (não deixar
+código morto). **Se um dia aparecer um PDF anexado que seja manual/texto
+denso (não slide), reavaliar** — a infra de fetch da URL já existe, só
+falta reconectar o parser se for preciso.
+
+### Bug encontrado e corrigido no `/hub` (chunkviz), fora do escopo original
+
+`hub.py::cv_extract_url` (botão "extrair de URL" do chunkviz) tinha dois
+problemas pré-existentes, achados só ao tentar testar manualmente pela UI:
+1. Chamava `save_temp_file(file_id, ...)` sem extensão no nome — `ext=""`
+   não bate em `ALLOWED` → sempre estourava `Formato '' não suportado`,
+   pra QUALQUER url, não só a do wiki.
+2. Tinha `GenericHTTPScraper` hardcoded — mesmo corrigindo (1), continuaria
+   testando o scraper genérico antigo, não o `DokuWikiScraper` novo.
+
+Corrigido: roteia por domínio (`ctic.uema.br` → `DokuWikiScraper`, resto →
+`GenericHTTPScraper`, igual `ScrapingService._resolve()` já faz) e usa
+`save_temp_file()` do jeito certo (deixa ele gerar o próprio `file_id`).
+
+### Eval automatizado
+
+`tests/eval/test_ctic_wiki_eval.py` (9 casos) + fixtures reais congeladas em
+`tests/fixtures/ctic_wiki/*.txt` (baixadas 1x do site real via
+`do=export_raw`). Cobre: conversão wikitext→Markdown, detecção de PDF como
+link, resolução de hierarquia sistema/modulo via grafo, propagação de
+taxonomia até `salvar_chunk()`, fidelidade do chunker `markdown`. Suíte
+completa (`tests/unit` + `tests/eval`) rodada após cada mudança — 190+
+passando, as 5 falhas pré-existentes (Redis local fora do ar,
+`test_registration_repository.py`, `test_sigaa_eval.py`) não têm relação
+com esta mudança.
+
+### Pendente (esperando autorização do usuário)
+
+1. Migração destrutiva do schema Redis (`FT.DROPINDEX ... DD` + recriar +
+   reingerir) pra `sistema`/`modulo` passarem a existir de verdade no
+   índice — hoje só existem no código, não no Redis.
+2. Rodar a descoberta em massa (`discovery.py::descobrir_paginas()`, via
+   `do=index`) contra o site real pra popular a fila de scraping com todas
+   as páginas do wiki — feito só manualmente/pontual até agora (4 páginas de
+   teste), não em lote.
+3. Testar o fluxo completo pelo `/hub` chunkviz manualmente (usuário estava
+   nisso quando parou pra pedir essa atualização de notas).

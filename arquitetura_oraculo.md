@@ -138,7 +138,7 @@ def create_app() -> FastAPI:
 
 **Índices RediSearch/RedisVL:**
 
-- `idx:rag:chunks` — prefixo `rag:chunk:`, campos text/tag/vector, taxonomia UEMA (`eixo`, `setor`, `tipo_doc`, `ano`, `campus`).
+- `idx:rag:chunks` — prefixo `rag:chunk:`, campos text/tag/vector, taxonomia UEMA (`eixo`, `setor`, `tipo_doc`, `ano`, `campus`, `sistema`, `modulo` — os dois últimos adicionados para o wiki CTIC, ver seção 11). **Migração pendente**: os campos `sistema`/`modulo` existem no `IndexSchema` do código mas o índice em produção ainda não foi recriado (`FT.DROPINDEX idx:rag:chunks DD` + reingestão) — destrutivo, esperando autorização.
 - `idx:tools` — prefixo `tools:emb:`, KNN para roteamento semântico.
 
 **Streams:**
@@ -340,6 +340,56 @@ migration          → alembic upgrade head (one-shot)
 2. **Sync vs Async Redis:** funções em `redis_client.py` são síncronas para Celery; async (`redis.asyncio`) só no FastAPI/Cognitive OS.
 3. **Grupo WhatsApp:** webhook filtra `ALLOWED_GROUP_ID` — ambiente homologado.
 4. **Identidade obrigatória:** usuário não cadastrado/inativo é bloqueado antes de qualquer chamada LLM (economia de tokens).
+
+---
+
+## 11. Scraping — Wiki CTIC (DokuWiki)
+
+**Estrutura** (`src/infrastructure/scraping/`):
+
+```
+scraping/
+├── base_scraper.py       # BaseScraper (Template Method): fetch() → parse() → clean() → to_chunks()
+├── scraping_service.py   # Registry + roteamento por domínio + fila + ingestão RAG automática
+├── anti_block.py / cache.py / retry.py / queue.py
+└── implementations/
+    ├── wikipedia_scraper.py
+    ├── generic_scraper.py       # GenericHTTPScraper — fallback genérico (qualquer domínio)
+    └── dokuwiki/                # Scraper especializado para ctic.uema.br/wiki (DokuWiki)
+        ├── scraper.py           # DokuWikiScraper(BaseScraper)
+        ├── wikitext.py          # Conversor wikitext DokuWiki → Markdown
+        ├── hierarchy.py         # Grafo pai→filho + inferência sistema/modulo
+        ├── media.py             # URL de anexos (PDF vira link, não é baixado)
+        └── discovery.py         # Descoberta em massa via do=index
+```
+
+**Por que não BeautifulSoup sobre HTML renderizado:** o DokuWiki expõe endpoints nativos testados manualmente contra o site real:
+- `doku.php?id={page}&do=export_raw` → wikitext-fonte da página, sem nav/sidebar/rodapé.
+- `doku.php?do=index` → lista todos os page_ids do wiki (namespaces majoritariamente flat — hierarquia NÃO está no page_id).
+
+`DokuWikiScraper.fetch()` busca `do=export_raw` (força `r.encoding="utf-8"` — o `Content-Type` da resposta não declara charset e o httpx adivinha errado, corrompendo acentos). `parse()` delega a `wikitext.convert()`:
+- Headers `======Título======` → `# Título` (DokuWiki inverte: mais `=` = nível MAIS alto).
+- Tabelas `^Cab^Cab^` / `|cel|cel|` → tabela Markdown.
+- `//itálico//` → `*itálico*`; `**negrito**` já é igual.
+- `[[pagina|Rótulo]]` → `[Rótulo](page_id)`, e o `page_id` normalizado (minúsculo, espaço→`_`) alimenta `internal_links`.
+- `{{:arquivo.pdf|Rótulo}}` → **não é baixado nem parseado** (decisão do projeto: anexos até agora são slides de apresentação, pouco texto extraível, conteúdo já coberto pela página). Vira link Markdown clicável direto pro arquivo (`media.build_media_url()` monta a URL via `lib/exe/fetch.php?media=...`). Reavaliar só se aparecer um PDF que seja manual/texto denso.
+- `{{:imagem.png}}` → vira só `[imagem: nome]` (ignorado, sem visão computacional).
+
+**Hierarquia (`hierarchy.py`):** como o page_id não tem namespace aninhado, a árvore Portal→Sistema→Módulo→Tutorial só existe no grafo de links. Cada página processada registra seus links `[[filho]]` como candidatos a filhos (`registrar_links()`); `resolver_taxonomia()` sobe a cadeia de pais até achar um hub conhecido em `KNOWN_SYSTEM_HUBS` (dict curado manualmente, ex.: `"almoxarifado" → ("SIPAC", "Almoxarifado")`). Sem match, cai no default `"Geral"/"Geral"`. Persistência: `InMemoryGraphStore` (testes) ou `RedisGraphStore` (chave `wiki:parent:{page_id}`, produção).
+
+**Descoberta em massa (`discovery.py`):** `descobrir_paginas()` busca `do=index` uma vez e devolve todos os page_ids do wiki — dispensa crawler recursivo só pra achar páginas. Ainda não agendado no Celery beat (candidato natural, ver `beat_nightly_memory_sync` na seção 7.3 como padrão a seguir).
+
+**Chunking:** `ChunkerFactory.for_doc_type("wiki_ctic")` usa o chunker `markdown` (não `semantic`) — o wikitext convertido já tem headers/tabelas reais, dispensa detecção de breakpoint semântico (mais barato, sem custo extra de embedding).
+
+**Taxonomia no Redis:** `sistema`/`modulo` (calculados por `hierarchy.py`) + `setor="CTIC"`/`tipo_doc="Manual"` (fixos) somam-se à taxonomia UEMA existente (seção 4.2) em `idx:rag:chunks`. `ScrapingService._ingest_to_rag()` propaga esses campos de `document.metadata` para `salvar_chunk()` — **atenção**: chunk-level metadata (`chunk.metadata`, ex. `header_context`) e document-level metadata (taxonomia) são coisas diferentes; um bug real (corrigido) fazia só o primeiro chegar no Redis.
+
+**Decisão de arquitetura — índice único, não banco separado:** avaliado e descartado criar um agente/Redis DB dedicado só para o wiki CTIC. Mantém-se `idx:rag:chunks` único com filtro por tag (`sistema`, `setor`) e o agente `academic_knowledge` existente — alinhado com a prática recomendada de RAG multi-fonte (single collection + metadata filter, "Pool" em vez de "Silo") e com a separação Router→Agents→Capabilities já adotada (scraping de nova fonte = nova capability, não novo agente). Reavaliar só se o volume de uma fonte específica prejudicar p95 de latência — não é o caso hoje.
+
+**Pendências conhecidas** (ver `notas.md` seção 6 para o histórico completo):
+1. Migração do schema Redis (`sistema`/`modulo` já no código, índice em produção ainda não recriado — `FT.DROPINDEX idx:rag:chunks DD` + reingestão, destrutivo, esperando autorização).
+2. `discovery.py::descobrir_paginas()` não está agendado (Celery beat) — só rodado manualmente/pontual até agora.
+
+**Testes:** `tests/eval/test_ctic_wiki_eval.py` (9 casos) + fixtures reais congeladas em `tests/fixtures/ctic_wiki/*.txt` (baixadas 1x via `do=export_raw`) — cobre conversão wikitext→Markdown, hierarquia, propagação de taxonomia, fidelidade do chunker `markdown`.
 
 ---
 
