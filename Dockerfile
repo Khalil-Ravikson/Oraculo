@@ -66,6 +66,8 @@ COPY --chown=oraculo:oraculo dados/      ./dados/
 COPY --chown=oraculo:oraculo templates/  ./templates/
 COPY --chown=oraculo:oraculo static/     ./static/
 COPY --chown=oraculo:oraculo src/        ./src/
+# 🧪 EXPERIMENTO (branch langgraph) — só existe nesta worktree, ver .claude.md do main
+COPY --chown=oraculo:oraculo langgraph_experiment/ ./langgraph_experiment/
 
 USER oraculo
 RUN python -c "import os; os.environ['HF_HOME']='/home/oraculo/.cache/huggingface'; from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', max_length=512)"

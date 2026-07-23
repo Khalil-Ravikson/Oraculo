@@ -124,8 +124,10 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
         mem_ctx = mem_svc.carregar_contexto(user_id=phone, session_id=phone, query=message)
         
         # ── Executa a chain (COGNITIVE OS) ─────────────────────────────────────
-        from src.application.runtime.dispatcher import processar as cognitive_processar
-        
+        # 🧪 EXPERIMENTO (branch langgraph): TICKET_ABERTURA/RAG desviados pro
+        # StateGraph do LangGraph — ver src/application/runtime/dispatcher_langgraph.py
+        from src.application.runtime.dispatcher_langgraph import processar as cognitive_processar
+
         t0 = time.monotonic()
         
         result_os = await cognitive_processar(
@@ -388,7 +390,8 @@ async def _handle_message(**kwargs) -> None:
         mem_ctx = mem_svc.carregar_contexto(user_id=sender, session_id=sender, query=text)
 
         # ── CognitiveOS: ───────────────────────────────────────────────────────
-        from src.application.runtime.dispatcher import processar as cognitive_processar
+        # 🧪 EXPERIMENTO (branch langgraph): ver dispatcher_langgraph.py
+        from src.application.runtime.dispatcher_langgraph import processar as cognitive_processar
         result_os = await cognitive_processar(
             message=text,
             session_id=sender,
