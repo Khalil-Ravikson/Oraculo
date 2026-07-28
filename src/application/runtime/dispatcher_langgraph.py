@@ -22,6 +22,15 @@ API e os workers Celery rodam em processos/containers diferentes; um
 funil de ticket que pausa (`interrupt()`) num processo e retoma noutro
 precisa que o estado esteja em Redis, não em memória local.
 
+ATENÇÃO — bug conhecido do pacote `langgraph-checkpoint-redis` na resumption
+de múltiplos `interrupt()` pendentes no MESMO node (funciona no 1º resume,
+quebra no 2º): https://github.com/langchain-ai/langgraph/issues/5074 e
+https://github.com/redis-developer/langgraph-redis/issues/133. Reproduzido
+nesta branch com o funil de ticket antigo (4 interrupts num node só).
+Mitigado em `langgraph_experiment/nodes.py` quebrando o funil em 1 node por
+pergunta (1 interrupt por node) — ver docstring lá. Versão do pacote pinada
+em `requirements.txt` por isso (área comprovadamente instável).
+
 Ativado trocando o import em `process_message_task.py`:
     from src.application.runtime.dispatcher import processar as cognitive_processar
     →
@@ -40,6 +49,11 @@ logger = logging.getLogger(__name__)
 
 _ROTAS_LANGGRAPH = {"TICKET_ABERTURA", "GERAL", "CALENDARIO", "EDITAL", "CONTATOS", "WIKI"}
 
+# Singleton de processo: correto desde que o processo Celery mantenha um único event loop
+# vivo pela vida inteira (ver src/infrastructure/celery_app.py::run_in_worker_loop() +
+# on_worker_process_init/on_worker_process_shutdown). O AsyncRedisSaver nasce e morre junto
+# do processo, nunca atravessa uma fronteira de asyncio.run() — não há mais asyncio.run()
+# nenhum nos entry points que chegam aqui (process_message_task.py).
 _graph = None
 _saver_cm = None
 _setup_lock = asyncio.Lock()
@@ -59,11 +73,26 @@ async def _get_graph():
         from src.infrastructure.settings import settings
 
         _saver_cm = AsyncRedisSaver.from_conn_string(settings.REDIS_URL)
-        saver = await _saver_cm.__aenter__()  # mantido aberto pela vida do processo, mesmo padrão de singleton de client usado em synthesis.py/embeddings.py
+        saver = await _saver_cm.__aenter__()  # fechado explicitamente em on_worker_process_shutdown
         await saver.asetup()
         _graph = build_graph(saver)
         logger.info("🧪 [LANGGRAPH] Grafo compilado com AsyncRedisSaver — checkpoint compartilhado entre API/workers.")
     return _graph
+
+
+async def aclose_graph() -> None:
+    """Fecha o AsyncRedisSaver cacheado. Chamado por
+    celery_app.py::on_worker_process_shutdown, rodando no mesmo loop persistente
+    em que o saver foi aberto."""
+    global _graph, _saver_cm
+    if _saver_cm is not None:
+        try:
+            await _saver_cm.__aexit__(None, None, None)
+        except Exception:
+            logger.exception("⚠️  [LANGGRAPH] Falha ao fechar AsyncRedisSaver no shutdown.")
+        finally:
+            _saver_cm = None
+            _graph = None
 
 
 def _thread_config(session_id: str) -> dict:

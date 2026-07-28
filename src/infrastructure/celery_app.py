@@ -13,6 +13,7 @@ MUDANÇAS vs versão anterior:
     - Task routing (default / notificacoes / admin)
     - Timezone America/Sao_Paulo
 """
+import asyncio
 import os
 import logging
 from celery import Celery
@@ -125,7 +126,34 @@ celery_app.autodiscover_tasks([
 logger = logging.getLogger(__name__)
 
 
-from celery.signals import worker_ready, worker_shutdown, worker_process_init
+from celery.signals import worker_ready, worker_shutdown, worker_process_init, worker_process_shutdown
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Event loop persistente por processo worker (prefork, single-thread, tasks
+# sequenciais dentro de cada processo — ver docker-compose.yml, sem --pool
+# explícito nos comandos = default prefork).
+#
+# Motivo: o experimento LangGraph (dispatcher_langgraph.py) usa um
+# AsyncRedisSaver que precisa sobreviver entre mensagens da mesma sessão
+# (HITL via interrupt()/Command(resume=...)). Um recurso async assim NÃO pode
+# atravessar a fronteira de um asyncio.run() por task (cria "Event loop is
+# closed"/"Future attached to a different loop" — ver notas.md/relatório da
+# investigação desta branch). A correção é nunca destruir o loop entre tasks:
+# criado uma vez aqui, reusado via run_in_worker_loop() em vez de
+# asyncio.run(), fechado em on_worker_process_shutdown.
+# ─────────────────────────────────────────────────────────────────────────────
+_worker_loop: asyncio.AbstractEventLoop | None = None
+
+
+def run_in_worker_loop(coro):
+    """Substitui asyncio.run() nas tasks que precisam de recursos async de
+    vida longa (checkpointer do experimento LangGraph). Reusa o mesmo loop
+    durante toda a vida do processo worker — nunca cria um loop novo por task."""
+    global _worker_loop
+    if _worker_loop is None or _worker_loop.is_closed():
+        _worker_loop = asyncio.new_event_loop()
+    return _worker_loop.run_until_complete(coro)
+
 
 @worker_process_init.connect
 def on_worker_process_init(**kwargs):
@@ -140,6 +168,28 @@ def on_worker_process_init(**kwargs):
         logger.info("✅ [CELERY] ML models pre-loaded successfully.")
     except Exception as e:
         logger.error("❌ [CELERY] Failed to pre-load models: %s", e)
+
+
+@worker_process_shutdown.connect
+def on_worker_process_shutdown(**kwargs):
+    """
+    Executado quando um worker child process (prefork) é encerrado —
+    diferente de worker_shutdown, que só dispara no processo principal.
+    Fecha os recursos async de vida longa (AsyncRedisSaver do experimento
+    LangGraph) e o event loop persistente deste processo, nessa ordem.
+    """
+    global _worker_loop
+    if _worker_loop is None or _worker_loop.is_closed():
+        return
+    try:
+        from src.application.runtime.dispatcher_langgraph import aclose_graph
+        _worker_loop.run_until_complete(aclose_graph())
+        _worker_loop.run_until_complete(_worker_loop.shutdown_asyncgens())
+    except Exception as e:
+        logger.error("❌ [CELERY] Falha ao fechar recursos async no shutdown: %s", e)
+    finally:
+        _worker_loop.close()
+        _worker_loop = None
 
 @worker_ready.connect
 def on_worker_ready(sender=None, **kwargs):

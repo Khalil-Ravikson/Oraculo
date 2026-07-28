@@ -19,7 +19,7 @@ import asyncio
 import logging
 import time
 
-from src.infrastructure.celery_app import celery_app
+from src.infrastructure.celery_app import celery_app, run_in_worker_loop
 from src.infrastructure.redis_client import get_redis_text
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ _WARNING_MSG   = "⏳ Processando, aguarde um instante..."
 )
 def processar_mensagem_task(self, identity: dict, stream_id: str = "") -> None:
     """Entry point Celery. Usa Cognitive OS para gerar resposta."""
-    asyncio.run(_processar_async(self, identity, stream_id))
+    run_in_worker_loop(_processar_async(self, identity, stream_id))
 
 
 async def _processar_async(task, identity: dict, stream_id: str) -> None:
@@ -287,7 +287,7 @@ def processar_mensagem_whatsapp(
     push_name: str, is_group: bool, mentioned_bot: bool,
     msg_key_id: str = "", has_media: bool = False, media_type: str = "",
 ) -> None:
-    asyncio.run(_handle_message(
+    run_in_worker_loop(_handle_message(
         remote_jid=remote_jid, sender_jid=sender_jid, text=text,
         push_name=push_name, is_group=is_group, mentioned_bot=mentioned_bot,
         msg_key_id=msg_key_id, has_media=has_media, media_type=media_type,

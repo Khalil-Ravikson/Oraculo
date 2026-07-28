@@ -1,11 +1,21 @@
 from __future__ import annotations
 
-from typing import TypedDict
+from pydantic import BaseModel, Field
 
 
-class OraculoState(TypedDict, total=False):
-    session_id: str
-    message: str
-    route: str          # "rag" | "ticket"
-    answer: str
-    ticket_data: dict
+class OraculoState(BaseModel):
+    session_id: str = ""
+    message: str = ""
+    route: str = ""          # "rag" | "ticket"
+    answer: str = ""
+    # dict simples (não um BaseModel aninhado): LangGraph serializa o estado
+    # via msgpack pro checkpointer, e tipos Pydantic customizados aninhados
+    # exigem registro explícito (allowed_msgpack_modules) — dict é nativo,
+    # sem esse risco. Chaves esperadas: tipo, categoria, queixa (todas str|None).
+    ticket_data: dict = Field(default_factory=dict)
+    # Mensagem de erro a prefixar na próxima pergunta do funil de ticket quando
+    # a resposta do usuário não valida — consumida pela edge condicional do
+    # node correspondente pra decidir re-perguntar em vez de aceitar qualquer
+    # texto silenciosamente (ver notas.md/plano da investigação HITL).
+    ticket_error: str = ""
+    ticket_confirmed: bool | None = None

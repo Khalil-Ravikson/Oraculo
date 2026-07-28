@@ -468,3 +468,159 @@ com esta mudança.
    teste), não em lote.
 3. Testar o fluxo completo pelo `/hub` chunkviz manualmente (usuário estava
    nisso quando parou pra pedir essa atualização de notas).
+
+---
+
+## 7. Experimento LangGraph (branch/worktree `langgraph`) — dois bugs estruturais achados e corrigidos (2026-07-27/28)
+
+> Esta branch existe só pra testar se o LangGraph consegue rodar de verdade no
+> Oráculo (ver `.claude.md` "Sem LangGraph" no `main` — descartado antes por
+> ter "travado em state/builder"). Ativado trocando o import em
+> `process_message_task.py` pra `dispatcher_langgraph.processar` (ver
+> docstring do próprio arquivo). Rotas cobertas: `TICKET_ABERTURA`, `GERAL`,
+> `CALENDARIO`, `EDITAL`, `CONTATOS`, `WIKI`. Tudo mais (SIGAA, CRUD,
+> comandos) continua 100% no pipeline original.
+
+### 7.1 Bug 1 — `Event loop is closed` / `Future attached to a different loop` (corrigido)
+
+**Sintoma:** toda mensagem que caía numa rota LangGraph tinha chance de
+quebrar com `RuntimeError: Event loop is closed`, `Task ... got Future
+attached to a different loop`, ou `RedisVLError: Failed to load data: Event
+loop is closed` — de forma aparentemente aleatória (às vezes a mesma rota
+funcionava, às vezes não).
+
+**Causa raiz:** `dispatcher_langgraph.py` guardava o `AsyncRedisSaver`
+(checkpointer) como singleton de módulo (`_graph`/`_saver_cm`), criado uma
+vez por processo Celery. Só que cada task Celery (`process_message_task.py`)
+chamava `asyncio.run(...)` — um event loop **novo** a cada mensagem. O
+`AsyncRedisSaver` nascia sob o loop da 1ª mensagem que batesse numa rota
+LangGraph; quando esse loop fechava (fim do `asyncio.run()`), a conexão
+Redis ficava presa a um loop que não existe mais — qualquer mensagem
+seguinte que reusasse essa conexão quebrava.
+
+**Investigação:** duas tentativas de patch local (cache do saver por
+event loop via `WeakKeyDictionary`, depois abrir/fechar a conexão a cada
+chamada) trocavam um sintoma pelo próximo (a 1ª virou vazamento de conexão —
+`ConnectionError: Connection closed by server` — até o Redis derrubar as
+conexões acumuladas) sem atacar a causa estrutural. Descartadas a pedido do
+usuário ("não quero soluções temporárias").
+
+**Fix aplicado (estrutural, sem trocar o modelo Celery):** event loop
+**persistente por processo worker**, criado uma vez em `worker_process_init`
+e reusado por todas as tasks daquele processo via
+`run_in_worker_loop()` (substitui `asyncio.run()`) — ver
+`src/infrastructure/celery_app.py`. Fechado corretamente em
+`worker_process_shutdown` (signal novo, dispara por processo filho do
+prefork, diferente de `worker_shutdown` que só dispara uma vez no processo
+principal). Isso permite voltar o `dispatcher_langgraph.py` ao singleton
+simples original (`_graph`/`_saver_cm`), que agora é correto porque só existe
+1 loop por processo — a conexão nunca mais atravessa a fronteira de um
+`asyncio.run()` porque essa fronteira deixou de existir nos dois entry
+points que chegam no grafo (`processar_mensagem_task`,
+`processar_mensagem_whatsapp`). Rede de segurança extra: `worker` roda com
+`--max-tasks-per-child=500` (`docker-compose.yml`) pra reciclar o processo
+periodicamente, já que o loop agora sobrevive indefinidamente.
+
+**Validado em produção:** 10+ mensagens seguidas em rotas LangGraph, mesma
+sessão e sessões diferentes, sem nenhuma ocorrência dos três erros.
+
+**Roteiro registrado pra depois (não implementado, só documentado):** se o
+experimento for validado pra produção E o volume justificar concorrência
+real, a arquitetura recomendada é um "Graph Runtime Service" dedicado
+(processo async-nativo próprio, não um worker Celery) reaproveitando
+`src/infrastructure/message_stream.py` (XADD/XACK/XPENDING — hoje código
+morto, não usado no caminho real de produção) e o container `worker_graph`
+(hoje provisionado mas ocioso). Trade-off: perde retry/Flower automáticos do
+Celery nessa rota, reativa infra nunca testada sob carga real — só vale o
+investimento quando o LangGraph já tiver provado valor suficiente.
+
+### 7.2 Bug 2 — funil de ticket (HITL) quebrava sempre na 2ª pergunta seguinte (corrigido)
+
+**Sintoma:** o funil de ticket (`Abra um ticket` → 4 perguntas sequenciais
+via `interrupt()`) funcionava pra 1ª pergunta → 2ª pergunta, mas na
+transição da 2ª → 3ª pergunta o sistema agia como se não houvesse nenhum
+`interrupt()` pendente (`state.next` vazio) e tratava a resposta do usuário
+como mensagem solta nova, abandonando o ticket no meio. Reproduzido 2x de
+forma idêntica.
+
+**Investigação:** confirmado por pesquisa na documentação oficial do
+LangGraph que múltiplos `interrupt()` sequenciais no MESMO node (como
+`ticket_node` original tinha — 4 empilhados) é um padrão suportado, matching
+por índice de chamada. Só que a busca por issues abertas no pacote real
+(`langgraph-checkpoint-redis`, o checkpointer Redis) achou o problema exato:
+bugs conhecidos na resumption de múltiplos interrupts pendentes,
+especificamente com checkpointer Redis (funciona com `InMemorySaver`, quebra
+com Redis) — [langchain-ai/langgraph#5074](https://github.com/langchain-ai/langgraph/issues/5074),
+[redis-developer/langgraph-redis#133](https://github.com/redis-developer/langgraph-redis/issues/133)
+(sintoma quase idêntico: "funciona na 1ª confirmação, quebra na 2ª"). Versão
+instalada (`langgraph-checkpoint-redis==0.5.1`) já era a mais recente
+disponível — não tinha upgrade trivial pra sair do bug.
+
+**Fix aplicado:** `ticket_node` (1 node, 4 `interrupt()`s) virou 5 nodes
+separados (`ticket_ask_tipo` → `ticket_ask_categoria` → `ticket_ask_queixa`
+→ `ticket_confirm` → `ticket_save`, ligados por edges condicionais em
+`langgraph_experiment/graph.py`), cada um com exatamente 1 `interrupt()` —
+reduz a dependência à trilha mais simples/testada do checkpointer (1
+interrupt pendente por vez), sem trocar de checkpointer. `ticket_save`
+separado de `ticket_confirm` de propósito (nó de aprovação separado do nó
+de efeito colateral, idempotência — princípio já registrado na curadoria do
+`.claude.md`, link note.com sobre HITL).
+
+**Bug relacionado corrigido junto:** o código antigo aceitava qualquer texto
+como resposta (`"Incidente" if resposta == "1" else "Requisicao"` —
+responder a palavra "Incidente" por extenso virava "Requisicao" em
+silêncio). Cada node novo agora valida a resposta e, se inválida,
+re-pergunta (edge condicional de volta pro mesmo node) em vez de aceitar
+qualquer coisa.
+
+**Também mudou:** `OraculoState` (`langgraph_experiment/state.py`) de
+`TypedDict` pra Pydantic `BaseModel` (validação em runtime, alinhado com a
+regra de tipagem do `.claude.md`). `ticket_data` ficou como `dict` (não um
+`BaseModel` aninhado) porque o LangGraph avisou que tipos Pydantic
+customizados aninhados exigem registro explícito no serializer
+(`allowed_msgpack_modules`) e isso vai virar erro bloqueante em versão
+futura — dict é nativo, sem esse risco.
+
+**Validado:** 3 testes de regressão novos
+(`tests/unit/application/test_langgraph_ticket_hitl.py`, rodando com
+`MemorySaver` — isolados do bug de infra do Redis) cobrindo fluxo completo
+válido, re-pergunta em resposta inválida, e cancelamento. Testado também
+manualmente contra o `AsyncRedisSaver` real (o checkpointer de produção) e
+depois via WhatsApp de ponta a ponta — aprovado pelo usuário em 2026-07-28.
+
+`langgraph-checkpoint-redis` pinado em `==0.5.1` no `requirements.txt` (era
+`>=0.4.0` flutuante) — área comprovadamente instável, não deixar subir de
+versão sem testar de novo.
+
+### 7.3 Arquivos tocados nesta rodada
+
+- `src/infrastructure/celery_app.py` — loop persistente por processo
+  (`run_in_worker_loop`), signal `worker_process_shutdown` novo.
+- `src/application/tasks/process_message_task.py` — 2 entry points trocados
+  pra `run_in_worker_loop` (os 2 que chegam no LangGraph); os outros 2
+  (`enviar_resposta_whatsapp_task`/`enviar_aviso_latencia_task`) continuam
+  com `asyncio.run()` puro, sem mudança.
+- `src/application/runtime/dispatcher_langgraph.py` — voltou ao singleton
+  simples original + `aclose_graph()` pro shutdown + docstring com as
+  issues do checkpointer.
+- `langgraph_experiment/state.py` — `TypedDict` → Pydantic `BaseModel`.
+- `langgraph_experiment/nodes.py` — `ticket_node` quebrado em 5 nodes +
+  validação de resposta por node.
+- `langgraph_experiment/graph.py` — edges novos ligando os 5 nodes do
+  funil de ticket.
+- `docker-compose.yml` — `--max-tasks-per-child=500` no serviço `worker`.
+- `requirements.txt` — `langgraph-checkpoint-redis` pinado.
+- `.claude.md` — nova entrada de curadoria com os dois achados (loop
+  persistente + bug do checkpointer), pra não redescobrir do zero numa
+  sessão futura.
+- `tests/unit/application/test_langgraph_ticket_hitl.py` — novo, 3 testes.
+
+### 7.4 Pendências / não feito nesta rodada (registrado, não esquecido)
+
+- Graph Runtime Service dedicado (ver 7.1) — só se/quando o experimento for
+  validado pra produção.
+- Avaliar `AsyncPostgresSaver` como alternativa mais madura ao checkpointer
+  Redis, SE o bug do item 7.2 voltar de outra forma no futuro (projeto já
+  usa Postgres via `asyncpg`/`sqlalchemy` — não avaliado nesta rodada por
+  decisão consciente, o redesenho dos nodes já resolveu o sintoma
+  observado).

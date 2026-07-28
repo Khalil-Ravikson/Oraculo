@@ -47,7 +47,10 @@ scikit-learn>=1.3.0
 # — experimento isolado, ver .claude.md do main "Sem LangGraph" e
 # langgraph_experiment/__init__.py) ────────────────────────
 langgraph>=1.0.0
-langgraph-checkpoint-redis>=0.4.0
+# Pinado em vez de >=: área de resumption de múltiplos interrupts pendentes
+# tem histórico de bugs abertos recentes no pacote (ver langgraph_experiment/
+# nodes.py e .claude.md) — não deixar flutuar pra uma versão não testada.
+langgraph-checkpoint-redis==0.5.1
 
 rapidocr-onnxruntime
 onnxruntime

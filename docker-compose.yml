@@ -228,7 +228,7 @@ services:
         limits:
           cpus: "1.0"
           memory: 768M
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=default,admin,notificacoes"]
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--max-tasks-per-child=500", "--queues=default,admin,notificacoes"]
 
   worker_rag:
     <<: [*worker-base, *resources-heavy]
