@@ -624,3 +624,118 @@ versão sem testar de novo.
   usa Postgres via `asyncpg`/`sqlalchemy` — não avaliado nesta rodada por
   decisão consciente, o redesenho dos nodes já resolveu o sintoma
   observado).
+
+---
+
+## 8. Experimento LangGraph — vazamento de estado entre execuções, "detour" institucional, linguagem natural e fluxo CRUD novo (2026-07-28)
+
+> Continuação do item 7. Testado a fundo via WhatsApp com transcript real
+> colado pelo usuário — achou um bug crítico novo e confirmou uma limitação
+> de UX real, além de um bug separado (não-LangGraph) no ChunkViz.
+
+### 8.1 Bug — vazamento de estado entre execuções sucessivas do mesmo funil na mesma sessão (corrigido)
+
+**Sintoma (achado no transcript real):** um 1º ticket foi aberto e confirmado
+("Sem wifi" → `Tipo: Incidente / Categoria: Rede e Conectividade`). Um 2º
+ticket na MESMA sessão, com o usuário respondendo **errado** de propósito
+tipo e categoria, mesmo assim teve o resumo final mostrando
+`Tipo: Incidente / Categoria: Rede e Conectividade` **idênticos ao 1º
+ticket** — dado velho vazando pro ticket novo.
+
+**Causa raiz:** `_thread_config()` usa um `thread_id` fixo por sessão pra
+sempre; o LangGraph mantém o checkpoint desse `thread_id` indefinidamente,
+mesmo depois do grafo chegar em `END`. Ao iniciar um funil NOVO, o payload
+do `ainvoke()` não resetava `ticket_data`/`ticket_error`/`ticket_confirmed`
+— o LangGraph mescla o dict parcial em cima do último checkpoint salvo, e
+os valores do funil anterior continuavam vivos. As edges de validação (só
+checavam "o campo tem *algum* valor?") eram enganadas por esse dado velho,
+deixando passar de pergunta mesmo com resposta atual inválida.
+
+**Fix:** `dispatcher_langgraph.py::_reset_payload_para_rota()` — ao iniciar
+um funil novo (não ao retomar um pendente), o payload inicial reseta
+explicitamente os campos DAQUELE funil (`ticket_*` ou `crud_*`, conforme a
+rota), sobrescrevendo qualquer resíduo de execução anterior no mesmo
+`thread_id`.
+
+### 8.2 UX — "detour" institucional durante ticket/CRUD (implementado)
+
+**Sintoma:** pergunta institucional no meio do funil de ticket ("me conte a
+história da UEMA") era tratada como resposta inválida, em vez de ser
+respondida — o funil não conseguia "pausar pra responder e retomar depois".
+
+**Fix (sem reconstruir o grafo pra "conversas paralelas" de verdade — mais
+risco em cima de um checkpointer Redis já frágil, sem necessidade real):**
+filtro leve em `dispatcher_langgraph.py::processar()`, ANTES de consumir a
+mensagem como `Command(resume=...)`. Descobre o node pendente
+(`state.next[0]`), roda o validador daquele passo (reaproveitado do próprio
+node via `nodes.VALIDATORS_POR_NODE` — sem duplicar regra); se a resposta
+não validar, reclassifica com `rotear()` (Supervisor real); se for uma rota
+RAG direta (`GERAL`/`CALENDARIO`/`EDITAL`/`CONTATOS`/`WIKI` — decisão:
+detour NÃO cobre SIGAA/outras rotas ambíguas), responde via
+`nodes.responder_rag_direto()` (mesma busca+síntese que `rag_node` usa) e
+reapresenta a pergunta pendente (extraída de
+`aget_state().tasks[0].interrupts[0].value["question"]` — não precisou de
+campo de estado novo pra isso, já vem do próprio LangGraph) — SEM tocar o
+grafo/interrupt, o funil fica exatamente onde estava.
+
+### 8.3 UX — linguagem natural em vez de formato rígido (implementado)
+
+Categoria só aceitava dígito exato, confirmação só aceitava `sim/s/confirmo`
+ou `não/nao/n` literais. `langgraph_experiment/nodes.py` ganhou validadores
+com sinônimos/regex (`validar_tipo`, `validar_categoria`, `validar_confirmacao`,
+`validar_campo_crud`, `validar_valor_crud`) — ex: "Hardware", "pode enviar",
+"deixa pra lá" agora são aceitos.
+
+### 8.4 Fluxo novo: CRUD de cadastro via LangGraph (implementado)
+
+Mesmo escopo do `crud_tool.py` original (`src/agents/tickets/crud_tool.py`)
+— só `centro`(setor)/`telefone`, não expandido. 4 nodes novos
+(`crud_ask_campo` → `crud_ask_valor` → `crud_confirm` → `crud_save`), mesmo
+padrão 1-interrupt-por-node do ticket. Reaproveita
+`ticket_repository.atualizar_setor_e_telefone()` (escrita real) e
+`settings.DEV_TEST_NO_DB_WRITE`/`dev_dump.salvar_json_dev` (mesmo gate
+dev/prod já usado em todo o projeto) — nenhuma lógica de persistência nova.
+**Melhoria em relação ao original:** `crud_ask_valor` valida o setor contra
+`CentroEnum` de verdade (o `crud_tool.py` original aceita texto livre sem
+validar contra o enum, potencial erro de banco silencioso) — corrigido só
+na versão LangGraph, sem tocar o `crud_tool.py` antigo.
+
+### 8.5 Bug registrado como TODO (não corrigido, fora do escopo LangGraph): ChunkViz sempre seleciona Docling
+
+Reportado pelo usuário com log de erro real (workers `SIGKILL`ados durante
+pre-load de ML). Investigado: **não existe nenhuma flag de configuração no
+projeto pra desativar Docling** (`settings.py` não tem nada assim).
+`src/rag/ingestion/parser_factory.py::_EXT_TO_PARSERS`/`ParserFactory.auto()`
+tem `"docling"` **hardcoded** como 1ª opção pra `.pdf`/`.docx`
+(`parser_factory.py:117-131,204-212`). A única forma de "desativar" hoje é
+desinstalar o pacote `docling` (nem está em `requirements.txt` — instalação
+manual), disparando fallback por `ImportError` pra `pymupdf`.
+`chunkviz_tools.py` (usado pelo `/hub`) chama `ParserFactory.auto()`/`.get()`
+direto — mesmo bug. Causa provável: ou o pacote ainda está instalado no
+ambiente, ou `DoclingAdapter()` lança exceção que não é `ImportError`/
+`ValueError` (únicas capturadas no fallback) e sobe sem rede de segurança.
+**Proposta não implementada:** adicionar `settings.DISABLE_DOCLING`, checado
+em `_EXT_TO_PARSERS`/`auto()` antes de incluir `"docling"` nos candidatos.
+
+### 8.6 Observado, não confirmado: workers `SIGKILL`ados durante pre-load de ML
+
+Log do usuário mostrou `ForkPoolWorker` sendo morto (`signal 9`)
+repetidamente durante "Pre-loading ML models on process init", timeout
+esperando UP message. Possível relação com `--max-tasks-per-child=500`
+(item 7.1) — mais respawns de processo = mais recargas do CrossEncoder =
+mais pressão de memória no limite de 768M do container `worker`. Não
+investigado a fundo nesta rodada — registrado pra acompanhar.
+
+### 8.7 Arquivos tocados nesta rodada
+
+- `langgraph_experiment/state.py` — `crud_data`/`crud_error`/`crud_confirmed`.
+- `langgraph_experiment/nodes.py` — validadores extraídos como funções puras
+  reaproveitáveis (node + detour), linguagem natural, 4 nodes de CRUD,
+  `responder_rag_direto()` extraído de `rag_node` pro detour reaproveitar,
+  `VALIDATORS_POR_NODE` (registry pro filtro de detour do dispatcher).
+- `langgraph_experiment/graph.py` — edges do CRUD, `classify` com 3ª opção.
+- `src/application/runtime/dispatcher_langgraph.py` — reset de estado por
+  fluxo, filtro de detour, rota `CRUD` mapeada.
+- `tests/unit/application/test_langgraph_ticket_hitl.py` — casos novos
+  (linguagem natural, vazamento de estado, detour institucional).
+- `tests/unit/application/test_langgraph_crud_hitl.py` — novo.

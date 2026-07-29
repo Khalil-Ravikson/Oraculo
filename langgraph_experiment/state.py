@@ -6,8 +6,10 @@ from pydantic import BaseModel, Field
 class OraculoState(BaseModel):
     session_id: str = ""
     message: str = ""
-    route: str = ""          # "rag" | "ticket"
+    route: str = ""          # "rag" | "ticket" | "crud"
     answer: str = ""
+
+    # ── Funil de ticket ──────────────────────────────────────────────────────
     # dict simples (não um BaseModel aninhado): LangGraph serializa o estado
     # via msgpack pro checkpointer, e tipos Pydantic customizados aninhados
     # exigem registro explícito (allowed_msgpack_modules) — dict é nativo,
@@ -19,3 +21,8 @@ class OraculoState(BaseModel):
     # texto silenciosamente (ver notas.md/plano da investigação HITL).
     ticket_error: str = ""
     ticket_confirmed: bool | None = None
+
+    # ── Funil de CRUD de cadastro (mesmo padrão do ticket) ──────────────────
+    crud_data: dict = Field(default_factory=dict)  # chaves: campo, valor
+    crud_error: str = ""
+    crud_confirmed: bool | None = None

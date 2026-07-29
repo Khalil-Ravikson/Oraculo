@@ -12,10 +12,19 @@ import pytest
 from langgraph.types import Command
 
 from langgraph_experiment.graph import build_graph
+import src.application.runtime.dispatcher_langgraph as dlg
+from src.router.contracts import RouterDecision
 
 
 def _pergunta(result: dict) -> str:
     return result["__interrupt__"][0].value["question"]
+
+
+def _fake_decision(rota: str) -> RouterDecision:
+    return RouterDecision(
+        rota=rota, confianca=1.0, motivo="teste", cache_hit=False,
+        cache_layer="miss", latencia_ms=0, dag_hint={},
+    )
 
 
 @pytest.mark.asyncio
@@ -46,6 +55,29 @@ async def test_funil_ticket_completo_com_respostas_validas():
 
 
 @pytest.mark.asyncio
+async def test_funil_ticket_linguagem_natural():
+    app = build_graph()
+    config = {"configurable": {"thread_id": "test_ticket_natural"}}
+
+    await app.ainvoke(
+        {"session_id": "test_ticket_natural", "message": "abrir chamado", "route": "ticket"},
+        config=config,
+    )
+    r = await app.ainvoke(Command(resume="É um incidente, meu pc quebrou"), config=config)
+    assert "categoria" in _pergunta(r).lower()
+
+    r = await app.ainvoke(Command(resume="Hardware"), config=config)
+    assert "descreva" in _pergunta(r).lower()
+
+    r = await app.ainvoke(Command(resume="Impressora não liga"), config=config)
+    assert "confirma" in _pergunta(r).lower()
+
+    r = await app.ainvoke(Command(resume="pode enviar"), config=config)
+    assert "__interrupt__" not in r or not r["__interrupt__"]
+    assert "Hardware" in r["answer"]
+
+
+@pytest.mark.asyncio
 async def test_funil_ticket_reprergunta_em_resposta_invalida():
     app = build_graph()
     config = {"configurable": {"thread_id": "test_ticket_invalido"}}
@@ -55,20 +87,19 @@ async def test_funil_ticket_reprergunta_em_resposta_invalida():
         config=config,
     )
 
-    # Resposta livre em vez de "1"/"2" — não pode avançar pra pergunta de categoria.
-    r = await app.ainvoke(Command(resume="Incidente"), config=config)
+    # Resposta ambígua, sem nenhuma palavra-chave reconhecível.
+    r = await app.ainvoke(Command(resume="não sei ao certo"), config=config)
     pergunta = _pergunta(r)
-    assert "inválida" in pergunta.lower()
+    assert "não entendi" in pergunta.lower() or "nao entendi" in pergunta.lower()
     assert "Incidente" in pergunta and "Requisição" in pergunta  # re-perguntou a MESMA questão
 
     # Agora responde certo — avança normalmente.
     r = await app.ainvoke(Command(resume="1"), config=config)
     assert "categoria" in _pergunta(r).lower()
 
-    # Categoria inválida (fora da lista) — re-pergunta em vez de aceitar.
+    # Categoria inválida (fora da lista, sem sinônimo reconhecível) — re-pergunta.
     r = await app.ainvoke(Command(resume="99"), config=config)
     pergunta = _pergunta(r)
-    assert "válido" in pergunta.lower() or "valido" in pergunta.lower()
     assert "categoria" in pergunta.lower()
 
 
@@ -86,6 +117,91 @@ async def test_funil_ticket_cancelamento():
     r = await app.ainvoke(Command(resume="teste de cancelamento"), config=config)
     assert "confirma" in _pergunta(r).lower()
 
-    r = await app.ainvoke(Command(resume="não"), config=config)
+    r = await app.ainvoke(Command(resume="deixa pra lá"), config=config)
     assert "__interrupt__" not in r or not r["__interrupt__"]
     assert r["answer"] == "❌ Ticket cancelado."
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Testes no nível do dispatcher (dispatcher_langgraph.processar) — cobrem o
+# vazamento de estado entre execuções e o "detour" institucional, que só
+# existem nesse nível (não no grafo puro). Usam MemorySaver via monkeypatch
+# do singleton `_graph` (bypassa a criação do AsyncRedisSaver real) e mockam
+# rotear()/responder_rag_direto pra não depender de Gemini/Postgres vivos.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _reset_dispatcher_singleton():
+    dlg._graph = None
+    yield
+    dlg._graph = None
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_nao_vaza_estado_entre_tickets_na_mesma_sessao(monkeypatch):
+    dlg._graph = build_graph()
+
+    async def _rotear_ticket(*a, **k):
+        return _fake_decision("TICKET_ABERTURA")
+
+    monkeypatch.setattr("src.router.supervisor.rotear", _rotear_ticket)
+
+    session_id = "test_dispatcher_vazamento"
+
+    # 1º ticket, completo e confirmado com dados válidos.
+    await dlg.processar("abrir chamado", session_id, {})
+    await dlg.processar("2", session_id, {})
+    await dlg.processar("4", session_id, {})
+    await dlg.processar("sem wifi", session_id, {})
+    r1 = await dlg.processar("sim", session_id, {})
+    assert "Requisicao" in r1.answer
+
+    # 2º ticket na MESMA sessão — responde tipo/categoria de propósito errado.
+    await dlg.processar("abrir outro chamado", session_id, {})
+    r_tipo_invalido = await dlg.processar("não sei", session_id, {})
+    assert "não entendi" in r_tipo_invalido.answer.lower() or "nao entendi" in r_tipo_invalido.answer.lower()
+
+    await dlg.processar("1", session_id, {})  # agora responde certo (Incidente)
+    r_categoria_invalida = await dlg.processar("xyz", session_id, {})
+    assert "categoria" in r_categoria_invalida.answer.lower()
+
+    await dlg.processar("2", session_id, {})  # Hardware
+    r_final = await dlg.processar("pc pegou fogo", session_id, {})
+    assert "confirma" in r_final.answer.lower()
+    r_confirma = await dlg.processar("sim", session_id, {})
+    # Não pode ter herdado tipo=Requisicao/categoria=Rede do 1º ticket.
+    assert "Incidente" in r_confirma.answer
+    assert "Hardware" in r_confirma.answer
+    assert "Rede e Conectividade" not in r_confirma.answer
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_detour_institucional_preserva_ticket(monkeypatch):
+    dlg._graph = build_graph()
+
+    decisoes = iter([_fake_decision("TICKET_ABERTURA"), _fake_decision("GERAL")])
+
+    async def _rotear_sequencial(*a, **k):
+        return next(decisoes)
+
+    monkeypatch.setattr("src.router.supervisor.rotear", _rotear_sequencial)
+
+    async def _fake_rag(mensagem: str) -> str:
+        return "A UEMA foi fundada em 1981."
+
+    monkeypatch.setattr("langgraph_experiment.nodes.responder_rag_direto", _fake_rag)
+
+    session_id = "test_dispatcher_detour"
+    r0 = await dlg.processar("abrir chamado", session_id, {})
+    assert "Incidente" in r0.answer
+
+    # Pergunta institucional em vez de responder 1/2.
+    r_detour = await dlg.processar("antes, me conte a história da UEMA", session_id, {})
+    assert "UEMA foi fundada em 1981" in r_detour.answer
+    assert "Incidente" in r_detour.answer and "Requisição" in r_detour.answer  # reapresentou a pergunta pendente
+    assert r_detour.status == "hitl_pending"
+
+    # Ticket continua exatamente onde estava — resposta válida agora avança.
+    r_avanca = await dlg.processar("1", session_id, {})
+    assert "categoria" in r_avanca.answer.lower()

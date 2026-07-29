@@ -2,10 +2,10 @@
 src/application/runtime/dispatcher_langgraph.py
 ====================================================
 EXPERIMENTO — existe só na worktree/branch `langgraph`. Não é uma versão
-"nova" do dispatcher.py original, é um wrapper fino que intercepta só as
-rotas TICKET_ABERTURA e RAG (GERAL/CALENDARIO/EDITAL/CONTATOS/WIKI) para
-desviar pro StateGraph do LangGraph (`langgraph_experiment/graph.py`).
-Qualquer outra rota (SIGAA, comandos !@$, CRUD, etc.) é 100% delegada pro
+"nova" do dispatcher.py original, é um wrapper fino que intercepta as
+rotas TICKET_ABERTURA, CRUD e RAG (GERAL/CALENDARIO/EDITAL/CONTATOS/WIKI)
+para desviar pro StateGraph do LangGraph (`langgraph_experiment/graph.py`).
+Qualquer outra rota (SIGAA, comandos !@$, etc.) é 100% delegada pro
 `application/runtime/dispatcher.py` ORIGINAL — sem duplicar guardrails,
 Orchestrator, HITL do SIGAA, cache semântico, nem nenhuma outra lógica que
 já existe lá.
@@ -19,7 +19,7 @@ already roda em produção.
 
 Checkpointer: `AsyncRedisSaver` (não `MemorySaver`) — obrigatório porque a
 API e os workers Celery rodam em processos/containers diferentes; um
-funil de ticket que pausa (`interrupt()`) num processo e retoma noutro
+funil de ticket/CRUD que pausa (`interrupt()`) num processo e retoma noutro
 precisa que o estado esteja em Redis, não em memória local.
 
 ATENÇÃO — bug conhecido do pacote `langgraph-checkpoint-redis` na resumption
@@ -27,9 +27,17 @@ de múltiplos `interrupt()` pendentes no MESMO node (funciona no 1º resume,
 quebra no 2º): https://github.com/langchain-ai/langgraph/issues/5074 e
 https://github.com/redis-developer/langgraph-redis/issues/133. Reproduzido
 nesta branch com o funil de ticket antigo (4 interrupts num node só).
-Mitigado em `langgraph_experiment/nodes.py` quebrando o funil em 1 node por
-pergunta (1 interrupt por node) — ver docstring lá. Versão do pacote pinada
-em `requirements.txt` por isso (área comprovadamente instável).
+Mitigado em `langgraph_experiment/nodes.py` quebrando cada funil em 1 node
+por pergunta (1 interrupt por node) — ver docstring lá. Versão do pacote
+pinada em `requirements.txt` por isso (área comprovadamente instável).
+
+ATENÇÃO 2 — vazamento de estado entre execuções sucessivas do MESMO funil na
+MESMA sessão: como o `thread_id` é fixo por sessão (`_thread_config`), o
+LangGraph mantém o checkpoint indefinidamente entre invocações — inclusive
+depois de chegar em END. Por isso, ao INICIAR um funil novo (não ao
+retomar), o payload do `ainvoke()` precisa resetar explicitamente os campos
+daquele funil (`_reset_payload_para_rota`), senão dados de uma execução
+anterior (ex: um ticket já confirmado) vazam pra próxima. Ver notas.md.
 
 Ativado trocando o import em `process_message_task.py`:
     from src.application.runtime.dispatcher import processar as cognitive_processar
@@ -47,7 +55,15 @@ from src.application.runtime.dispatcher import processar as _processar_original
 
 logger = logging.getLogger(__name__)
 
-_ROTAS_LANGGRAPH = {"TICKET_ABERTURA", "GERAL", "CALENDARIO", "EDITAL", "CONTATOS", "WIKI"}
+# Rotas RAG "puras" (sem HITL) — usadas tanto pro roteamento normal quanto
+# como escopo do "detour" institucional (pergunta solta no meio de um funil
+# HITL): só essas rotas podem interromper um ticket/CRUD pra responder algo
+# e depois retomar. SIGAA/comandos/outras rotas ambíguas NÃO entram no
+# detour — caem no comportamento padrão do node (rejeita/re-pergunta).
+_ROTAS_DETOUR_RAG = {"GERAL", "CALENDARIO", "EDITAL", "CONTATOS", "WIKI"}
+_ROTAS_LANGGRAPH = _ROTAS_DETOUR_RAG | {"TICKET_ABERTURA", "CRUD"}
+
+_ROUTE_TO_ROTA = {"ticket": "TICKET_ABERTURA", "crud": "CRUD"}
 
 # Singleton de processo: correto desde que o processo Celery mantenha um único event loop
 # vivo pela vida inteira (ver src/infrastructure/celery_app.py::run_in_worker_loop() +
@@ -99,9 +115,21 @@ def _thread_config(session_id: str) -> dict:
     return {"configurable": {"thread_id": f"lg_ticket_{session_id}"}}
 
 
-async def _tem_interrupt_pendente(app, config) -> bool:
-    state = await app.aget_state(config)
-    return bool(state.next)
+def _rota_from_route(route: str) -> str:
+    return _ROUTE_TO_ROTA.get(route, (route or "GERAL").upper())
+
+
+def _reset_payload_para_rota(session_id: str, message: str, route: str) -> dict:
+    """Payload inicial pro ainvoke() de um funil NOVO — reseta explicitamente
+    os campos daquele funil (não os do outro), pra não herdar dado de uma
+    execução anterior no mesmo thread_id (ver ATENÇÃO 2 na docstring do
+    módulo)."""
+    payload = {"session_id": session_id, "message": message, "route": route}
+    if route == "ticket":
+        payload.update(ticket_data={}, ticket_error="", ticket_confirmed=None)
+    elif route == "crud":
+        payload.update(crud_data={}, crud_error="", crud_confirmed=None)
+    return payload
 
 
 def _to_os_result(result: dict, rota: str, t0: float) -> OSResult:
@@ -130,12 +158,45 @@ async def processar(
     app = await _get_graph()
     config = _thread_config(session_id)
 
-    # ── 0. Retomada de um interrupt() pendente (funil de ticket em andamento) ──
-    if await _tem_interrupt_pendente(app, config):
+    state = await app.aget_state(config)
+
+    # ── 0. Retomada de um interrupt() pendente (funil de ticket/CRUD em andamento) ──
+    if state.next:
+        from langgraph_experiment.nodes import VALIDATORS_POR_NODE, responder_rag_direto
+
+        node_pendente = state.next[0]
+        validador = VALIDATORS_POR_NODE.get(node_pendente)
+        parece_valida = validador(state.values, message) if validador else True
+
+        if not parece_valida:
+            # Pode ser um "detour": pergunta institucional solta no meio do
+            # funil, em vez de resposta pro passo pendente — reclassifica
+            # antes de rejeitar (ver .claude.md/notas.md, decisão: detour
+            # limitado a rotas RAG diretas, não expande pra SIGAA/outras).
+            from src.router.supervisor import rotear
+
+            decision = await rotear(message, session_id, user_context)
+            if decision.rota in _ROTAS_DETOUR_RAG:
+                pergunta_pendente = ""
+                if state.tasks and state.tasks[0].interrupts:
+                    pergunta_pendente = state.tasks[0].interrupts[0].value.get("question", "")
+                resposta_rag = await responder_rag_direto(message)
+                answer = f"{resposta_rag}\n\n📋 Voltando ao que estávamos fazendo:\n{pergunta_pendente}"
+                ms = int((time.monotonic() - t0) * 1000)
+                logger.info(
+                    "🧪 [LANGGRAPH] Detour institucional (rota=%s) durante node=%s (session=%s)",
+                    decision.rota, node_pendente, session_id,
+                )
+                return OSResult(
+                    answer=answer, plan_id="langgraph_hitl_detour", rota=_rota_from_route(state.values.get("route", "")),
+                    cache_hit=False, total_ms=ms, status="hitl_pending",
+                )
+            # Não pareceu detour nem resposta válida → deixa o próprio node
+            # rejeitar e re-perguntar (comportamento padrão de validação).
+
         from langgraph.types import Command
 
-        state = await app.aget_state(config)
-        rota = "TICKET_ABERTURA" if state.values.get("route") == "ticket" else state.values.get("route", "GERAL").upper()
+        rota = _rota_from_route(state.values.get("route", ""))
         result = await app.ainvoke(Command(resume=message), config=config)
         return _to_os_result(result, rota, t0)
 
@@ -145,15 +206,12 @@ async def processar(
     decision = await rotear(message, session_id, user_context)
 
     if decision.rota not in _ROTAS_LANGGRAPH:
-        # Não é escopo deste experimento (SIGAA, CRUD, comandos, greeting...)
+        # Não é escopo deste experimento (SIGAA, comandos, greeting...)
         # → delega inteiro pro pipeline original, sem retrabalho nosso.
         return await _processar_original(message, session_id, user_context, history, fatos)
 
-    route = "ticket" if decision.rota == "TICKET_ABERTURA" else "rag"
+    route = {"TICKET_ABERTURA": "ticket", "CRUD": "crud"}.get(decision.rota, "rag")
     logger.info("🧪 [LANGGRAPH] rota=%s → node=%s (session=%s)", decision.rota, route, session_id)
 
-    result = await app.ainvoke(
-        {"session_id": session_id, "message": message, "route": route},
-        config=config,
-    )
+    result = await app.ainvoke(_reset_payload_para_rota(session_id, message, route), config=config)
     return _to_os_result(result, decision.rota, t0)
