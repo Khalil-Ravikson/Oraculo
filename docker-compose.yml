@@ -60,21 +60,28 @@ x-worker-base: &worker-base
       condition: service_healthy
 
 # ── Perfis de recursos (contenção de memória/CPU por container) ────────────────
+# Usamos mem_limit/cpus (chaves "legacy" do Compose) em vez de deploy.resources:
+# deploy.* só é aplicado de fato em modo Swarm ou com `--compatibility`. Em
+# `docker compose up` local (não-swarm), deploy.resources.limits é ignorado
+# silenciosamente — o container sobe sem teto real de RAM/CPU, mesmo aparecendo
+# no YAML. mem_limit/cpus são sempre respeitados pelo engine, com ou sem swarm.
 x-resources-light: &resources-light
-  deploy:
-    resources:
-      limits:
-        cpus: "0.5"
-        memory: 512M
+  mem_limit: 512m
+  cpus: 0.5
 
 x-resources-heavy: &resources-heavy
-  deploy:
-    resources:
-      limits:
-        cpus: "1.5"
-        memory: 1536M
-      reservations:
-        memory: 256M
+  mem_limit: 1024m
+  mem_reservation: 256m
+  cpus: 1.5
+
+# rag_search é o único worker com lib C persistente propensa a vazamento
+# gradual (CrossEncoder/torch, pré-carregado só aqui via CELERY_PRELOAD_RERANKER
+# — ver celery_app.py::on_worker_process_init). synthesis/media/graph não têm
+# esse perfil (API HTTP / yt-dlp por chamada, sem estado nativo entre tasks),
+# por isso rodam --pool=solo com budget mais enxuto.
+x-resources-solo: &resources-solo
+  mem_limit: 512m
+  cpus: 1.0
 
 services:
   # ── Infraestrutura Oráculo ──
@@ -83,11 +90,8 @@ services:
     container_name: oraculo_postgres
     <<: [*restart, *logging]
     profiles: ["core"]
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1024M
+    mem_limit: 1024m
+    cpus: 1.0
     networks:
       oraculo_net:
         ipv4_address: 172.18.0.40
@@ -109,11 +113,8 @@ services:
     container_name: oraculo_redis
     <<: [*restart, *logging]
     profiles: ["core"]
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1024M
+    mem_limit: 1024m
+    cpus: 1.0
     networks:
       oraculo_net:
         ipv4_address: 172.18.0.50
@@ -195,12 +196,12 @@ services:
       - 1.1.1.1
     container_name: oraculo_api
     profiles: ["app"]
-    deploy:
-      resources:
-        limits:
-          cpus: "1.5"
-          memory: 1536M
-    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "2", "--loop", "uvloop", "--no-access-log"]
+    mem_limit: 1536m
+    cpus: 1.5
+    # --workers 1 em dev: 2 processos uvicorn dobram a carga do modelo de
+    # embeddings/CrossEncoder na RAM e estouravam o mem_limit, causando
+    # OOM-kill silencioso (container reiniciando sem log de startup)
+    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "1", "--loop", "uvloop", "--no-access-log"]
     ports:
       - "${API_PORT:-9000}:9000"
     volumes:
@@ -223,41 +224,69 @@ services:
     <<: *worker-base
     container_name: oraculo_worker
     profiles: ["app"]
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 768M
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--max-tasks-per-child=500", "--queues=default,admin,notificacoes"]
+    mem_limit: 768m
+    cpus: 1.0
+    # concurrency=1 (não 2): este container concentra 3 fontes de pressão de
+    # memória no mesmo processo — Playwright (Chromium por fluxo SIGAA,
+    # browser.py::_init_playwright), o event loop asyncio persistente do
+    # LangGraph (run_in_worker_loop, celery_app.py) e o parsing de PDF de
+    # histórico (fitz). Rodar 2 filhos dobraria os 3 picos ao mesmo tempo.
+    # max-tasks-per-child mais baixo que antes (500→200): recicla mais cedo
+    # por segurança dado esse acúmulo. Fica em prefork (não solo) de propósito
+    # — precisa do fork pra reciclar via max-tasks-per-child, e fork+Playwright
+    # é o padrão testado (solo colocaria Playwright no mesmo processo/loop do
+    # supervisor Celery).
+    environment:
+      CELERY_PRELOAD_RERANKER: "false"
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=1", "--max-tasks-per-child=200", "--queues=default,admin,notificacoes"]
 
   worker_rag:
     <<: [*worker-base, *resources-heavy]
     container_name: oraculo_worker_rag
     profiles: ["app"]
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=rag_search"]
+    # Único worker com lib C persistente propensa a vazamento gradual
+    # (CrossEncoder/torch em sentence-transformers) — fica em prefork
+    # (default, sem --pool) justamente para poder reciclar via
+    # max-tasks-per-child=100. CELERY_PRELOAD_RERANKER=true é o único
+    # container que deve pagar o custo do preload do CrossEncoder
+    # (worker_process_init em celery_app.py é global ao app Celery,
+    # dispararia em todos sem esse gate).
+    environment:
+      CELERY_PRELOAD_RERANKER: "true"
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=1", "--max-tasks-per-child=100", "--queues=rag_search"]
 
   worker_synthesis:
-    <<: [*worker-base, *resources-heavy]
+    <<: [*worker-base, *resources-solo]
     container_name: oraculo_worker_synthesis
     profiles: ["app"]
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=synthesis"]
+    # --pool=solo: só chama Gemini via HTTP (SynthesisService), sem lib C
+    # persistente — não há vazamento pra mitigar com fork+max-tasks-per-child,
+    # então o fork só pagaria overhead de import duplicado à toa.
+    environment:
+      CELERY_PRELOAD_RERANKER: "false"
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo", "--queues=synthesis"]
 
   worker_media:
-    <<: [*worker-base, *resources-heavy]
+    <<: *worker-base
     container_name: oraculo_worker_media
     profiles: ["app"]
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=media"]
+    mem_limit: 768m
+    cpus: 1.0
+    # --pool=solo: yt-dlp/instaloader instanciados por chamada (media_download_
+    # service.py), sem estado nativo entre tasks. mem_limit um pouco acima do
+    # resources-solo padrão por causa de buffers de download de vídeo.
+    environment:
+      CELERY_PRELOAD_RERANKER: "false"
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo", "--queues=media"]
 
   worker_graph:
-    <<: *worker-base
+    <<: [*worker-base, *resources-solo]
     container_name: oraculo_worker_graph
     profiles: ["app"]
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1024M
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=1", "--queues=graph"]
+    # --pool=solo: GraphExtractorService é LLM/regex, sem spaCy/torch local.
+    environment:
+      CELERY_PRELOAD_RERANKER: "false"
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo", "--queues=graph"]
 
   beat:
     <<: [*worker-base, *resources-light]
@@ -272,11 +301,8 @@ services:
     container_name: oraculo_evolution
     <<: [*restart, *logging]
     profiles: ["gateway"]
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1024M
+    mem_limit: 1024m
+    cpus: 1.0
     ports:
       - "8081:8080"
     networks:

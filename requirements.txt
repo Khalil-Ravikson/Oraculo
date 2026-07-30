@@ -55,6 +55,13 @@ langgraph-checkpoint-redis==0.5.1
 rapidocr-onnxruntime
 onnxruntime
 
+# sentence-transformers puxa torch como dependência transitiva. Sem fixar a
+# variante aqui, o instalador resolve o build padrão com CUDA (centenas de MB
+# a mais de pacotes nvidia-*), inútil nesta imagem (python:3.11-slim, sem
+# GPU). --extra-index-url força a resolução para a build CPU-only, bem menor
+# e mais rápida de baixar/instalar no build da imagem Docker.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 
 sentence-transformers>=2.5.0
 google-api-python-client>=2.100.0

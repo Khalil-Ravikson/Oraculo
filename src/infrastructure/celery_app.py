@@ -160,7 +160,16 @@ def on_worker_process_init(**kwargs):
     """
     Executado quando um novo worker child process é iniciado (prefork).
     Carrega modelos de ML em memória no boot para eliminar latência nas tasks.
+
+    Gated por CELERY_PRELOAD_RERANKER: este signal é global do celery_app —
+    dispara em TODO container que sobe um worker deste app, independente de
+    --queues. Sem o gate, worker/worker_synthesis/worker_media/worker_graph
+    carregavam o CrossEncoder (~90-300MB com torch) mesmo nunca executando a
+    task "reranker" (fila rag_search, só consumida por worker_rag). Setar
+    CELERY_PRELOAD_RERANKER=true só no worker_rag (docker-compose.yml).
     """
+    if os.environ.get("CELERY_PRELOAD_RERANKER", "false").lower() != "true":
+        return
     try:
         from src.application.chain.reranker import get_reranker
         logger.info("⏳ [CELERY] Pre-loading ML models on process init...")
