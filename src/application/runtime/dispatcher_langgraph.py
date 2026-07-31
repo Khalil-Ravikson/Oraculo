@@ -123,8 +123,15 @@ def _reset_payload_para_rota(session_id: str, message: str, route: str) -> dict:
     """Payload inicial pro ainvoke() de um funil NOVO — reseta explicitamente
     os campos daquele funil (não os do outro), pra não herdar dado de uma
     execução anterior no mesmo thread_id (ver ATENÇÃO 2 na docstring do
-    módulo)."""
-    payload = {"session_id": session_id, "message": message, "route": route}
+    módulo). `cancelado` é sempre resetado independente da rota: sem isso,
+    uma sessão que saiu de um funil anterior ("sair"/RBAC bloqueado) fica
+    com cancelado=True gravado no checkpoint pra sempre — e como as edges
+    condicionais checam state.cancelado ANTES de qualquer outra regra
+    (langgraph_experiment/nodes.py), todo funil novo nessa mesma sessão
+    aceita a 1ª resposta e vai direto pro __end__, sem nunca perguntar o
+    resto (reproduzido em teste real: 1x "sair", todo ticket seguinte
+    quebrado)."""
+    payload = {"session_id": session_id, "message": message, "route": route, "cancelado": False}
     if route == "ticket":
         payload.update(ticket_data={}, ticket_error="", ticket_confirmed=None)
     elif route == "crud":
