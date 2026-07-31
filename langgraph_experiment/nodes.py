@@ -178,6 +178,29 @@ def _com_erro(pergunta: str, erro: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Saída explícita do HITL — comando reconhecido em QUALQUER pergunta do funil
+# (ticket ou CRUD), checado ANTES do validador específico do node. Existe
+# porque, sem isso, uma mensagem como "sair"/"cancelar" solta no meio do
+# funil não validava pro passo pendente e caía no filtro de detour
+# institucional (dispatcher_langgraph.py) — ia pro RAG, respondia "não
+# encontrei" e voltava a repetir a mesma pergunta pendente, sem nunca sair.
+# Ver _eh_saida() usado também por dispatcher_langgraph.py::processar() pra
+# pular o detour quando a mensagem é claramente um pedido de saída.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_RE_SAIR_HITL = re.compile(r"^\s*(sair|cancelar?|desist[oi]r?|abortar|encerrar|parar)\s*[.!]?\s*$", re.I)
+_MSG_SAIDA_HITL = "🚪 Você saiu do atendimento. Se precisar, é só chamar de novo."
+
+
+def _eh_saida(texto: str) -> bool:
+    return bool(_RE_SAIR_HITL.match(texto.strip()))
+
+
+def _resultado_saida() -> dict:
+    return {"cancelado": True, "answer": _MSG_SAIDA_HITL}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Funil de ticket — 1 interrupt() por node (não 4 empilhados no mesmo node).
 #
 # Motivo (ver plano/investigação): múltiplos interrupt() sequenciais no mesmo
@@ -196,12 +219,24 @@ def _com_erro(pergunta: str, erro: str) -> str:
 
 
 async def ticket_ask_tipo(state: OraculoState) -> dict:
+    # RBAC — mesma checagem do fluxo real (ticket_flow.py), portada pra cá.
+    # Roda no topo do node de ENTRADA do funil: LangGraph reexecuta o corpo
+    # do node do início a cada resume, então isso é rechecado a cada turno
+    # (leitura pura, sem side effect — idempotente, ok repetir).
+    from src.agents.tickets.rbac import checar_permissao_chamado
+
+    autorizado, msg_bloqueio, _ = await checar_permissao_chamado(state.session_id)
+    if not autorizado:
+        return {"cancelado": True, "answer": msg_bloqueio}
+
     pergunta = _com_erro(
         "É um *Incidente* (algo parou) ou uma *Requisição* (pedido novo)? "
         "Responda 1 ou 2, ou diga com suas palavras.",
         state.ticket_error,
     )
     resposta = interrupt({"question": pergunta})
+    if _eh_saida(str(resposta)):
+        return _resultado_saida()
     ok, valor = validar_tipo(str(resposta))
     if ok:
         return {"ticket_data": {**state.ticket_data, "tipo": valor}, "ticket_error": ""}
@@ -209,6 +244,8 @@ async def ticket_ask_tipo(state: OraculoState) -> dict:
 
 
 def _tipo_valido(state: OraculoState) -> str:
+    if state.cancelado:
+        return "__end__"
     return "ticket_ask_categoria" if state.ticket_data.get("tipo") and not state.ticket_error else "ticket_ask_tipo"
 
 
@@ -221,6 +258,8 @@ async def ticket_ask_categoria(state: OraculoState) -> dict:
         state.ticket_error,
     )
     resposta = interrupt({"question": pergunta})
+    if _eh_saida(str(resposta)):
+        return _resultado_saida()
     ok, valor = validar_categoria(str(resposta))
     if ok:
         return {"ticket_data": {**state.ticket_data, "categoria": valor}, "ticket_error": ""}
@@ -228,12 +267,16 @@ async def ticket_ask_categoria(state: OraculoState) -> dict:
 
 
 def _categoria_valida(state: OraculoState) -> str:
+    if state.cancelado:
+        return "__end__"
     return "ticket_ask_queixa" if state.ticket_data.get("categoria") and not state.ticket_error else "ticket_ask_categoria"
 
 
 async def ticket_ask_queixa(state: OraculoState) -> dict:
     pergunta = _com_erro("Descreva o problema ou pedido com suas palavras:", state.ticket_error)
     resposta = interrupt({"question": pergunta})
+    if _eh_saida(str(resposta)):
+        return _resultado_saida()
     ok, valor = validar_queixa(str(resposta))
     if ok:
         return {"ticket_data": {**state.ticket_data, "queixa": valor}, "ticket_error": ""}
@@ -241,6 +284,8 @@ async def ticket_ask_queixa(state: OraculoState) -> dict:
 
 
 def _queixa_valida(state: OraculoState) -> str:
+    if state.cancelado:
+        return "__end__"
     return "ticket_confirm" if state.ticket_data.get("queixa") and not state.ticket_error else "ticket_ask_queixa"
 
 
@@ -249,6 +294,8 @@ async def ticket_confirm(state: OraculoState) -> dict:
     resumo = f"Tipo: {d.get('tipo')}\nCategoria: {d.get('categoria')}\nDescrição: {d.get('queixa')}"
     pergunta = _com_erro(f"{resumo}\n\nConfirma o envio? (sim/não)", state.ticket_error)
     resposta = interrupt({"question": pergunta})
+    if _eh_saida(str(resposta)):
+        return _resultado_saida()
     ok, valor = validar_confirmacao(str(resposta))
     if not ok:
         return {"ticket_confirmed": None, "ticket_error": "❌ Não entendi — responda algo como \"sim\"/\"pode enviar\" ou \"não\"/\"cancelar\"."}
@@ -258,6 +305,8 @@ async def ticket_confirm(state: OraculoState) -> dict:
 
 
 def _confirm_route(state: OraculoState) -> str:
+    if state.cancelado:
+        return "__end__"
     if state.ticket_confirmed is True:
         return "ticket_save"
     if state.ticket_confirmed is False:
@@ -288,11 +337,21 @@ async def ticket_save(state: OraculoState) -> dict:
 
 
 async def crud_ask_campo(state: OraculoState) -> dict:
+    # RBAC — mesma checagem do fluxo real (crud_tool.py), portada pra cá.
+    # Mesmo motivo/idempotência do ticket_ask_tipo (ver comentário lá).
+    from src.agents.tickets.rbac import checar_permissao_chamado
+
+    autorizado, msg_bloqueio, _ = await checar_permissao_chamado(state.session_id)
+    if not autorizado:
+        return {"cancelado": True, "answer": msg_bloqueio}
+
     pergunta = _com_erro(
         "O que você quer atualizar: seu *setor* ou seu *telefone*? (responda 'setor' ou 'telefone')",
         state.crud_error,
     )
     resposta = interrupt({"question": pergunta})
+    if _eh_saida(str(resposta)):
+        return _resultado_saida()
     ok, valor = validar_campo_crud(str(resposta))
     if ok:
         return {"crud_data": {**state.crud_data, "campo": valor}, "crud_error": ""}
@@ -300,6 +359,8 @@ async def crud_ask_campo(state: OraculoState) -> dict:
 
 
 def _campo_crud_valido(state: OraculoState) -> str:
+    if state.cancelado:
+        return "__end__"
     return "crud_ask_valor" if state.crud_data.get("campo") and not state.crud_error else "crud_ask_campo"
 
 
@@ -314,6 +375,8 @@ async def crud_ask_valor(state: OraculoState) -> dict:
         pergunta = _com_erro("Qual é o novo número de telefone? (com DDD)", state.crud_error)
 
     resposta = interrupt({"question": pergunta})
+    if _eh_saida(str(resposta)):
+        return _resultado_saida()
     ok, valor = validar_valor_crud(campo, str(resposta))
     if ok:
         return {"crud_data": {**state.crud_data, "valor": valor}, "crud_error": ""}
@@ -323,6 +386,8 @@ async def crud_ask_valor(state: OraculoState) -> dict:
 
 
 def _valor_crud_valido(state: OraculoState) -> str:
+    if state.cancelado:
+        return "__end__"
     return "crud_confirm" if state.crud_data.get("valor") and not state.crud_error else "crud_ask_valor"
 
 
@@ -331,6 +396,8 @@ async def crud_confirm(state: OraculoState) -> dict:
     resumo = f"Campo: {d.get('campo')}\nNovo valor: {d.get('valor')}"
     pergunta = _com_erro(f"{resumo}\n\nConfirma a atualização? (sim/não)", state.crud_error)
     resposta = interrupt({"question": pergunta})
+    if _eh_saida(str(resposta)):
+        return _resultado_saida()
     ok, valor = validar_confirmacao(str(resposta))
     if not ok:
         return {"crud_confirmed": None, "crud_error": "❌ Não entendi — responda algo como \"sim\"/\"pode enviar\" ou \"não\"/\"cancelar\"."}
@@ -340,6 +407,8 @@ async def crud_confirm(state: OraculoState) -> dict:
 
 
 def _crud_confirm_route(state: OraculoState) -> str:
+    if state.cancelado:
+        return "__end__"
     if state.crud_confirmed is True:
         return "crud_save"
     if state.crud_confirmed is False:

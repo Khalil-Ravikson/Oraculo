@@ -162,11 +162,19 @@ async def processar(
 
     # ── 0. Retomada de um interrupt() pendente (funil de ticket/CRUD em andamento) ──
     if state.next:
-        from langgraph_experiment.nodes import VALIDATORS_POR_NODE, responder_rag_direto
+        from langgraph_experiment.nodes import VALIDATORS_POR_NODE, _eh_saida, responder_rag_direto
 
         node_pendente = state.next[0]
-        validador = VALIDATORS_POR_NODE.get(node_pendente)
-        parece_valida = validador(state.values, message) if validador else True
+        # Comando de saída ("sair"/"cancelar"/...) tem prioridade sobre o
+        # validador do node E sobre o detour de RAG abaixo — sem isso, "sair"
+        # não validava pro passo pendente, virava detour, o RAG respondia
+        # "não encontrei" e a mesma pergunta pendente era repetida, sem
+        # nunca sair de fato do funil (bug observado em teste real).
+        if _eh_saida(message):
+            parece_valida = True
+        else:
+            validador = VALIDATORS_POR_NODE.get(node_pendente)
+            parece_valida = validador(state.values, message) if validador else True
 
         if not parece_valida:
             # Pode ser um "detour": pergunta institucional solta no meio do

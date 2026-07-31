@@ -26,3 +26,9 @@ class OraculoState(BaseModel):
     crud_data: dict = Field(default_factory=dict)  # chaves: campo, valor
     crud_error: str = ""
     crud_confirmed: bool | None = None
+
+    # Sinaliza saída explícita do HITL (comando "sair"/"cancelar" em qualquer
+    # pergunta do funil) OU bloqueio de RBAC — as edges condicionais checam
+    # isso ANTES de qualquer outra regra e vão direto pro __end__, sem cair
+    # no detour de RAG nem re-perguntar. Ver nodes.py::_eh_saida().
+    cancelado: bool = False

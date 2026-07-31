@@ -66,15 +66,15 @@ def build_graph(checkpointer=None):
 
     graph.add_conditional_edges(
         "ticket_ask_tipo", _tipo_valido,
-        {"ticket_ask_tipo": "ticket_ask_tipo", "ticket_ask_categoria": "ticket_ask_categoria"},
+        {"ticket_ask_tipo": "ticket_ask_tipo", "ticket_ask_categoria": "ticket_ask_categoria", "__end__": END},
     )
     graph.add_conditional_edges(
         "ticket_ask_categoria", _categoria_valida,
-        {"ticket_ask_categoria": "ticket_ask_categoria", "ticket_ask_queixa": "ticket_ask_queixa"},
+        {"ticket_ask_categoria": "ticket_ask_categoria", "ticket_ask_queixa": "ticket_ask_queixa", "__end__": END},
     )
     graph.add_conditional_edges(
         "ticket_ask_queixa", _queixa_valida,
-        {"ticket_ask_queixa": "ticket_ask_queixa", "ticket_confirm": "ticket_confirm"},
+        {"ticket_ask_queixa": "ticket_ask_queixa", "ticket_confirm": "ticket_confirm", "__end__": END},
     )
     graph.add_conditional_edges(
         "ticket_confirm", _confirm_route,
@@ -84,11 +84,11 @@ def build_graph(checkpointer=None):
 
     graph.add_conditional_edges(
         "crud_ask_campo", _campo_crud_valido,
-        {"crud_ask_campo": "crud_ask_campo", "crud_ask_valor": "crud_ask_valor"},
+        {"crud_ask_campo": "crud_ask_campo", "crud_ask_valor": "crud_ask_valor", "__end__": END},
     )
     graph.add_conditional_edges(
         "crud_ask_valor", _valor_crud_valido,
-        {"crud_ask_valor": "crud_ask_valor", "crud_confirm": "crud_confirm"},
+        {"crud_ask_valor": "crud_ask_valor", "crud_confirm": "crud_confirm", "__end__": END},
     )
     graph.add_conditional_edges(
         "crud_confirm", _crud_confirm_route,
