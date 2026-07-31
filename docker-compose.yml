@@ -48,6 +48,7 @@ x-worker-base: &worker-base
     - 1.1.1.1
   volumes:
     - ./src:/app/src
+    - ./langgraph_experiment:/app/langgraph_experiment
     - ./dados:/app/dados
     # Isolamento de segurança: mapeia pasta temporária interna ao invés de expor o host /tmp
     - ./dados/tmp:/tmp
@@ -206,6 +207,7 @@ services:
       - "${API_PORT:-9000}:9000"
     volumes:
       - ./src:/app/src
+      - ./langgraph_experiment:/app/langgraph_experiment
       - ./dados:/app/dados
       - ./dados/tmp:/tmp
       - ./migrations:/app/migrations
