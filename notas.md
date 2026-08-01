@@ -739,3 +739,191 @@ investigado a fundo nesta rodada — registrado pra acompanhar.
 - `tests/unit/application/test_langgraph_ticket_hitl.py` — casos novos
   (linguagem natural, vazamento de estado, detour institucional).
 - `tests/unit/application/test_langgraph_crud_hitl.py` — novo.
+
+## 9. Sessão 2026-07-31 — reavaliação do LangGraph, RBAC, comando de saída, bug do `cancelado` vazando, limpeza de workers mortos
+
+Contexto: usuário retestou o experimento LangGraph extensivamente via
+WhatsApp e não achou mais tão nocivo quanto da rejeição original (`.claude.md`
+linha 11 histórica). Sessão focou em: (1) validar isso com critério técnico
+antes de atualizar a decisão registrada, (2) fechar duas lacunas concretas
+achadas no caminho (RBAC ausente no funil LangGraph, sem jeito de sair do
+HITL), (3) rodar os dois testes direcionados que ficaram pendentes da rodada
+anterior (múltiplos `interrupt()` no mesmo node; carga concorrente), (4)
+limpeza de código morto identificado ao longo do processo.
+
+### 9.1 Webhook mudo — causa raiz não tinha nada a ver com LangGraph
+
+Sintoma relatado: bot parou de responder após `git pull` + `docker compose up
+-d --force-recreate` numa sessão de trabalho. Causa: `WHATSAPP_HOOK_URL` no
+`.env` apontava pra `http://api:9000/webhook` — a rota real é
+`POST /webhook/evolution` (prefixo `/webhook` + `@router.post("/evolution")`
+em `webhook_controller.py`). `EvolutionService` reconfigura o webhook no
+Evolution a cada boot do `api`, então qualquer recreate reafirmava a URL
+errada. Corrigido no `.env` (não versionado).
+
+Achado secundário no mesmo diagnóstico: todo serviço do `docker-compose.yml`
+ganhou `profiles:` (`core`/`monitoring`/`app`/`gateway`) num commit anterior
+(`e1cd34f`, o mesmo que já se descrevia como WIP), mas nada ativa isso por
+padrão — `docker compose up -d` sem `--profile` não sobe nada. Não corrigido
+nesta rodada (ver `.claude.md` pra o workaround).
+
+### 9.2 RBAC ausente no funil LangGraph (corrigido)
+
+`checar_permissao_chamado()` (`src/agents/tickets/rbac.py`) já existia e já
+protegia o fluxo real (`ticket_flow.py`/`crud_tool.py`), mas nunca foi
+portado pro `langgraph_experiment/nodes.py` — qualquer role/status
+conseguia abrir ticket/CRUD via LangGraph. Adicionado no topo dos nodes de
+entrada `ticket_ask_tipo`/`crud_ask_campo`. Testado com
+`DEV_TEST_SKIP_REGISTRATION=False` e telefone sem cadastro: bloqueou antes
+de qualquer pergunta.
+
+### 9.3 Comando de saída do HITL (implementado)
+
+Não existia jeito de sair de um funil de ticket/CRUD no meio — mensagens
+como "sair"/"cancelar" não validavam pro passo pendente e caíam no filtro
+de detour institucional (`dispatcher_langgraph.py`), que tentava RAG,
+respondia "não encontrei" e repetia a mesma pergunta pendente indefinidamente
+(bug reproduzido em teste real via WhatsApp). Implementado: campo
+`state.cancelado` (`langgraph_experiment/state.py`), checado em toda edge
+condicional ANTES de qualquer outra regra, e `_eh_saida()`/`_resultado_saida()`
+(`nodes.py`) checado em todo node do funil, com prioridade sobre o
+validador do node e sobre o detour no dispatcher. Comando reconhecido só
+como mensagem EXATA (`^sair$`, `^cancelar$`, etc., regex com âncoras) —
+decisão consciente pra não capturar a palavra solta dentro de texto livre
+(ex: `ticket_ask_queixa` aceita descrição livre do problema).
+
+### 9.4 Bug real: `cancelado=True` vazando entre execuções (corrigido)
+
+Sintoma: depois de UMA sessão digitar "sair" uma vez, todo ticket/CRUD
+seguinte NESSA MESMA sessão quebrava — aceitava a 1ª resposta (ex: tipo)
+e ia direto pro fim, sem perguntar categoria/queixa/confirmação. Parecia
+exatamente o bug de concorrência do checkpointer (2º resume "perdendo" o
+`next`), mas não era. Causa raiz: `_reset_payload_para_rota()`
+(`dispatcher_langgraph.py`) resetava `ticket_data`/`ticket_error`/
+`ticket_confirmed` ao iniciar um funil novo, mas não o novo campo
+`cancelado` — que fica gravado no checkpoint indefinidamente (mesmo padrão
+de fundo do bug 8.1). Toda edge condicional checa `state.cancelado` antes
+de qualquer regra, então uma vez `True`, fica `True` pra sempre nessa
+sessão. Fix: `cancelado: False` adicionado ao payload de reset. Confirmado
+contra dado real de produção (state history da sessão mostrava `ticket_data`
+capturado certo mas `next=()` imediato) e retestado com sucesso depois do
+fix (3 resumes seguidos avançando corretamente).
+
+**Lição registrada:** se esse sintoma reaparecer (resposta válida não avança
+o funil, `state.next` some), checar primeiro se é o mesmo padrão de leak
+(campo de estado novo esquecido no reset) antes de suspeitar do
+checkpointer de novo.
+
+### 9.5 Dedup de webhook por `msg_key_id` (corrigido)
+
+Achado ao investigar por que uma sessão real ficou com dados inconsistentes:
+o Evolution reentrega o mesmo evento de webhook com frequência alta —
+confirmado em produção, praticamente toda mensagem chegava 2x. Sem dedup,
+cada duplicata virava uma task Celery independente mexendo no mesmo funil
+HITL por conta própria (ex: a mesma resposta processada 2x, uma delas
+respondendo a pergunta ERRADA do funil por já ter avançado). Fix:
+`webhook_controller.py` deduplica por `msg_key_id` (id único que o Evolution
+já manda) usando `acquire_lock()` de `redis_client.py` — função que já
+existia com esse propósito exato e nunca tinha sido chamada em lugar
+nenhum. TTL de 120s. Testado com payload idêntico enviado 2x (1ª aceita, 2ª
+ignorada) e a dedup pegou uma duplicata real acontecendo durante o teste.
+
+### 9.6 `langgraph_experiment/` sem volume mount (corrigido)
+
+`docker-compose.yml` só montava `./src` como volume — `langgraph_experiment/`
+nunca chegava aos containers (rodavam a cópia congelada da imagem). Todo o
+trabalho de 9.2/9.3/9.4 só passou a valer de verdade nos containers reais
+depois desse fix (adicionado ao anchor `x-worker-base` e ao serviço `api`).
+
+### 9.7 Dois testes direcionados que faltavam da rodada anterior (fechados)
+
+**Múltiplos `interrupt()` no mesmo node**: node descartável (2 `interrupt()`
+sequenciais numa única execução, fora dos nodes de produção) contra o
+checkpointer real. Não reproduziu o bug catastrófico dos issues #5074/#133
+— fluxo completou corretamente end-to-end nos 2 resumes. Achado menor:
+`aget_state().next` reportou vazio logo após o 1º resume mesmo com um 2º
+interrupt pendente (inconsistência de relatório, sem impacto — confirmado
+pelo 2º resume funcionar). Versões no momento do teste: `langgraph==1.2.10`,
+`langgraph-checkpoint-redis==0.5.1`, `langgraph-checkpoint==4.1.1`.
+
+**Carga concorrente**: 5 processos separados (loop persistente cada,
+imitando `run_in_worker_loop()`) rodando o funil completo em paralelo,
+sessões diferentes — zero erros de event loop. Teste extra mais agressivo:
+2 respostas concorrentes pro MESMO interrupt pendente, sem lock nenhum —
+não quebrou, mas causou last-write-wins silencioso (uma resposta some sem
+aviso). Confirma que o lock por telefone (`lock:msg:{phone}`,
+`process_message_task.py`) é necessário, não redundante.
+
+**Conclusão**: os dois motivos técnicos concretos da rejeição original
+parecem resolvidos no upstream. Falta só RBAC testado corretamente na
+`main` (fora do LangGraph) antes de reconsiderar promover pra lá — decisão
+consciente de NÃO mexer nisso nesta sessão.
+
+### 9.8 Limpeza de código morto/ocioso
+
+- **Worker fantasma `crud_confirm`**: nunca teve `@register()` em lugar
+  nenhum (já documentado antes, nunca limpo). Removida a entrada de
+  `_QUEUES` (`application/workers/registry.py`); comentários repetidos em
+  `supervisor.py`/`planning.py` reduzidos a ponteiro pra
+  `agents/tickets/service.py` (mantém o histórico completo).
+- **`worker_graph`/`graph_extractor`**: confirmado por grep independente
+  (não só pela nota antiga) — zero chamadores reais em router/agents/
+  use_cases/commands/api. Container removido do `docker-compose.yml` e
+  parado; código (`worker_graph_extractor.py`, registro em
+  `celery_app.py`/`registry.py`) mantido intacto pra reativar se aparecer
+  uso real.
+- **`message_stream.py` — QUASE removido por engano**: a entrada anterior
+  deste arquivo (seção 7.1) dizia "código morto, não usado no caminho real
+  de produção". Verificação direta no código atual mostrou o oposto:
+  `_xack_stream()` roda em toda mensagem processada, `recover_pending_messages()`
+  roda no boot do worker E na task periódica `stream_recovery` (observada
+  rodando com sucesso nos logs desta própria sessão). Não removido — a nota
+  antiga estava errada ou fora de escopo (provavelmente só válida pro
+  cenário hipotético do "Graph Runtime Service" nunca implementado).
+  **Lição**: verificar contra o código atual antes de agir em cima de uma
+  nota antiga, mesmo quando parece autoritativa.
+- **Mantidos sem mudança**: `ytb_download`/`insta_download` — tecnicamente
+  funcionais (regex de detecção em `router/supervisor.py`, dispatch real em
+  `dispatcher.py`), decisão consciente de manter mesmo fora do escopo
+  "acadêmico" da identidade do produto.
+
+### 9.9 Arquivos tocados nesta rodada
+
+- `.claude.md` — status do LangGraph atualizado 4x ao longo da sessão
+  (reavaliação inicial → achados testados → resultado dos 2 testes
+  direcionados), volume mounts e profiles do compose documentados.
+- `langgraph_experiment/state.py` — campo `cancelado`.
+- `langgraph_experiment/nodes.py` — RBAC nos nodes de entrada,
+  `_eh_saida()`/`_resultado_saida()`, checagem de `cancelado` em toda edge.
+- `langgraph_experiment/graph.py` — `"__end__"` adicionado como destino nas
+  edges que ainda não tinham.
+- `src/application/runtime/dispatcher_langgraph.py` — prioridade do comando
+  de saída sobre validador/detour; reset de `cancelado` no payload novo.
+- `src/application/webhook/webhook_controller.py` — dedup por `msg_key_id`.
+- `src/application/tasks/ingestion_tasks.py` — bug não relacionado ao
+  LangGraph, corrigido na mesma sessão: `_extrair_texto()` ignorava o
+  parser escolhido no ChunkViz, sempre usava `ParserFactory.auto()`.
+- `docker-compose.yml` — volume mount de `langgraph_experiment/`, remoção
+  do serviço `worker_graph`.
+- `src/application/workers/registry.py`, `src/router/supervisor.py`,
+  `src/agents/academic_knowledge/planning.py`, `src/capabilities/registry.py`
+  — limpeza das referências ao worker fantasma `crud_confirm`.
+
+### 9.10 Pendências explícitas pra próxima sessão
+
+1. RBAC testado corretamente na `main` (fora do LangGraph) — bloqueia a
+   decisão de promover o LangGraph.
+2. Decisão de estratégia de merge/integração da branch `langgraph` — ainda
+   não tomada, e não deve ser até o item 1 fechar.
+3. `GEMINI_MODEL=gemini-3.1-flash-lite-preview` no `.env` dando 404 nos
+   testes de detour — nome de modelo provavelmente inválido/descontinuado.
+4. `COMPOSE_PROFILES` sem default — decidir se fixa no `.env` ou documenta
+   o comando completo.
+5. Containers `beat`/`worker`/`worker_media`/`worker_rag`/`worker_synthesis`
+   aparecendo "unhealthy" no `docker compose ps` há um tempo — não
+   investigado, pode ser só o healthcheck script.
+6. Dúvida do usuário sobre "OCR do SIGAA" não resolvida — não achado
+   arquivo dedicado nessa área, suspeita de ser o `rapidocr_adapter.py`
+   genérico (não específico de SIGAA).
+7. Convenção de branches (`feature/`, `fix/`, `spike/`, `research/`) —
+   discutida, ainda não formalizada como prática.
