@@ -242,7 +242,8 @@ def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) 
 
     if rota == "TICKET_ABERTURA":
         # Fast-path próprio em dispatcher.py (agents/tickets/ticket_flow.py) —
-        # nunca chega ao Planner/crud_confirm.
+        # nunca chega ao Planner (ver agents/tickets/service.py pro histórico
+        # de por que essa rota nunca despacha um worker via Planner).
         return {"steps": ["ticket_abertura"]}
 
     if rota == "SIGAA":
@@ -268,7 +269,7 @@ def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) 
         "CONTATOS":    {"steps": ["rag_search"], "doc_type": "contatos",   "k": 6},
         "WIKI":        {"steps": ["rag_search"], "doc_type": "wiki_ctic",  "k": 6},
         # dispatcher.py intercepta CRUD antes do Planner (agents/tickets/crud_tool.py)
-        # — "crud_confirm" nunca existiu de verdade, ver notas.md.
+        # — ver agents/tickets/service.py pro histórico do worker fantasma que isso evita.
         "CRUD":        {"steps": ["crud_tool"],                            "k": 0},
         "TICKET_ABERTURA": {"steps": ["ticket_abertura"],                  "k": 0},
         "GREETING":    {"steps": ["greeting"],                             "k": 0},

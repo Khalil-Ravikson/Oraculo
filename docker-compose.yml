@@ -281,14 +281,11 @@ services:
       CELERY_PRELOAD_RERANKER: "false"
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo", "--queues=media"]
 
-  worker_graph:
-    <<: [*worker-base, *resources-solo]
-    container_name: oraculo_worker_graph
-    profiles: ["app"]
-    # --pool=solo: GraphExtractorService é LLM/regex, sem spaCy/torch local.
-    environment:
-      CELERY_PRELOAD_RERANKER: "false"
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo", "--queues=graph"]
+  # worker_graph removido do compose (2026-07-31): fila "graph"/worker_graph_extractor
+  # nunca teve chamador real em produção (nenhum router/agent/use_case despacha
+  # "graph_extractor" — confirmado por grep, não só por nota antiga). Código e task
+  # continuam existindo (worker_graph_extractor.py, registry.py, celery_app.py) —
+  # é só reativar este serviço se aparecer um uso real futuro.
 
   beat:
     <<: [*worker-base, *resources-light]

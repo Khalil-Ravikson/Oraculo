@@ -139,10 +139,9 @@ async def criar_plano(
     if rota in ("CRUD", "TICKET_ABERTURA"):
         # Defesa em profundidade: dispatcher.py intercepta essas duas rotas
         # ANTES do Planner (agents/tickets/ticket_flow.py e crud_tool.py) —
-        # chegar aqui não deveria acontecer no fluxo normal. Não existe (nunca
-        # existiu) worker "crud_confirm" real; se cair aqui mesmo assim,
-        # responde com "greeting" (sempre válido) em vez de referenciar um
-        # worker fantasma — ver notas.md.
+        # chegar aqui não deveria acontecer no fluxo normal. Responde com
+        # "greeting" (sempre válido) em vez de deixar o Planner inventar um
+        # worker que não existe — ver agents/tickets/service.py pro histórico.
         plan = _plano_simples(rota, query, session_id, user_context, history, fatos or [])
         ms = int((time.monotonic() - t0) * 1000)
         _PLANNER_LATENCY.observe(ms)

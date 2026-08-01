@@ -15,11 +15,11 @@ documentado lá) em vez de hardcoded neste arquivo.
 ACHADO da Fase 6 original: nenhum destes tools tinha consumidor vivo — o
 único import de `crud_tools.executar_tool` era em
 `application/chain/oracle_chain.bak` (arquivo `.bak`, nunca executado). A
-rota "CRUD" do Supervisor aponta hoje para um worker "crud_confirm" que não
-existe (ver `agents/tickets/service.py`). Migrado mesmo assim porque a
-implementação é válida e reaproveitável — só não está conectada a nenhum
-fluxo de produção no momento. Conectar isso é trabalho de produto (decidir
-COMO o CRUD confirma e dispara), não desta fase estrutural.
+rota "CRUD" do Supervisor não despacha nenhum destes hoje — ver
+`agents/tickets/service.py` pro histórico completo. Migrado mesmo assim
+porque a implementação é válida e reaproveitável — só não está conectada a
+nenhum fluxo de produção no momento. Conectar isso é trabalho de produto
+(decidir COMO o CRUD confirma e dispara), não desta fase estrutural.
 """
 from __future__ import annotations
 
