@@ -52,6 +52,14 @@ langgraph>=1.0.0
 # nodes.py e .claude.md) — não deixar flutuar pra uma versão não testada.
 langgraph-checkpoint-redis==0.5.1
 
+# ── Laboratório REST (habilitado só na branch/worktree `research/rest-mcp-estudos`
+# — estudo isolado, ver rest_lab/__init__.py e .claude.md) ─────────────────
+httpx>=0.27.0
+
+# ── Laboratório MCP (mesma branch/worktree — estudo isolado, ver
+# mcp_lab/__init__.py e .claude.md) ─────────────────────────────────────────
+mcp>=2.0.0
+
 rapidocr-onnxruntime
 onnxruntime
 

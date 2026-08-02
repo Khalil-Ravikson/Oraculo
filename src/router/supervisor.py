@@ -76,6 +76,10 @@ _RE_GREETING = re.compile(
 
 _RE_YTB = re.compile(r'(https?://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)[\w\-]+)', re.I)
 _RE_INSTA = re.compile(r'(https?://(?:www\.)?instagram\.com/(?:p|reel)/[\w\-]+)', re.I)
+# Busca por termo (sem URL) — verbo explícito "buscar/procurar" + "vídeo" pra
+# não colidir com pergunta acadêmica real tipo "tem vídeo sobre isso?" (só
+# vira comando de download com essa combinação específica de palavras).
+_RE_YTB_BUSCA = re.compile(r'\bbuscar\s+(?:um\s+)?v[ií]deo\b(?:\s+(?:sobre|de|do|da))?\s+(.+)', re.I)
 _RE_SIGAA = re.compile(
     r'(sigaa|biblioteca|acervo|livro|obra|marc|inscrever|inscrição|processo seletivo|edital sigaa|concurso uema|nota|média|cr\b|ira\b|histórico|turmas|grade|matéria|integraliza|grade curricular|estrutura curricular|sala|professor|complementar)',
     re.I
@@ -96,6 +100,8 @@ def _regex_rapido(query: str) -> str | None:
     if _RE_YTB.search(query):
         return "MEDIA_DOWNLOAD"
     if _RE_INSTA.search(query):
+        return "MEDIA_DOWNLOAD"
+    if _RE_YTB_BUSCA.search(query):
         return "MEDIA_DOWNLOAD"
     if _RE_GREETING.match(query.strip()):
         return "GREETING"
@@ -238,6 +244,13 @@ def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) 
         match_insta = _RE_INSTA.search(query)
         if match_insta:
             return {"steps": ["insta_download"], "url": match_insta.group(1)}
+        match_busca = _RE_YTB_BUSCA.search(query)
+        if match_busca:
+            # "ytsearch1:" é o extractor de busca nativo do yt-dlp — devolve
+            # o 1º resultado, sem precisar de API/chave extra nem servidor
+            # MCP externo. `_plano_media` (planning.py) só lê a chave "url"
+            # do dag_hint, então isso reaproveita o mesmo caminho de sempre.
+            return {"steps": ["ytb_download"], "url": f"ytsearch1:{match_busca.group(1).strip()}"}
         return {"steps": ["ytb_download"], "url": query}
 
     if rota == "TICKET_ABERTURA":

@@ -49,6 +49,8 @@ x-worker-base: &worker-base
   volumes:
     - ./src:/app/src
     - ./langgraph_experiment:/app/langgraph_experiment
+    - ./rest_lab:/app/rest_lab
+    - ./mcp_lab:/app/mcp_lab
     - ./dados:/app/dados
     # Isolamento de segurança: mapeia pasta temporária interna ao invés de expor o host /tmp
     - ./dados/tmp:/tmp
@@ -208,6 +210,8 @@ services:
     volumes:
       - ./src:/app/src
       - ./langgraph_experiment:/app/langgraph_experiment
+      - ./rest_lab:/app/rest_lab
+      - ./mcp_lab:/app/mcp_lab
       - ./dados:/app/dados
       - ./dados/tmp:/tmp
       - ./migrations:/app/migrations

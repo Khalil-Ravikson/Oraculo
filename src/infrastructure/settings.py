@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     EVOLUTION_INSTANCE_NAME: str = ""
     WHATSAPP_HOOK_URL:       str = ""
 
+    # ── mcp_lab (laboratório de estudo MCP, ver mcp_lab/ARQUITETURA.md) ──
+    BRAVE_API_KEY:  str = ""
+    GITHUB_API_KEY: str = ""
+
     # ── RAG ───────────────────────────────────────────────────────
     PDF_PARSER:           str = "pymupdf"
     LLAMA_CLOUD_API_KEY:  str = ""

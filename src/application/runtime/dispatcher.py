@@ -304,7 +304,18 @@ async def processar(
         if decision.rota == "MEDIA_DOWNLOAD":
             import re
             urls = re.findall(r'(https?://\S+)', message)
-            url = urls[0] if urls else message
+            if urls:
+                url = urls[0]
+            else:
+                # Sem URL na mensagem — pode ser busca por termo ("buscar
+                # vídeo sobre X", ver router/supervisor.py::_RE_YTB_BUSCA).
+                # Sem essa checagem, a mensagem INTEIRA vira "url" e o yt-dlp
+                # falha com "not a valid URL" (bug real encontrado nesta
+                # sessão — este Fast-Path é um caminho paralelo ao Planner/
+                # `_dag_hint_para_rota`, não reaproveita aquela lógica).
+                from src.router.supervisor import _RE_YTB_BUSCA
+                match_busca = _RE_YTB_BUSCA.search(message)
+                url = f"ytsearch1:{match_busca.group(1).strip()}" if match_busca else message
 
             from src.application.workers.registry import _autodiscover_workers, _REGISTRY
             from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
@@ -319,6 +330,12 @@ async def processar(
                 event = {
                     "plan_id": plan_id,
                     "session_id": session_id,
+                    # `chat_id` (JID de grupo `@g.us` ou contato `@s.whatsapp.net`)
+                    # é o destino de envio de verdade — `session_id`/`phone` é
+                    # só a chave de sessão/memória, a Evolution API rejeita
+                    # mídia mandada pro número "cru" (bug real encontrado
+                    # nesta sessão: 400 Bad Request, jid "não existe").
+                    "chat_id": user_context.get("chat_id") or session_id,
                     "step_id": "s1",
                     "url": url,
                     "query": message,

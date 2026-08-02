@@ -927,3 +927,160 @@ consciente de NÃO mexer nisso nesta sessão.
    genérico (não específico de SIGAA).
 7. Convenção de branches (`feature/`, `fix/`, `spike/`, `research/`) —
    discutida, ainda não formalizada como prática.
+
+## 10. Sessão 2026-07-31 — início do laboratório REST (`rest_lab/`), branch `research/rest-mcp-estudos`
+
+Contexto: nova worktree isolada (`Oraculo-rest-mcp`), branch
+`research/rest-mcp-estudos`, criada a partir de `langgraph` — carrega todo o
+histórico da seção 9, mas é um esforço à parte, sem relação com o LangGraph.
+Objetivo explícito do usuário: estudo/prática de API REST e MCP como prova
+de capacidade técnica pra apresentar na CETIC/UEMA, **não** é feature de
+produto e **não** integra com `src/` do núcleo por enquanto. Primeiro passo
+combinado: REST puro (GET/POST/PUT/DELETE) contra APIs públicas sem
+fricção — MCP fica pra uma rodada seguinte.
+
+### 10.1 Achado relevante antes de implementar: Oráculo não tem tool-calling agentic em lugar nenhum
+
+Ao decidir como o "agente" deveria escolher qual chamada REST fazer,
+levantamento no código mostrou que o padrão de decisão via LLM hoje em
+produção é **sempre saída estruturada forçada** (`response_schema` Pydantic
+via `google.genai`, ver `src/router/llm_fallback.py::_classificar_com_flash`/
+`orchestrate`), nunca function-calling nativo. O único código que já tentou
+esse padrão é `src/capabilities/messaging/gmail_tool.py`
+(`langchain_core.tools.StructuredTool` + comentário citando `bind_tools`) —
+mas é código morto: nenhum lugar do projeto importa/chama essas factories
+(confirmado via grep, único outro hit é `application/chain/oracle_chain.bak`,
+arquivo `.bak` nunca executado). Mesma situação do achado já registrado na
+seção 9 sobre `crud_tools`/`capabilities/registry.py` — capability
+implementada, sem consumidor vivo. **Decisão pra esta rodada**: não
+resolver isso agora — `rest_lab/router.py` usa regex determinístico (mesmo
+nível de `langgraph_experiment/nodes.py::classify_node`), sem o LLM
+decidindo a chamada. Function-calling real fica registrado como evolução
+natural de uma próxima rodada, e só faria sentido introduzir via
+`google.genai` (o provider já usado no projeto), não via LangChain
+`bind_tools` (padrão comprovadamente não adotado aqui apesar de já ter sido
+tentado uma vez).
+
+### 10.2 Estrutura criada — `rest_lab/`
+
+Pasta nova, sibling de `langgraph_experiment/`, sem depender de `src/`
+(as três APIs usadas são públicas, sem autenticação, então nem
+`settings`/`.env` são necessários — diferente de `langgraph_experiment/`,
+que depende pesado do núcleo real):
+
+- `clients.py` — um `httpx.AsyncClient` por API (JSONPlaceholder, DummyJSON,
+  httpbin) como singleton lazy, mesmo espírito do `_get_client()` de
+  `llm_fallback.py`. `fechar_todos()` chamado só na saída do CLI.
+- `tools.py` — uma função async por operação REST, retorno sempre
+  `{"mensagem": str}` (mesmo formato de
+  `capabilities/tools/tool_get_student_info.py`, reforça o hábito de já
+  devolver texto pronto pra chat, não dado cru). Erro de rede/HTTP sempre
+  capturado dentro da função (nunca sobe como exceção) — mesmo padrão
+  defensivo do núcleo.
+- `router.py` — `rotear(mensagem) -> dict`, regex puro mapeando frase →
+  tool. Único ponto de decisão "qual chamada fazer" (ver 10.1 sobre o
+  porquê de não ser LLM nesta rodada).
+- `run_test.py` — CLI (`python3 -m rest_lab.run_test`), loop de `input()`
+  sem WhatsApp/Celery/dispatcher, espelhando a forma de
+  `langgraph_experiment/run_test.py` (não reaproveita código, mesma
+  estrutura só).
+
+Operações implementadas e testadas manualmente via CLI, todas OK:
+- JSONPlaceholder: `listar_usuarios` (GET, lista formatada, cap de 10
+  itens pensando em WhatsApp), `obter_usuario` (GET com 404 tratado),
+  `criar_post` (POST), `atualizar_post` (PUT), `deletar_post` (DELETE).
+- DummyJSON: `listar_produtos` (GET com paginação real, mostra `total` do
+  payload), `buscar_produto` (GET busca textual).
+- httpbin: `testar_status` (GET `/status/{code}`, sem `raise_for_status`
+  de propósito — o objetivo é justamente observar status ≠ 200 sem virar
+  exceção), `echo_request` (GET `/get`, mostra headers/args ecoados).
+
+**Nota sobre JSONPlaceholder**: POST/PUT/DELETE não persistem de verdade no
+servidor — é comportamento documentado da própria API pública (sempre
+responde 200/201 com eco do payload + id fake), não bug do `rest_lab`.
+Confirmado no teste manual: `criar_post` devolveu `id=101` (a API sempre
+usa 101 pra novos posts, já que a "base" tem 100 fixos).
+
+### 10.3 Dependência nova
+
+`httpx` instalado via `pip install --user` no ambiente local de teste, e
+**adicionado a `requirements.txt`** (seção própria, comentada como
+"habilitado só na branch/worktree `research/rest-mcp-estudos`", mesmo
+padrão da seção do LangGraph) — não estava listado antes (grep confirmou:
+nenhuma lib HTTP async explícita ali, possivelmente vem transitivo de
+`google-genai`, não investigado a fundo). Necessário pra valer porque o
+`rest_lab` agora roda dentro do worker Celery real (ver 10.6), não só no
+ambiente local de teste — sem isso o container do worker quebraria no
+primeiro `import httpx`.
+
+### 10.4 Fora de escopo desta rodada (revisado em 10.6 — usuário pediu integração com WhatsApp na mesma sessão)
+
+- Sem integração com `src/` além do ponto mínimo de entrada em
+  `dispatcher_langgraph.py` (ver 10.6) — nenhuma outra parte do núcleo
+  tocada.
+- Sem LLM decidindo a tool chamada (ver 10.1) — mantido regex mesmo depois
+  do pivot pro WhatsApp.
+- MCP — próxima rodada, depois do REST validado no canal real.
+
+### 10.6 Pivot na mesma sessão — usuário pediu pra esquecer CLI, testar direto no WhatsApp
+
+Depois do CLI validado (10.2), o usuário decidiu pular a etapa intermediária
+e pediu integração direta com o grupo do WhatsApp ("esquece CLI, o projeto é
+pra zap zap" — repetido 2x, sinal de prioridade clara). Mudanças feitas:
+
+- **`rest_lab/router.py`** — todo comando agora exige prefixo `rest ` (ex:
+  `rest listar usuários`). Motivo: rodando dentro do fluxo real de mensagens
+  do grupo, sem prefixo um comando como "usuário 3" poderia colidir com
+  linguagem natural real de um aluno. Duas funções públicas agora:
+  `tentar_rotear()` (devolve `None` se a mensagem não começa com "rest" —
+  usada pelo dispatcher, fast-path de 1 regex antes de testar os outros 9) e
+  `rotear()` (usada só pela CLI, nunca devolve `None`, cai no texto de ajuda).
+- **`src/application/runtime/dispatcher_langgraph.py::processar()`** — novo
+  passo "-1" no topo da função, ANTES até da checagem de funil HITL pendente
+  (`state.next`): chama `tentar_rotear(message)` e, se bater, devolve
+  `OSResult` direto (`plan_id="rest_lab"`, `rota="REST_LAB"`), sem tocar no
+  grafo LangGraph nem no Supervisor real. Único ponto do núcleo tocado nesta
+  mudança — nenhuma outra lógica de roteamento/RBAC/guardrails alterada,
+  `process_message_task.py` continua chamando `dispatcher_langgraph.processar`
+  exatamente como já chamava.
+- **`docker-compose.yml`** — `./rest_lab:/app/rest_lab` adicionado como
+  volume em todos os serviços que já montavam `./langgraph_experiment`
+  (`api`, `worker`, `worker_rag`, `worker_synthesis`, `worker_media`,
+  `beat`) — confirmado via parse do YAML (`x-worker-base` propaga pra todos
+  os workers). Sem isso o container rodaria uma cópia congelada da imagem,
+  mesmo problema já documentado pro `langgraph_experiment/` no `.claude.md`.
+- **`requirements.txt`** — `httpx` promovido de dependência só-local pra
+  entrada real no arquivo (ver 10.3), porque agora o worker Celery de
+  produção (dentro do Docker) importa `rest_lab.router`, que importa
+  `rest_lab.tools`, que importa `httpx`.
+
+CLI (`run_test.py`) continua funcionando, ajustado pro mesmo prefixo `rest `
+(reteste manual OK após a mudança: `rest listar usuários`, `rest usuário 3`,
+`rest ajuda`, e uma mensagem sem prefixo confirmando que não intercepta).
+
+**Não testado ainda nesta sessão**: o caminho real dentro do Docker/WhatsApp
+— o ambiente onde este trabalho foi feito não tem o daemon Docker acessível
+(`docker ps` falhou: "no such file or directory" no socket), então só foi
+possível validar sintaticamente (`py_compile`) e via YAML parse. Teste real
+end-to-end (mandar "rest listar usuários" no grupo do WhatsApp) fica
+pendente pro usuário rodar no ambiente com Docker.
+
+### 10.7 Pendências pra próxima sessão
+
+1. **Testar de verdade no WhatsApp** (grupo homologado, `ALLOWED_GROUP_ID`)
+   — rebuildar/subir os containers (`docker compose --profile core --profile
+   monitoring --profile app --profile gateway up -d --build`, já que
+   `requirements.txt` mudou — só `--force-recreate` não pega dependência
+   nova, precisa rebuild de imagem) e mandar `rest listar usuários`,
+   `rest usuário 3`, `rest listar produtos` no grupo. Prestar atenção
+   especial no tamanho da mensagem de `listar_usuarios`/`listar_produtos`
+   (preocupação original do usuário) — se o WhatsApp cortar/formatar mal,
+   ajustar `_LIMITE_LISTA` em `rest_lab/tools.py`.
+2. Decidir se avança pra function-calling real (Gemini nativo) nesta mesma
+   pasta ou se mantém regex — depende do que o usuário quer demonstrar
+   (regex prova "integração REST funcional"; function-calling prova
+   "agente decidindo sozinho", gap real do projeto identificado em 10.1).
+3. Começar o estudo de MCP (servidores de referência oficiais — Everything,
+   Fetch, Filesystem, Git — e GitHub MCP server/DeepWiki como análogos a
+   integração real tipo GLPI/SIGAA), conforme lista já validada em sessão
+   anterior.

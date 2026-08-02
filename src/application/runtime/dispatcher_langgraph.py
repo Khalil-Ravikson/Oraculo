@@ -162,6 +162,40 @@ async def processar(
     fatos: list[str] | None = None,
 ) -> OSResult:
     t0 = time.monotonic()
+
+    # ── -1. Laboratório REST (`rest_lab/`, branch/worktree `research/rest-mcp-estudos`) ──
+    # Intercepta ANTES de tudo (mesmo antes de checar funil HITL pendente):
+    # comandos "rest ..." são estudo isolado, sem estado/interrupt, não fazem
+    # parte de nenhum funil real. `tentar_rotear` só intercepta mensagens que
+    # começam literalmente com "rest " — qualquer outra coisa devolve `None`
+    # e cai no fluxo normal abaixo, sem custo nem risco de colidir com uma
+    # pergunta acadêmica real do aluno. Ver rest_lab/router.py.
+    from rest_lab.router import tentar_rotear
+
+    rest_resultado = await tentar_rotear(message)
+    if rest_resultado is not None:
+        ms = int((time.monotonic() - t0) * 1000)
+        return OSResult(
+            answer=rest_resultado["mensagem"], plan_id="rest_lab", rota="REST_LAB",
+            cache_hit=False, total_ms=ms, status="ok",
+        )
+
+    # ── -1b. Laboratório MCP (`mcp_lab/`, mesma branch/worktree) ──
+    # Mesmo desenho do laboratório REST acima: intercepta ANTES de tudo,
+    # prefixo próprio ("stack ...") não colide com "rest ..." nem com
+    # pergunta acadêmica real. Ver mcp_lab/router.py e mcp_lab/__init__.py.
+    from mcp_lab.router import tentar_rotear as mcp_tentar_rotear
+
+    mcp_resultado = await mcp_tentar_rotear(
+        message, chat_id=user_context.get("chat_id") or session_id
+    )
+    if mcp_resultado is not None:
+        ms = int((time.monotonic() - t0) * 1000)
+        return OSResult(
+            answer=mcp_resultado["mensagem"], plan_id="mcp_lab", rota="MCP_LAB",
+            cache_hit=False, total_ms=ms, status="ok",
+        )
+
     app = await _get_graph()
     config = _thread_config(session_id)
 
