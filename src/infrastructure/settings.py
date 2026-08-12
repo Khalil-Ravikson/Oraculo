@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     GEMINI_TEMP:       float = 0.2
     GEMINI_MAX_TOKENS: int   = 1024
 
+    # ── Multimodal (STT/TTS/Vision) ─────────────────────────────────
+    # Seleção de provider por capability — ver src/infrastructure/adapters/
+    # {stt,tts}_factory.py. Trocar aqui não exige mudança de código.
+    STT_PROVIDER: str  = "gemini"   # opções: gemini
+    TTS_PROVIDER: str  = "kokoro"   # opções: kokoro, gtts
+    KOKORO_VOICE: str  = "pf_dora"  # opções: pf_dora (fem.), pm_alex/pm_santa (masc.)
 
     # Nightly Memory flag
     ENABLE_NIGHTLY_MEMORY: bool = False

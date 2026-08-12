@@ -189,6 +189,41 @@ class PrometheusMetrics:
             Counter, f"{ns}_sigaa_selector_changes_total",
             "Total de alterações detectadas nos seletores HTML do SIGAA")
 
+        # ── Multimodal Metrics (STT/TTS/Vision) ─────────────────────────────────
+        # Label `provider` em tudo: trocar STT_PROVIDER/TTS_PROVIDER/VISION_PROVIDER
+        # no .env não exige mudança de código aqui — só aparece como série nova
+        # filtrável no Grafana. Ver roadmap: notas.md seção 11.
+        self._stt_latency = _get_or_create(
+            Histogram, f"{ns}_stt_latency_ms",
+            "Latência de transcrição de áudio (STT) em ms", ["provider"],
+            buckets=_REQUEST_BUCKETS)
+
+        self._stt_requests_total = _get_or_create(
+            Counter, f"{ns}_stt_requests_total",
+            "Total de transcrições de áudio por resultado", ["provider", "resultado"])
+
+        self._tts_latency = _get_or_create(
+            Histogram, f"{ns}_tts_latency_ms",
+            "Latência de síntese de voz (TTS) em ms", ["provider"],
+            buckets=_REQUEST_BUCKETS)
+
+        self._tts_requests_total = _get_or_create(
+            Counter, f"{ns}_tts_requests_total",
+            "Total de sínteses de voz por resultado", ["provider", "resultado"])
+
+        self._vision_latency = _get_or_create(
+            Histogram, f"{ns}_vision_latency_ms",
+            "Latência de extração de imagem (Vision) em ms", ["provider"],
+            buckets=_REQUEST_BUCKETS)
+
+        self._vision_requests_total = _get_or_create(
+            Counter, f"{ns}_vision_requests_total",
+            "Total de extrações de imagem por resultado", ["provider", "resultado"])
+
+        self._vision_confidence_last = _get_or_create(
+            Gauge, f"{ns}_vision_confidence_last",
+            "Último confidence retornado pela extração de Vision")
+
         self._initialized = True
         logger.info("✅ [METRICS] PrometheusMetrics inicializado (Singleton).")
 
@@ -318,6 +353,30 @@ class PrometheusMetrics:
     def increment_sigaa_selector_change(self) -> None:
         if self._enabled:
             self._sigaa_selector_changes_total.inc()
+
+    # ── Multimodal Methods (STT/TTS/Vision) ───────────────────────────────────
+
+    def observe_stt(self, provider: str, ms: int, sucesso: bool) -> None:
+        if self._enabled:
+            self._stt_latency.labels(provider=provider).observe(ms)
+            self._stt_requests_total.labels(
+                provider=provider, resultado="sucesso" if sucesso else "falha").inc()
+
+    def observe_tts(self, provider: str, ms: int, sucesso: bool) -> None:
+        if self._enabled:
+            self._tts_latency.labels(provider=provider).observe(ms)
+            self._tts_requests_total.labels(
+                provider=provider, resultado="sucesso" if sucesso else "falha").inc()
+
+    def observe_vision(self, provider: str, ms: int, sucesso: bool) -> None:
+        if self._enabled:
+            self._vision_latency.labels(provider=provider).observe(ms)
+            self._vision_requests_total.labels(
+                provider=provider, resultado="sucesso" if sucesso else "falha").inc()
+
+    def set_vision_confidence(self, score: float) -> None:
+        if self._enabled:
+            self._vision_confidence_last.set(round(score, 4))
 
     # ── Decorator de latência ─────────────────────────────────────────────────
 

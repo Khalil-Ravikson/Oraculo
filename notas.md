@@ -1084,3 +1084,433 @@ pendente pro usuário rodar no ambiente com Docker.
    Fetch, Filesystem, Git — e GitHub MCP server/DeepWiki como análogos a
    integração real tipo GLPI/SIGAA), conforme lista já validada em sessão
    anterior.
+
+## 11. Sessão 2026-08-12 — Roadmap MCP & Multimodal (auditoria + pesquisa + Sprint 1.1)
+
+Pedido do usuário: evoluir o Oráculo com capacidades multimodais (STT, TTS,
+Vision, geração de imagem) e MCPs externos, mas só depois de auditar o
+projeto e pesquisar tecnologias atuais, com plano em fases/sprints aprovado
+antes de qualquer implementação.
+
+**Fase 0 (auditoria + pesquisa)**, feita via 6 agentes (3 de auditoria de
+código, 3 de pesquisa com fontes primárias — HuggingFace, repos oficiais).
+Achados principais:
+
+- Oráculo já tem STT (`AudioService.transcribe()` via Gemini 2.5 Flash áudio
+  nativo, `src/infrastructure/services/audio_service.py`) e TTS
+  (`AudioService.synthesize()` via gTTS) implementados, mas **órfãos** —
+  nenhum worker/rota real os aciona hoje.
+- Não existe nenhum serviço de Vision. Bytes de imagem/áudio recebidos do
+  usuário nunca são baixados no fluxo de chat normal (`webhook_controller.py`
+  já popula `has_media`/`media_type`, mas `router/supervisor.py` nunca lê).
+- Hardware é CPU-only (torch CPU-only no Dockerfile, sem CUDA) — isso
+  descartou geração de imagem local (FLUX/SDXL, minutos por imagem em CPU
+  e/ou licença não-comercial) e favoreceu manter Vision/STT via Gemini cloud
+  (já integrado, segundos de latência) em vez de VLM local (10s-2min em CPU).
+  TTS foi a única capability onde vale trocar o baseline: gTTS → Piper (MIT,
+  tempo real em CPU) ou Kokoro (Apache-2.0).
+- MCP: só `mcp_lab`/`rest_lab` (roteamento regex, não LLM) tocam produção
+  hoje, confirmando o que já estava documentado no `.claude.md`. Nenhum MCP
+  novo é bloqueante para o trabalho multimodal — GitHub MCP oficial é o
+  único 🟢 "pronto pra produção" achado na pesquisa; o resto é 🟡/🔴.
+
+Usuário decidiu (via pergunta direta): **adiar completamente geração de
+imagem** — não entra em nenhuma fase, documentado como decisão consciente,
+não esquecimento.
+
+Plano completo (8 fases, sprints, riscos, segurança, testes, observabilidade)
+escrito em `C:\Users\User\.claude\plans\claude-md-arquitetura-oraculo-md-soft-moonbeam.md`.
+Usuário aprovou pedindo um adicional: monitoramento **ajustável** via
+Prometheus/Grafana (stack que ele já usa) — adicionado como Sprint 1.3 e
+seção dedicada no plano, replicando o padrão de métricas SIGAA já existente
+em `src/infrastructure/observability/metrics.py` (histogram de latência +
+counters de sucesso/falha, agora com label `provider` em tudo, para que
+trocar `STT_PROVIDER`/`TTS_PROVIDER`/`VISION_PROVIDER` no `.env` não exija
+nenhuma mudança de código nas métricas/dashboards).
+
+**Sprint 1.1 implementada nesta mesma sessão** (Fundação de Providers):
+
+- `src/domain/ports/speech_to_text_provider.py` (`ISpeechToTextProvider` +
+  `TranscriptionResult`) e `text_to_speech_provider.py`
+  (`ITextToSpeechProvider` + `SynthesisResult`) — Protocols espelhando
+  `ILLMProvider` (`src/domain/ports/llm_Provider.py`).
+- `src/infrastructure/adapters/gemini_stt_provider.py` (`GeminiSTTProvider`)
+  e `gtts_provider.py` (`GTTSProvider`) — lógica portada de `AudioService`
+  (que continua intocado nesta sprint — a religação por factory/settings é
+  Sprint 1.2). Ao portar, um `base64.b64encode()` morto (calculado e nunca
+  usado) foi removido do código original do STT.
+- 8 testes unitários novos (`tests/unit/infrastructure/adapters/`), mocks de
+  `google.genai.Client`/`gtts.gTTS`, todos passando.
+- Suite completa (`tests/unit`, 200 testes) rodada para checar regressão:
+  186 passed, **14 failed — todas pré-existentes, em arquivos não tocados
+  por esta sprint** (`test_dispatcher.py` SIGAA, `test_langgraph_crud_hitl.py`,
+  `test_langgraph_ticket_hitl.py`, `test_registration_repository.py`) —
+  confirmado via `git status` que só arquivos novos foram criados, nenhum
+  existente foi modificado. Não investigadas/corrigidas — fora do escopo
+  desta sprint, registrar aqui para não confundir com regressão futura.
+
+**Sprint 1.2 aprovada e implementada na sequência, mesma sessão** (religar
+`AudioService` via factory/config, conforme o plano):
+
+- `src/infrastructure/settings.py` ganhou `STT_PROVIDER="gemini"` e
+  `TTS_PROVIDER="gtts"` (bloco `── Multimodal (STT/TTS/Vision) ──`, logo
+  após o bloco `GEMINI_*`).
+- `src/infrastructure/adapters/stt_factory.py`/`tts_factory.py` — cada um
+  com uma função `get_x_provider(provider_name: str | None = None)` que lê
+  `settings.X_PROVIDER` (ou aceita override explícito, case-insensitive) e
+  devolve a instância singleton certa; nome desconhecido levanta
+  `ValueError` claro em vez de falhar silencioso.
+- `src/infrastructure/services/audio_service.py` reescrito para delegar
+  `transcribe()`/`synthesize()` para o provider resolvido pela factory —
+  `AudioResult` (contrato externo consumido pelos workers) ficou idêntico,
+  só a implementação interna mudou. Import morto (`base64`, `tempfile`,
+  lógica duplicada de gTTS) removido — essa lógica já vive só em
+  `gtts_provider.py`/`gemini_stt_provider.py` desde a Sprint 1.1.
+- 10 testes novos (`test_stt_factory.py`, `test_tts_factory.py`,
+  `test_audio_service.py`) cobrindo seleção por settings, override
+  explícito, erro em provider desconhecido, e delegação real do
+  `AudioService` (sucesso e propagação de falha).
+- Suite completa rodada de novo: **196 passed, 14 failed — exatamente os
+  mesmos 14 de antes**, nenhuma regressão nova. `worker_audio_to_text.py`/
+  `worker_text_to_audio.py` não precisaram de nenhuma alteração — continuam
+  chamando `get_audio_service().transcribe()/.synthesize()` normalmente,
+  agora batendo nos providers configuráveis por baixo dos panos.
+
+Trocar provider hoje (`STT_PROVIDER=gemini`/`TTS_PROVIDER=gtts`, únicas
+opções implementadas até aqui) é só config — o código já está pronto para
+receber um segundo provider de cada tipo (ex.: Piper na Sprint 3) sem tocar
+em `AudioService` de novo, só adicionando um `elif` na factory.
+
+**Sprint 1.3 + Fase 2 (STT no fluxo real) — pedidas juntas pelo usuário na
+mesma sessão** ("sprint 1.3 e faça logo a ligando stt pro fluxo de verdade,
+to querendo dar docker compose -d --build logo"):
+
+- **Sprint 1.3 (observabilidade)**: `src/infrastructure/observability/metrics.py`
+  ganhou o grupo Multimodal (mesmo padrão das métricas SIGAA já existentes) —
+  `oraculo_stt_latency_ms`/`oraculo_stt_requests_total`,
+  `oraculo_tts_latency_ms`/`oraculo_tts_requests_total`,
+  `oraculo_vision_latency_ms`/`oraculo_vision_requests_total`,
+  `oraculo_vision_confidence_last`, todas com label `provider`. 4 alertas
+  novos em `observability/alert_rules.yml` (`HighSTTFailureRate`,
+  `HighTTSFailureRate`, `HighVisionFailureRate`, `HighVisionLatency`) com
+  limiares editáveis direto no YAML — isso é o "ajustável" que o usuário
+  pediu. **Achado importante**: não existe dashboard Grafana versionado no
+  repo (`observability/grafana/provisioning/dashboards/` só tem o YAML de
+  provisioning, os painéis reais vivem no volume Docker `grafana_data`,
+  criados manualmente na UI) — não dá pra "adicionar uma linha Multimodal"
+  em um JSON que não existe no repo; documentado como pendência do usuário
+  (queries PromQL prontas: `oraculo_stt_latency_ms_bucket`,
+  `rate(oraculo_stt_requests_total[5m])`, etc., filtráveis por `provider`).
+
+- **Fase 2 (ligar STT no fluxo real)**:
+  - `process_message_task.py::_handle_message()` — `user_context` ganhou
+    `msg_key_id` (faltava; `has_media`/`media_type` já eram propagados mas
+    `msg_key_id` não, e sem ele não dá pra baixar o áudio de verdade via
+    Evolution API).
+  - `dispatcher.py::processar()` ganhou um Fast-Path `-1` (roda ANTES de
+    guardrails/HITL/orchestrator, porque nota de voz chega com `message`
+    vazio): se `media_type == "audioMessage"` e há `msg_key_id`, chama
+    `_transcrever_audio_recebido()` — baixa o áudio via
+    `EvolutionAdapter.baixar_midia_base64()`, cap de 16MB (mesmo número de
+    `_MAX_ENVIO_MB` em `worker_media_download.py`), despacha
+    `worker_audio_to_text` (queue=`media`, já existia, estava órfão) via
+    `WorkerRegistry.dispatch()` e faz polling em `plan:results:{plan_id}:{step_id}`
+    (mesmo Redis que o worker já escreve, reaproveitando
+    `redis_state.get_result_cache()` que já existia sem consumidor
+    síncrono). Timeout de 20s. Se falhar, responde com mensagem amigável
+    (`rota="AUDIO_TRANSCRIBE"`) em vez de vazar erro técnico. Métricas via
+    `get_metrics().observe_stt(provider, ms, sucesso)`.
+  - Decisão de design: dispatch via Celery pro worker `media` (não chamada
+    inline no worker `default`) — `CELERY_CONCURRENCY=1` no `.env` (ver
+    nota de 2026-08-02 acima) faz o worker `default` processar mensagens
+    serialmente; transcrever inline bloquearia TODOS os usuários enquanto
+    isso rodasse. Rodar no worker `media` mantém o `default` livre.
+  - 12 testes novos (`test_metrics_multimodal.py`, `test_dispatcher_stt_fastpath.py`).
+
+- **Bug real pré-existente encontrado E corrigido nesta rodada** (exposto
+  pelos testes novos, não introduzido por eles): `src/router/supervisor.py`
+  registrava `Histogram("oraculo_router_latency_ms", ...)` e
+  `Counter("oraculo_router_cache_hit_total", ...)` **direto via construtor**,
+  sem a proteção `_get_or_create` que `PrometheusMetrics`
+  (`infrastructure/observability/metrics.py`) usa — e os DOIS módulos
+  registram uma métrica com o MESMO NOME LITERAL. Enquanto `router.supervisor`
+  sempre importava antes de qualquer `get_metrics()` rodar, o `_get_or_create`
+  do lado de `metrics.py` simplesmente reaproveitava o coletor já existente
+  (silencioso, sem erro). O Fast-Path de STT novo chama `get_metrics()` bem
+  cedo (antes do 1º `rotear()` de uma sessão) — inverteu a ordem em cenários
+  onde `router.supervisor` ainda não tinha sido importado, e a segunda
+  tentativa de registro (a insegura, em supervisor.py) explodia com
+  `ValueError: Duplicated timeseries in CollectorRegistry`. Fix: `supervisor.py`
+  ganhou o mesmo padrão de registro seguro (`_get_or_create_metric()`, cópia
+  local da lógica de `_get_or_create` pra não acoplar a um símbolo privado de
+  outro módulo). **Isso era uma bomba-relógio de produção também**, não só
+  de teste — dependia de qual módulo importava primeiro em cada processo
+  Celery, não só nos testes que expuseram o bug agora.
+  - Suite completa: **206 passed, mesmas 14 falhas pré-existentes de sempre**
+    (as mesmas de sempre, nenhuma nova).
+
+**Pendência explícita pro usuário**: `worker` (fila default, roda
+`dispatcher.py`/roteamento) E `worker_media` (fila media, roda
+`worker_audio_to_text`) os DOIS precisam estar rodando a imagem nova depois
+do `docker compose up -d --build` — reiniciar só um deles deixa metade do
+fluxo rodando código velho, silenciosamente (mesma lição já documentada
+acima sobre múltiplos containers de worker). Nenhuma dependência nova foi
+adicionada ao `requirements.txt` nesta rodada (Gemini/gTTS/prometheus_client
+já estavam instalados) — `--build` não é estritamente necessário só por
+causa deste código (o volume mount de `./src` já bastaria + restart), mas
+não atrapalha.
+
+**Bug real de produção encontrado E corrigido na hora, mesma sessão** —
+usuário testou com uma nota de voz real logo depois do deploy e mandou o log:
+`langchain_google_genai._common.GoogleGenerativeAIError: Error embedding
+content (INVALID_ARGUMENT): 400 ... 'EmbedContentRequest.content contains an
+empty Part'`, capturado silenciosamente por `SemanticCache.get()` (try/except
+que loga warning e segue, por isso a task ainda "succeeded" e mandou uma
+resposta — só que sem transcrever o áudio de verdade). Causa raiz: o
+Fast-Path de STT só tinha sido colocado em `dispatcher.py::processar()`, mas
+o entry point REAL chamado por `process_message_task.py::_handle_message()`
+é `dispatcher_langgraph.py::processar()` — que só delega pro `dispatcher.py`
+original quando a rota classificada NÃO é uma das que ele mesmo trata
+(TICKET_ABERTURA/CRUD/RAG). Nota de voz sem legenda → `rotear("", ...)` →
+rota `GERAL` (uma rota RAG, tratada DIRETO pelo LangGraph) → nunca passava
+por `dispatcher.py` → `message=""` ia direto pro node de RAG do LangGraph,
+que embedava a query vazia. **Lição pra qualquer fast-path novo que precise
+rodar antes da classificação de rota**: sempre checar `dispatcher_langgraph.py`
+além de `dispatcher.py` — são DOIS entry points, não um só, e o LangGraph só
+delega pro dispatcher.py original pras rotas que ele mesmo não trata.
+
+Fix: mesma interceptação de STT (`_transcrever_audio_recebido`, reaproveitada
+de `dispatcher.py` — não duplicada) adicionada em
+`dispatcher_langgraph.py::processar()`, rodando ANTES até dos labs REST/MCP
+(passo "-2"). Depois de transcrever com sucesso, `user_context` é substituído
+por uma cópia com `media_type`/`msg_key_id` zerados antes de qualquer
+delegação pro `dispatcher.py` original — evita baixar/transcrever o MESMO
+áudio duas vezes no caminho de delegação (ex.: rota SIGAA). A interceptação
+em `dispatcher.py` foi MANTIDA (não removida) como rede de segurança: outros
+consumidores chamam `dispatcher.py::processar()` direto (admin hub/eval_api,
+ver docstring do módulo), e o LangGraph está "em reavaliação, não aprovado
+pra main" — se o import em `process_message_task.py` for revertido pro
+`dispatcher.py` puro, essa rede de segurança vira o único caminho ativo.
+3 testes novos (`test_dispatcher_langgraph_stt.py`) cobrindo: transcrição
+acontece antes de `rotear()`/`_get_graph()`; falha de transcrição retorna
+erro amigável sem chamar o grafo; delegação pro dispatcher.py original
+recebe `user_context` já limpo. **Achado lateral**: pacote `mcp` não estava
+instalado no venv local (só dentro do Docker) — instalado agora
+(`pip install mcp` no `./venv`) pra rodar os testes que importam
+`dispatcher_langgraph.py` (que sempre tenta `mcp_lab.router` antes de
+qualquer outra coisa) sem precisar mockar todo o import chain.
+Suite completa: 209 passed, mesmas 14 falhas pré-existentes de sempre.
+
+**Dois achados adicionais, mesma sessão, usuário testando ao vivo com imagem e comando de vídeo:**
+
+1. **"baixe vídeo de `<termo>`" não baixava** — `_RE_YTB_BUSCA` (`router/supervisor.py`) só reconhecia o verbo "buscar", não "baixar/baixe". O orquestrador LLM (`router/llm_fallback.py`) já classificava a intenção certa (`call_media`, prompt já cobre "usuário pede para baixar um vídeo"), mas a regex de EXTRAÇÃO DE TERMO (usada tanto no Layer 1 do Supervisor quanto no Fast-Path de `dispatcher.py`) não reconhecia essa frase — a mensagem inteira virava "url" e o yt-dlp falhava com "not a valid URL" (mesmo bug de fundo já documentado em sessão anterior, só que pra uma frase diferente). Fix: regex ampliada pra `(?:buscar|procurar|baixar|baixe)`. Testado: não colide com "tem vídeo sobre isso?" (pergunta acadêmica real).
+
+2. **Imagem sem legenda tinha o MESMO bug do áudio, sem tratamento nenhum** — usuário mandou imagem de teste, `message=""` chegava até o RAG/embeddings (Vision ainda não existe, Fase 4/5 do roadmap). Fix: novo guard "-1b"/"-1c" (mesmo padrão dos fast-paths de áudio, em AMBOS os entry points — `dispatcher.py` e `dispatcher_langgraph.py`) — se `message` vazio E `has_media=True` (qualquer tipo que não seja áudio, já tratado antes), responde com mensagem amigável (`rota="UNSUPPORTED_MEDIA"`) em vez de deixar vazar pro RAG. Não é Vision de verdade (isso continua Fase 4/5) — só evita a falha silenciosa/`embed_query("")`.
+
+5 testes novos (`test_regex_rapido_media_download_busca_por_termo`,
+`test_processar_com_imagem_sem_legenda_retorna_mensagem_amigavel`,
+`test_imagem_sem_legenda_retorna_mensagem_amigavel_sem_chamar_grafo`, e mais 2
+cobrindo os dois entry points). Suite completa: 212 passed, mesmas 14 falhas
+de sempre.
+
+## 12. Sessão 2026-08-12 (continuação) — Fase 3: TTS no fluxo real (Kokoro)
+
+Usuário pediu pra seguir pra Fase 3 do roadmap. Antes de implementar, achado
+importante que mudou a recomendação original da pesquisa:
+
+**Licença do Piper mudou desde a pesquisa da Fase 0** — `rhasspy/piper`
+(MIT) foi **arquivado em 10/2025**; o sucessor mantido é
+`OHF-Voice/piper1-gpl`, e o pacote `piper-tts` no PyPI é **GPL-3.0-or-later**
+a partir da v1.4.0 (jan/2026) — só a v1.3.0 (jul/2025) e anteriores ainda são
+MIT, mas essa versão é congelada/sem manutenção. Achado confirmado via
+WebFetch direto no GitHub/PyPI (não confiado de memória, achado real que
+contradiz a pesquisa original da Fase 0 — o mercado mudou entre a pesquisa e
+a implementação). Perguntado ao usuário como tratar; decisão: **trocar pra
+Kokoro-82M** (Apache-2.0, sem ambiguidade de licença) como único provider de
+TTS local — Piper descartado inteiramente pra este projeto.
+
+**Kokoro testado localmente antes de escrever qualquer código** (mesma
+disciplina da Sprint 1.1): `pip install kokoro soundfile` no venv, síntese
+real de "Estou com um erro ao tentar acessar o sistema da universidade."
+funcionou — 2.2s pra gerar ~3.9s de áudio (tempo real+ em CPU comum). Achados
+que mudaram a implementação:
+- **Não precisa de torch extra nem de `espeak-ng` via apt** — `kokoro`
+  reaproveita o torch já instalado (CrossEncoder) e `espeakng-loader`
+  (dependência transitiva) já embute os binários do espeak-ng via pip. Menos
+  mudança de infra do que a pesquisa original antecipava.
+- `KPipeline(lang_code='p')` + `pipeline(texto, voice='pf_dora')` — 3 vozes
+  pt-BR disponíveis: `pf_dora` (fem., escolhida como padrão), `pm_alex`/
+  `pm_santa` (masc.).
+- Retorna `torch.Tensor`, não `numpy.array` direto — precisa `.detach().cpu().numpy()`
+  antes de `soundfile.write()` (descoberto no teste local, não documentado
+  claramente na doc oficial).
+- Conflito de versão `click` (gtts exige `<8.2`, kokoro/spacy puxam `8.4.2`)
+  — testado que **não quebra** o gTTS na prática (síntese real via
+  `GTTSProvider` continua funcionando, warning do pip é inofensivo aqui).
+
+**Implementado:**
+- `src/infrastructure/adapters/kokoro_tts_provider.py` (`KokoroTTSProvider`)
+  — pipeline carregado lazy (~15s na 1ª síntese por processo, fica em
+  memória depois), `synthesize()` roda em `asyncio.to_thread` (CPU-bound).
+  Texto truncado em 500 chars (mesmo cap do `GTTSProvider`, mesma limitação
+  conhecida).
+- `tts_factory.py` ganhou a opção `"kokoro"`. `settings.TTS_PROVIDER` mudou
+  o default de `"gtts"` pra `"kokoro"` (esse é o objetivo da Fase 3); nova
+  `settings.KOKORO_VOICE = "pf_dora"`.
+- `Dockerfile` — novo `RUN` logo depois do CrossEncoder, baixando o modelo
+  base + a voz `pf_dora` em build-time (síntese real de teste, não só
+  instanciar o pipeline — força o download da voz também). **Não testado em
+  build Docker de verdade nesta sessão** (sem daemon Docker acessível aqui)
+  — só validado localmente fora do container. Primeira validação real fica
+  pro `docker compose up -d --build` do usuário.
+- `requirements.txt` — `kokoro>=0.9.2`, `soundfile>=0.14.0`.
+
+**Sprint 3.2 (gatilho de uso) — decisão de design**: opt-in explícito via
+frase no texto digitado (`_RE_AUDIO_REPLY`/`_quer_resposta_em_audio()` em
+`dispatcher.py`, mesmo padrão de módulo compartilhado de `_transcrever_audio_recebido`),
+não automático em toda resposta (TTS ainda tem custo de cold-load ~15s/
+processo, nem toda resposta faz sentido em voz). Reconhece "em/por/de áudio",
+"manda(r/e/em) (um/uma mensagem de) áudio" — testado contra falsos positivos
+("o áudio que mandei não carregou" não dispara). **Limitação conhecida e
+documentada**: só detecta o pedido no texto ORIGINAL digitado/legenda — se o
+pedido for FALADO dentro da própria nota de voz ("responda em áudio" dito em
+voz), não é capturado, porque a checagem roda sobre o texto bruto recebido
+por `_handle_message()`, não sobre o transcript (que só existe depois, dentro
+de `dispatcher_langgraph.py`). Cobre o caso principal (pedido digitado).
+
+**Sprint 3.3 (envio de saída)**: `process_message_task.py::_enviar_resposta_em_audio()`
+— sintetiza `result.answer` (sem o sufixo "_Avalie: !1 a !5_", que não faz
+sentido em voz) via `AudioService.synthesize()` e envia com
+`EvolutionAdapter.enviar_midia_base64(mediatype="audio", mimetype="audio/wav")`
+— mesmo endpoint/padrão já usado pra vídeo do YouTube, arquivo temporário
+sempre apagado depois (sucesso ou falha, `finally`). Só ligado no branch LLM
+de `_handle_message()` (grupo homologado) — mesmo escopo dos fixes de STT
+desta sessão.
+
+21 testes novos no total (`test_kokoro_tts_provider.py`,
+`test_tts_factory.py` +1, `test_audio_reply_trigger.py`,
+`test_enviar_resposta_em_audio.py`). Suite completa: **233 passed, mesmas 14
+falhas pré-existentes de sempre**.
+
+**Pendências explícitas pro usuário testar de verdade**:
+1. `docker compose up -d --build` — a camada nova do Kokoro no Dockerfile
+   nunca rodou de verdade (baixa ~300MB+ do HF Hub na 1ª build, aumenta o
+   tempo/tamanho da imagem — não medido).
+2. Testar qualidade de voz real do `pf_dora` em pt-BR (só validado que
+   gera áudio, não a qualidade/naturalidade percebida).
+3. Testar o gatilho de verdade no WhatsApp: escrever "explica X em áudio" e
+   confirmar que chega uma segunda mensagem (áudio) além do texto.
+4. `worker` (roda `_handle_message`) e `worker_media` (não usado por TTS
+   desta vez — a síntese roda inline no worker `default`, diferente do STT
+   que usa Celery separado; ver nota abaixo) precisam da imagem nova.
+
+**Nota de arquitetura — TTS não usa Celery/fila separada como o STT usa**:
+decisão deliberada por simplicidade nesta sprint — `_enviar_resposta_em_audio()`
+roda no MESMO worker `default` que processa a mensagem, não despacha pra
+`worker_text_to_audio` (que continua existindo mas órfão, só chamado via
+`registry.dispatch()` manual). Diferente do STT (que despacha pro worker
+`media` justamente pra não travar o `default` com `CELERY_CONCURRENCY=1`),
+aqui o cold-load de ~15s do Kokoro SÓ acontece na 1ª síntese por processo —
+depois fica quente. Se isso se mostrar um problema real de latência
+(bloqueando outras mensagens) depois de testar em produção, mover pra
+`worker_media` como o STT é o próximo passo natural — não fiz agora pra não
+adicionar complexidade (round-trip Celery+polling) sem evidência de que é
+necessário.
+
+**A "evidência de que é necessário" apareceu na hora — usuário testou e o
+worker `default` MORREU (OOM-kill).** Log real:
+
+```
+🔊 [KOKORO] Carregando pipeline (lang_code='p')...
+WARNING: Defaulting repo_id to hexgrad/Kokoro-82M...
+HTTP Request: HEAD https://huggingface.co/.../config.json
+... (baixando kokoro-v1_0.pth)
+ERROR/MainProcess: Process 'ForkPoolWorker-2' pid:218 exited with 'signal 9 (SIGKILL)'
+billiard.exceptions.WorkerLostError: Worker exited prematurely: signal 9 (SIGKILL) Job: 4.
+```
+
+**Causa raiz dupla, achada lendo o próprio `docker-compose.yml`:**
+
+1. `worker` (fila default, onde `_handle_message()` roda) tem `mem_limit: 768m`
+   e um comentário já existente no arquivo avisando que esse container
+   "concentra 3 fontes de pressão de memória" (Playwright/Chromium do SIGAA,
+   event loop do LangGraph, parsing de PDF) — rodar Kokoro (torch + spacy +
+   curated-transformers + checkpoint de 82M params) INLINE nesse mesmo
+   processo, ainda por cima, foi a decisão errada da Sprint 3.3 original.
+   O SIGKILL matou o container inteiro — **derrubando TODO o processamento
+   de mensagens**, não só a resposta em áudio (`WorkerLostError` também
+   perde a task em andamento).
+2. O log mostra download acontecendo em RUNTIME (`HTTP Request: HEAD
+   https://huggingface.co/...`), não carregando de um cache já baked —
+   confirma que o container rodando ainda não tinha a camada nova do
+   Dockerfile (imagem não rebuildada, ou rebuild não pegou por algum motivo
+   não investigado nesta sessão).
+
+**Fix aplicado imediatamente:**
+
+- `process_message_task.py::_enviar_resposta_em_audio()` reescrita — não
+  chama mais `AudioService.synthesize()` inline. Agora despacha
+  `worker_text_to_audio` via Celery (`WorkerRegistry.dispatch`, fila
+  `media`, mesmo padrão do STT) e faz polling em
+  `plan:results:{plan_id}:{step_id}` (timeout 25s — cold-load do Kokoro
+  ~15s + fila + polling).
+- **Segundo bug real encontrado no processo** (pré-existente, nunca tinha
+  sido exercitado de ponta a ponta antes): `worker_text_to_audio.py`
+  deixava o arquivo `/tmp` "pra quem consumir apagar" — mas quem despacha
+  esse worker roda num CONTAINER DIFERENTE (`worker` vs `worker_media`),
+  sem acesso nenhum a esse caminho local. E pior: `_salvar()` filtrava
+  explicitamente `audio_b64` antes de gravar no Redis
+  (`{k:v for k,v ... if k != "audio_b64"}`) — não tinha NENHUM jeito de o
+  áudio chegar no consumidor, arquivo inacessível E bytes não persistidos.
+  Fix: o próprio worker apaga o arquivo depois de ler (é quem criou, é quem
+  deve limpar) e `audio_b64` passa a ser persistido no Redis (TTL 120s, sem
+  filtro) — payload pequeno o bastante (texto já truncado em 500 chars →
+  WAV curto) pra não ser um problema de tamanho de chave.
+
+**Risco residual, não testado, deixado explícito pro usuário**: `worker_media`
+(768m, sem Playwright competindo, `--pool=solo` então só 1 task por vez
+nesse container) é mais seguro que o `worker` default, mas 768MB ainda pode
+ser pouco pra torch+spacy+curated-transformers+checkpoint de 82M todos
+residentes ao mesmo tempo — não medido, spike transiente durante
+deserialização do checkpoint pode passar do resident final. Se OOM
+acontecer de novo (agora em `worker_media`), o fix é subir `mem_limit` desse
+serviço em `docker-compose.yml` — não fiz essa mudança sozinho porque é uma
+decisão de orçamento de RAM do host inteiro que não me cabe decidir sem o
+usuário saber quanto de RAM total a máquina tem disponível.
+
+10 testes novos/reescritos (`test_enviar_resposta_em_audio.py` reescrito do
+zero pro novo mecanismo de dispatch, `test_worker_text_to_audio.py` novo).
+Suite completa: **235 passed, mesmas 14 falhas pré-existentes de sempre**.
+
+**Terceiro bug real de produção, mesma sessão, achado testando depois do
+rebuild**: com o OOM corrigido, o pedido de áudio parou de derrubar o
+worker — mas voltou uma resposta em TEXTO tipo "Não consigo te explicar
+sobre o Office 365 em áudio, pois sou um assistente...". Causa: a frase
+inteira do usuário ("Me explique em áudio sobre o Office 365") ia direto
+pro LLM de síntese/RAG como a pergunta — o modelo via literalmente "em
+áudio" na pergunta e respondia SOBRE o pedido de formato (recusando, porque
+"é um assistente de texto"), em vez de responder a pergunta de verdade
+sobre Office 365. A frase-gatilho era só um sinal pro MEU roteamento de
+entrega (`_quer_resposta_em_audio`), nunca deveria ter ido pro LLM como
+parte da pergunta.
+
+Fix: nova `_remover_pedido_audio()` em `dispatcher.py` (mesmo módulo de
+`_quer_resposta_em_audio`) — remove a frase-gatilho do texto ANTES de virar
+`message` pro RAG/orchestrator/synthesis, com fallback pro texto original se
+a limpeza deixar a mensagem vazia (raro: mensagem que É só o gatilho, tipo
+"em áudio" sozinho). `process_message_task.py::_handle_message()`
+reestruturado: `quer_audio`/`mensagem` (limpa) calculados uma vez, ANTES de
+`cognitive_processar()` — a versão limpa vai pro RAG/memória, a decisão de
+mandar áudio usa o texto original (já detectado antes da limpeza).
+
+4 testes novos em `test_audio_reply_trigger.py`. Suite completa: **239
+passed, mesmas 14 falhas de sempre**.
+
+**Padrão que se repetiu 3x nesta sessão, vale reter**: toda vez que um
+recurso novo lê o TEXTO da mensagem do usuário pra tomar uma decisão de
+roteamento/entrega (STT: media_type; TTS: frase-gatilho), o sinal usado pra
+decisão vazava pro conteúdo que o LLM via — cada vez descoberto só no teste
+real, não em teste unitário isolado. Lição pra qualquer gatilho textual
+futuro (ex.: Vision): sempre separar explicitamente "o que decide o
+roteamento" de "o que o LLM recebe como pergunta", e limpar/sanitizar antes
+de repassar adiante.

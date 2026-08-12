@@ -22,6 +22,19 @@ def test_regex_rapido_media_download():
     assert _regex_rapido("https://youtube.com/watch?v=abc123xyz") == "MEDIA_DOWNLOAD"
     assert _regex_rapido("https://instagram.com/reel/abc123xyz/") == "MEDIA_DOWNLOAD"
 
+
+def test_regex_rapido_media_download_busca_por_termo():
+    # "baixar/baixe" adicionados nesta sessão (bug real: LLM orchestrator já
+    # classificava a intenção certa, mas essa regex só reconhecia "buscar" —
+    # a mensagem inteira virava "url" e o yt-dlp falhava).
+    assert _regex_rapido("buscar video sobre python asyncio") == "MEDIA_DOWNLOAD"
+    assert _regex_rapido("buscar um video sobre python asyncio") == "MEDIA_DOWNLOAD"
+    assert _regex_rapido("procurar video de gatos") == "MEDIA_DOWNLOAD"
+    assert _regex_rapido("baixar video de lofi hip hop radio") == "MEDIA_DOWNLOAD"
+    assert _regex_rapido("baixe video de lofi hip hop radio") == "MEDIA_DOWNLOAD"
+    # não deve colidir com pergunta acadêmica real
+    assert _regex_rapido("tem vídeo sobre isso?") is None
+
 def test_heuristica_basica():
     assert _heuristica_basica("senha sigaa uema") == "WIKI"
     assert _heuristica_basica("qual o calendário?") == "CALENDARIO"

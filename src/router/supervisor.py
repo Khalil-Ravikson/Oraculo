@@ -38,14 +38,32 @@ from src.router.llm_fallback import _classificar_com_flash
 
 logger = logging.getLogger(__name__)
 
+
+def _get_or_create_metric(metric_cls, name, documentation, labelnames=(), **kwargs):
+    """
+    Evita 'Duplicated timeseries in CollectorRegistry': `PrometheusMetrics`
+    (infrastructure/observability/metrics.py) registra `oraculo_router_latency_ms`/
+    `oraculo_router_cache_hit_total` sob os MESMOS nomes, de forma segura
+    (`_get_or_create`). Este módulo registrava direto via `Histogram(...)`/
+    `Counter(...)`, sem essa proteção — colidia sempre que `get_metrics()`
+    rodasse antes deste módulo ser importado pela primeira vez (bug real
+    encontrado na Sprint 1.3 do roadmap multimodal, ver notas.md seção 11:
+    STT agora chama `get_metrics()` bem cedo no pipeline, antes do primeiro
+    `rotear()`, expondo uma dependência de ordem de import que já existia).
+    """
+    from prometheus_client import REGISTRY
+    if name in REGISTRY._names_to_collectors:
+        return REGISTRY._names_to_collectors[name]
+    return metric_cls(name, documentation, labelnames=labelnames, **kwargs)
+
+
 # ── Métricas ──────────────────────────────────────────────────────────────────
-_CACHE_HIT = Counter(
-    "oraculo_router_cache_hit_total",
-    "Cache hits no router por camada",
-    ["layer"],
+_CACHE_HIT = _get_or_create_metric(
+    Counter, "oraculo_router_cache_hit_total",
+    "Cache hits no router por camada", ["layer"],
 )
-_LATENCY = Histogram(
-    "oraculo_router_latency_ms",
+_LATENCY = _get_or_create_metric(
+    Histogram, "oraculo_router_latency_ms",
     "Latência do router em ms",
     buckets=[5, 10, 25, 50, 100, 250, 500],
 )
@@ -76,10 +94,18 @@ _RE_GREETING = re.compile(
 
 _RE_YTB = re.compile(r'(https?://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)[\w\-]+)', re.I)
 _RE_INSTA = re.compile(r'(https?://(?:www\.)?instagram\.com/(?:p|reel)/[\w\-]+)', re.I)
-# Busca por termo (sem URL) — verbo explícito "buscar/procurar" + "vídeo" pra
-# não colidir com pergunta acadêmica real tipo "tem vídeo sobre isso?" (só
-# vira comando de download com essa combinação específica de palavras).
-_RE_YTB_BUSCA = re.compile(r'\bbuscar\s+(?:um\s+)?v[ií]deo\b(?:\s+(?:sobre|de|do|da))?\s+(.+)', re.I)
+# Busca por termo (sem URL) — verbo explícito "buscar/procurar/baixar/baixe" +
+# "vídeo" pra não colidir com pergunta acadêmica real tipo "tem vídeo sobre
+# isso?" (só vira comando de download com essa combinação específica de
+# palavras). "baixar/baixe" adicionados nesta sessão — o orquestrador LLM já
+# classificava "baixe vídeo de X" como call_media (intent correto), mas essa
+# regex de extração de termo (usada tanto aqui quanto no Fast-Path de
+# dispatcher.py) só reconhecia "buscar", então a mensagem inteira virava "url"
+# e o yt-dlp falhava com "not a valid URL" — achado real testando ao vivo.
+_RE_YTB_BUSCA = re.compile(
+    r'\b(?:buscar|procurar|baixar|baixe)\s+(?:um\s+)?v[ií]deo\b(?:\s+(?:sobre|de|do|da))?\s+(.+)',
+    re.I,
+)
 _RE_SIGAA = re.compile(
     r'(sigaa|biblioteca|acervo|livro|obra|marc|inscrever|inscrição|processo seletivo|edital sigaa|concurso uema|nota|média|cr\b|ira\b|histórico|turmas|grade|matéria|integraliza|grade curricular|estrutura curricular|sala|professor|complementar)',
     re.I

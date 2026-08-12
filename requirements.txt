@@ -81,3 +81,19 @@ psycopg2-binary>=2.9.9
 yt-dlp>=2024.1.0
 gTTS>=2.5.0
 instaloader>=4.10
+
+# TTS local — Kokoro-82M (Apache-2.0). Piper foi avaliado e descartado: o
+# pacote rhasspy/piper original (MIT) foi arquivado em 10/2025, sucessor
+# piper-tts>=1.4.0 é GPL-3.0-or-later — evitado por decisão explícita do
+# usuário. Kokoro não precisa de torch extra (reaproveita o já instalado
+# pra CrossEncoder) nem de espeak-ng via apt — espeakng-loader (dependência
+# transitiva) já embute os binários.
+kokoro>=0.9.2
+soundfile>=0.14.0
+# Encoder MP3 puro-Python (wheel manylinux, sem precisar de ffmpeg via apt) —
+# Kokoro gera WAV cru; WhatsApp/Evolution API não entrega áudio "audio/wav"
+# de forma confiável (aceito com 201 mas nunca chega no app — bug real
+# encontrado testando ao vivo, ver notas.md seção 12). audio/mpeg (mp3) é o
+# formato já usado pelo único outro envio de áudio deste projeto
+# (worker_media_download.py, fallback de áudio do YouTube).
+lameenc>=1.8.0

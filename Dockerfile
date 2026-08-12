@@ -70,6 +70,12 @@ USER oraculo
 # força re-download do HuggingFace a cada build.
 RUN python -c "import os; os.environ['HF_HOME']='/home/oraculo/.cache/huggingface'; from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', max_length=512)"
 
+# Kokoro-82M (TTS pt-BR) — mesma lógica: baixa o modelo base + a voz padrão
+# (pf_dora) em build-time, cacheado no mesmo HF_HOME. Uma síntese real (não
+# só instanciar o pipeline) força o download da voz também, não só do modelo
+# base — testado localmente antes de entrar aqui (ver notas.md seção 11).
+RUN python -c "import os; os.environ['HF_HOME']='/home/oraculo/.cache/huggingface'; from kokoro import KPipeline; p = KPipeline(lang_code='p'); list(p('teste', voice='pf_dora'))"
+
 # Cópia ordenada por frequência de alteração (mais frequente por último)
 COPY --chown=oraculo:oraculo alembic.ini ./
 COPY --chown=oraculo:oraculo migrations/ ./migrations/

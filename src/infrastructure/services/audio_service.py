@@ -1,13 +1,12 @@
 """
-AudioService — STT via Gemini 2.0, TTS via gTTS.
-Sem GPU. Sem modelos locais pesados.
+AudioService — orquestra STT/TTS via providers configuráveis.
+
+Não fala com Gemini/gTTS diretamente — delega para o provider selecionado
+por settings.STT_PROVIDER/TTS_PROVIDER (ver infrastructure/adapters/
+{stt,tts}_factory.py). Trocar provider é mudança de config, não de código.
 """
 from __future__ import annotations
-import asyncio
-import base64
 import logging
-import os
-import tempfile
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -23,61 +22,31 @@ class AudioResult:
 
 class AudioService:
 
-    # ── STT: áudio → texto via Gemini ─────────────────────────────────────────
+    # ── STT: áudio → texto ──────────────────────────────────────────────────
 
     async def transcribe(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> AudioResult:
         """
-        Transcreve áudio usando Gemini 2.0 Flash (suporte nativo a áudio).
+        Transcreve áudio via o provider de STT configurado (settings.STT_PROVIDER).
         mime_type: audio/ogg | audio/mp4 | audio/wav | audio/webm
         """
-        try:
-            from src.infrastructure.settings import settings
-            import google.genai as genai
-            from google.genai import types
+        from src.infrastructure.adapters.stt_factory import get_stt_provider
 
-            client = genai.Client(api_key=settings.GEMINI_API_KEY)
-            b64 = base64.b64encode(audio_bytes).decode()
+        provider = get_stt_provider()
+        result = await provider.transcribe(audio_bytes, mime_type)
+        return AudioResult(ok=result.ok, text=result.text, error=result.error)
 
-            response = await client.aio.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[
-                    types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
-                    "Transcreva o áudio acima para texto em português. "
-                    "Retorne apenas a transcrição, sem comentários.",
-                ],
-            )
-            text = (response.text or "").strip()
-            if not text:
-                return AudioResult(ok=False, error="Transcrição vazia")
-            return AudioResult(ok=True, text=text)
-
-        except Exception as e:
-            logger.exception("❌ [AUDIO] transcribe falhou: %s", e)
-            return AudioResult(ok=False, error=str(e)[:200])
-
-    # ── TTS: texto → áudio via gTTS ────────────────────────────────────────────
+    # ── TTS: texto → áudio ──────────────────────────────────────────────────
 
     async def synthesize(self, text: str, lang: str = "pt") -> AudioResult:
         """
-        Converte texto em áudio MP3 via gTTS (CPU, gratuito).
-        Retorna caminho do arquivo temporário.
+        Converte texto em áudio via o provider de TTS configurado (settings.TTS_PROVIDER).
+        Retorna caminho do arquivo temporário gerado.
         """
-        try:
-            import asyncio
-            path = await asyncio.to_thread(self._gtts_sync, text, lang)
-            return AudioResult(ok=True, audio_path=path)
-        except ImportError:
-            return AudioResult(ok=False, error="gTTS não instalado: pip install gTTS")
-        except Exception as e:
-            logger.exception("❌ [AUDIO] synthesize falhou: %s", e)
-            return AudioResult(ok=False, error=str(e)[:200])
+        from src.infrastructure.adapters.tts_factory import get_tts_provider
 
-    def _gtts_sync(self, text: str, lang: str) -> str:
-        from gtts import gTTS
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir="/tmp")
-        tts = gTTS(text=text[:500], lang=lang, slow=False)
-        tts.save(tmp.name)
-        return tmp.name
+        provider = get_tts_provider()
+        result = await provider.synthesize(text, lang)
+        return AudioResult(ok=result.ok, audio_path=result.audio_path, error=result.error)
 
 
 _audio_service: AudioService | None = None

@@ -332,6 +332,9 @@ services:
       - WEBHOOK_EVENTS_MESSAGES_UPDATE=true
       - WEBHOOK_EVENTS_MESSAGES_DELETE=false # Recomendado: ignorar eventos de deleção
       - WEBHOOK_EVENTS_GROUPS_UPSERT=false
+      - SYNCFULLHISTORY=false
+      
+
     depends_on:
       postgres:
         condition: service_healthy

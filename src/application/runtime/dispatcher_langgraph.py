@@ -163,6 +163,60 @@ async def processar(
 ) -> OSResult:
     t0 = time.monotonic()
 
+    # ── -2. Fast-Path ÁUDIO (STT) ────────────────────────────────────────────
+    # Roda ANTES de tudo, inclusive dos labs REST/MCP abaixo — nota de voz
+    # chega com `message` vazio, e ESTE módulo (não dispatcher.py) é o entry
+    # point real chamado por process_message_task.py::_handle_message().
+    # Bug real encontrado em produção nesta sessão: a interceptação de áudio
+    # só existia em dispatcher.py::processar(), que só é chamado DAQUI quando
+    # a rota classificada não é uma das que este módulo trata direto
+    # (TICKET_ABERTURA/CRUD/RAG) — ou seja, nunca rodava pro caso mais comum
+    # (voice note → rota GERAL, tratada direto aqui via LangGraph): `rotear("",
+    # ...)` classificava a mensagem vazia como GERAL, e o node de RAG do
+    # LangGraph ia pro embedding com query vazia (`EmbedContentRequest.content
+    # contains an empty Part`, capturado/logado pelo SemanticCache mas sem
+    # nunca transcrever o áudio de verdade). Ver notas.md seção 11.
+    if user_context.get("media_type") == "audioMessage" and user_context.get("msg_key_id"):
+        from src.application.runtime.dispatcher import _transcrever_audio_recebido
+        from src.infrastructure.redis_client import get_redis_text
+
+        r_stt = get_redis_text()
+        transcript = await _transcrever_audio_recebido(r_stt, user_context, session_id)
+        if transcript is None:
+            ms = int((time.monotonic() - t0) * 1000)
+            return OSResult(
+                answer="😕 Não consegui entender o áudio. Pode tentar de novo ou escrever a mensagem?",
+                plan_id="stt_error", rota="AUDIO_TRANSCRIBE", cache_hit=False,
+                total_ms=ms, status="error",
+            )
+        message = f"{message.strip()}\n{transcript}" if message.strip() else transcript
+        # Marca como consumido antes de qualquer delegação pra
+        # dispatcher.py::processar() mais abaixo — evita baixar/transcrever o
+        # MESMO áudio de novo lá (que mantém a mesma checagem como rede de
+        # segurança pra outros consumidores diretos, ex.: admin hub/eval_api,
+        # ou se o import em process_message_task.py voltar a apontar pro
+        # dispatcher.py puro — ver nota "Ativado trocando o import" acima).
+        user_context = {**user_context, "media_type": "", "msg_key_id": ""}
+        logger.info("🎤 [LANGGRAPH] Áudio transcrito | session=%s | texto='%.60s'",
+                    session_id, message)
+
+    # ── -1c. Fast-Path MÍDIA SEM LEGENDA (imagem/sticker/vídeo/documento) ────
+    # Vision ainda não existe (Fase 4/5, não implementado) — sem essa
+    # checagem, mídia sem legenda seguia com `message` vazio até o RAG do
+    # LangGraph, gerando `EmbedContentRequest.content contains an empty Part`
+    # (mesma classe de bug do áudio acima, sem tratamento). O bloco de áudio
+    # já garante `message` não-vazio quando a transcrição dá certo (e retorna
+    # cedo quando falha) — chegar aqui com `message` vazio só é possível pra
+    # outros tipos de mídia. Ver notas.md seção 11.
+    if not message.strip() and user_context.get("has_media"):
+        ms = int((time.monotonic() - t0) * 1000)
+        return OSResult(
+            answer="📎 Recebi seu arquivo, mas ainda não consigo analisar imagens/vídeos/documentos. "
+                   "Me conta em texto o que você precisa que eu tento ajudar!",
+            plan_id="unsupported_media", rota="UNSUPPORTED_MEDIA", cache_hit=False,
+            total_ms=ms, status="ok",
+        )
+
     # ── -1. Laboratório REST (`rest_lab/`, branch/worktree `research/rest-mcp-estudos`) ──
     # Intercepta ANTES de tudo (mesmo antes de checar funil HITL pendente):
     # comandos "rest ..." são estudo isolado, sem estado/interrupt, não fazem
