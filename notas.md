@@ -1514,3 +1514,47 @@ real, não em teste unitário isolado. Lição pra qualquer gatilho textual
 futuro (ex.: Vision): sempre separar explicitamente "o que decide o
 roteamento" de "o que o LLM recebe como pergunta", e limpar/sanitizar antes
 de repassar adiante.
+
+**Quarto bug real, mesma sessão, achado testando de novo depois do fix
+acima**: com a pergunta limpa, o texto saiu certo — mas o áudio nunca
+chegou. Log mostrou dois problemas distintos:
+
+1. **1ª tentativa: timeout de verdade** (`⚠️ [TTS] Síntese falhou ou deu
+   timeout | payload=None`, ~27s desde o despacho) — o cold-load do Kokoro
+   em produção (container mais fraco que a máquina de dev onde medi ~15s)
+   estourou o timeout de 25s da Sprint 3.3. Fix: `_TTS_TIMEOUT_S` subiu pra
+   45s.
+2. **2ª tentativa: Evolution aceitou (HTTP 201 `sendMedia`) e o código
+   logou "Resposta em áudio enviada" — mas nada chegou no WhatsApp.** Causa:
+   `_enviar_resposta_em_audio()` mandava `mimetype="audio/wav"` — Kokoro
+   gera WAV cru via `soundfile`, e a Evolution API aparentemente aceita esse
+   payload na API síncrona (retorna 201) mas falha silenciosamente na
+   entrega de verdade pro WhatsApp (falha assíncrona, não reportada de
+   volta no HTTP response). Achado ao conferir o ÚNICO outro envio de áudio
+   já existente neste projeto (`worker_media_download.py::_enviar_para_whatsapp()`,
+   fallback de áudio do YouTube) — ele usa `mimetype="audio/mpeg"` (MP3),
+   não WAV. **Nota**: nem esse outro caminho tinha sido confirmado
+   funcionando via WhatsApp real antes desta sessão (só documentado como
+   "não testado" no `.claude.md`), então MP3 não era 100% garantido, mas é
+   a aposta muito mais segura — WAV cru é mal suportado por gateways de
+   mensageria em geral, MP3 é universal.
+
+   Fix: `kokoro_tts_provider.py::_synthesize_sync()` agora codifica o áudio
+   pra MP3 via `lameenc` (encoder MP3 puro-Python, wheel `manylinux2014_x86_64`
+   pronta pro `python:3.11-slim` da imagem — sem precisar instalar `ffmpeg`
+   via apt, que não estava instalado em lugar nenhum do projeto). Testado
+   de verdade localmente antes de aplicar: `Encoder().encode(pcm16.tobytes())`
+   sobre áudio real gerado pelo Kokoro → arquivo com header `\xff\xf3`
+   (frame sync MP3 válido), 31680 bytes pra ~3.9s de áudio a 64kbps (número
+   bate). `_enviar_resposta_em_audio()` também corrigido pra
+   `mimetype="audio/mpeg"`/`filename="resposta.mp3"`, batendo com o que
+   Kokoro E gTTS produzem os dois agora (gTTS já sempre gerou MP3 — o
+   mimetype "audio/wav" hardcoded nunca tinha batido com gTTS também, bug
+   latente que só apareceu agora que o caminho foi exercitado de verdade
+   pela 1ª vez).
+
+`lameenc>=1.8.0` adicionado ao `requirements.txt`. Teste novo em
+`test_kokoro_tts_provider.py` confere o header binário real do MP3 gerado
+(`0xFF` + top 3 bits `0xE0`), não só mocka a chamada. Suite completa: 239
+passed, mesmas 14 falhas de sempre (contagem de teste não mudou — testes
+existentes atualizados, não adicionados, pra essa rodada específica).
