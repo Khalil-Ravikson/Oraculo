@@ -192,9 +192,7 @@ async def _planejar_com_pro(
     history: str,
     fatos: list[str],
 ) -> ExecutionPlan:
-    from src.infrastructure.settings import settings
-    import google.genai as genai
-    from google.genai import types
+    from src.infrastructure.adapters.llm_factory import get_llm_provider
 
     prompt = f"""Rota detectada: {rota}
 Dica do router: {json.dumps(dag_hint)}
@@ -205,35 +203,29 @@ Pergunta atual: "{query[:400]}"
 
 Gere o plano de execução:"""
 
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
-    response = await client.aio.models.generate_content(
-        model=settings.GEMINI_MODEL,  # gemini-2.5-flash-lite ou pro conforme .env
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=_SYSTEM_PLANNER,
-            temperature=0.0,
-            max_output_tokens=300,
-            response_mime_type="application/json",
-            response_schema=ExecutionPlanSchema,
-        ),
+    provider = get_llm_provider(agente="academic_knowledge", rota="planner")
+    plano_schema = await provider.gerar_resposta_estruturada_async(
+        prompt=prompt,
+        response_schema=ExecutionPlanSchema,
+        system_instruction=_SYSTEM_PLANNER,
+        temperatura=0.0,
+        user_id=session_id or "",
+        rota="planner",
     )
 
-    usage = response.usage_metadata
-    if usage:
-        _PRO_TOKENS.labels(direction="input").inc(usage.prompt_token_count or 0)
-        _PRO_TOKENS.labels(direction="output").inc(usage.candidates_token_count or 0)
-        if session_id:
-            from src.infrastructure.redis_client import registrar_tokens_redis
-            registrar_tokens_redis(session_id, usage.prompt_token_count or 0, usage.candidates_token_count or 0)
+    if session_id:
+        tokens_in, tokens_out = provider.ultimo_uso_tokens
+        _PRO_TOKENS.labels(direction="input").inc(tokens_in)
+        _PRO_TOKENS.labels(direction="output").inc(tokens_out)
+        # Mantido em paralelo à telemetria persistente (llm_factory.py) —
+        # é o cache curto que o simulador de avaliação do /hub consome.
+        from src.infrastructure.redis_client import registrar_tokens_redis
+        registrar_tokens_redis(session_id, tokens_in, tokens_out)
 
-    texto = (response.text or "").strip()
-    if texto.startswith("```json"):
-        texto = texto[7:-3].strip()
-    elif texto.startswith("```"):
-        texto = texto[3:-3].strip()
+    if plano_schema is None:
+        raise ValueError("Planner não devolveu plano válido")
 
-    data = json.loads(texto or "{}")
-    steps = data.get("steps", [])
+    steps = [s.model_dump() for s in plano_schema.steps]
 
     # Validação mínima
     if not steps or not isinstance(steps, list):

@@ -45,6 +45,8 @@ class AgentCatalogRepository:
                 "descricao": row.descricao,
                 "permissions": row.permissions,
                 "ativo": row.ativo,
+                "llm_provider": row.llm_provider,
+                "llm_model": row.llm_model,
                 "criado_em": row.criado_em,
                 "atualizado_em": row.atualizado_em,
                 "atualizado_por": row.atualizado_por,
@@ -64,9 +66,28 @@ class AgentCatalogRepository:
             "descricao": row.descricao,
             "permissions": row.permissions,
             "ativo": row.ativo,
+            "llm_provider": row.llm_provider,
+            "llm_model": row.llm_model,
             "atualizado_em": row.atualizado_em,
             "atualizado_por": row.atualizado_por,
         }
+
+    async def set_llm_override(
+        self, nome: str, llm_provider: str | None, llm_model: str | None, admin: str | None = None,
+    ) -> None:
+        """Define (ou limpa, passando None) o provider/modelo LLM específico
+        deste agente. NULL nos dois campos volta a herdar o global."""
+        await self._session.execute(
+            update(AgenteCatalogo)
+            .where(AgenteCatalogo.nome == nome)
+            .values(
+                llm_provider=llm_provider or None,
+                llm_model=llm_model or None,
+                atualizado_por=admin,
+                atualizado_em=datetime.now(timezone.utc),
+            )
+        )
+        await self._session.flush()
 
     async def set_ativo(self, nome: str, ativo: bool, admin: str | None = None) -> None:
         await self._session.execute(

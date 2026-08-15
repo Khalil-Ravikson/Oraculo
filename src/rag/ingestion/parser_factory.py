@@ -211,6 +211,14 @@ class ParserFactory:
                 logger.info("📄 PDF com texto: %s → usando docling", os.path.basename(file_path))
                 candidates = ["docling", "pymupdf"]
 
+        # DISABLE_DOCLING (settings): docling carrega modelos ML pesados no
+        # pre-load do worker — causa real de SIGKILL sob pressão de memória
+        # (notas.md §8.5/8.6). Sem esta flag, a única forma de desativar era
+        # desinstalar o pacote manualmente.
+        from src.infrastructure.settings import settings
+        if settings.DISABLE_DOCLING and "docling" in candidates:
+            candidates = [c for c in candidates if c != "docling"]
+
         chosen_parser = None
         for parser_name in candidates:
             try:

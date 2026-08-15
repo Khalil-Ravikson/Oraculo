@@ -238,6 +238,11 @@ class AgenteCatalogo(Base):
     descricao      = Column(Text, nullable=True)
     permissions    = Column(ARRAY(String), server_default="{}", nullable=False)
     ativo          = Column(Boolean, server_default="true", nullable=False)
+    # Override de provider/modelo LLM por agente (migration 007). NULL nos
+    # dois = herda o provider/modelo global (settings.LLM_PROVIDER ou
+    # override em runtime via Redis `admin:llm_provider`).
+    llm_provider   = Column(String(20), nullable=True)
+    llm_model      = Column(String(50), nullable=True)
     criado_em      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     atualizado_por = Column(String(100), nullable=True)

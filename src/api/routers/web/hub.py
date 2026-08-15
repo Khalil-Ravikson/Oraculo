@@ -829,6 +829,8 @@ async def agents_data(request: Request):
                 "description": catalogo.get(a.name, {}).get("descricao") or a.description,
                 "permissions": a.permissions,
                 "enabled": status[a.name],
+                "llm_provider": catalogo.get(a.name, {}).get("llm_provider"),
+                "llm_model": catalogo.get(a.name, {}).get("llm_model"),
                 "atualizado_em": (
                     catalogo.get(a.name, {}).get("atualizado_em").isoformat()
                     if catalogo.get(a.name, {}).get("atualizado_em") else None
@@ -893,6 +895,166 @@ async def agents_set_descricao(request: Request, name: str, data: AgentDescricao
         return {"error": "Falha ao gravar no Postgres. Tente novamente."}
 
     return {"name": name, "descricao": data.descricao}
+
+
+class AgentLLMRequest(BaseModel):
+    llm_provider: str | None = None  # "gemini" | "deepseek" | "groq" | None (herda global)
+    llm_model:    str | None = None
+
+
+_PROVIDERS_VALIDOS = ("gemini", "deepseek", "groq")
+
+
+@router.post("/agents/{name}/llm")
+async def agents_set_llm(request: Request, name: str, data: AgentLLMRequest):
+    """Define o override de provider/modelo LLM deste agente (ou limpa,
+    enviando null nos dois — volta a herdar o provider global). Grava em
+    Postgres (fonte de verdade, `agentes_catalogo`) e no cache Redis que
+    `llm_factory.get_llm_provider()` lê no caminho quente (ver
+    `infrastructure/adapters/llm_factory.py::_override_do_agente`)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    if data.llm_provider and data.llm_provider not in _PROVIDERS_VALIDOS:
+        return {"error": f"Provider inválido: {data.llm_provider}. Use um de {_PROVIDERS_VALIDOS}."}
+
+    from src.agents.registry import registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.agent_catalog_repository import AgentCatalogRepository
+    from src.infrastructure.repositories.observability_repository import ObservabilityRepository
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        registry.resolve(name)
+    except KeyError:
+        return {"error": f"Agente '{name}' não encontrado."}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await AgentCatalogRepository(session).set_llm_override(
+                name, data.llm_provider, data.llm_model, admin=payload.sub,
+            )
+            await ObservabilityRepository(session).salvar_audit(
+                admin_id=payload.sub, action="agent_llm_override", target=name,
+                detalhes={"llm_provider": data.llm_provider, "llm_model": data.llm_model},
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao gravar override LLM de '%s': %s", name, exc)
+        return {"error": "Falha ao gravar no Postgres. Tente novamente."}
+
+    # Write-through no cache Redis que o caminho quente lê de verdade —
+    # sem isso, o /hub mostraria a config nova mas o pipeline continuaria
+    # usando a antiga até o próximo restart (mesma classe de bug que o
+    # painel de agentes já teve antes do catálogo Postgres existir).
+    try:
+        r = get_redis_text()
+        chave_provider = f"admin:agent:{name}:llm_provider"
+        chave_model    = f"admin:agent:{name}:llm_model"
+        if data.llm_provider:
+            r.set(chave_provider, data.llm_provider)
+        else:
+            r.delete(chave_provider)
+        if data.llm_model:
+            r.set(chave_model, data.llm_model)
+        else:
+            r.delete(chave_model)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao atualizar cache Redis do override LLM de '%s': %s", name, exc)
+
+    return {"name": name, "llm_provider": data.llm_provider, "llm_model": data.llm_model}
+
+
+class GlobalLLMProviderRequest(BaseModel):
+    provider: str
+
+
+@router.get("/llm/provider")
+async def llm_provider_get(request: Request):
+    """Provider global ativo agora (troca em runtime, sem restart)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.adapters.llm_factory import _provider_global_ativo
+    return {"provider": _provider_global_ativo(), "opcoes": list(_PROVIDERS_VALIDOS)}
+
+
+@router.post("/llm/provider")
+async def llm_provider_set(request: Request, data: GlobalLLMProviderRequest):
+    """Troca o provider LLM global em runtime (Redis `admin:llm_provider`,
+    sem restart) — afeta toda chamada que não tenha override por agente."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    if data.provider not in _PROVIDERS_VALIDOS:
+        return {"error": f"Provider inválido: {data.provider}. Use um de {_PROVIDERS_VALIDOS}."}
+
+    from src.infrastructure.adapters.llm_factory import _CHAVE_PROVIDER_GLOBAL
+    from src.infrastructure.redis_client import get_redis_text
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.observability_repository import ObservabilityRepository
+
+    try:
+        get_redis_text().set(_CHAVE_PROVIDER_GLOBAL, data.provider)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao trocar provider global no Redis: %s", exc)
+        return {"error": "Falha ao gravar no Redis. Tente novamente."}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await ObservabilityRepository(session).salvar_audit(
+                admin_id=payload.sub, action="llm_provider_global_change",
+                detalhes={"provider": data.provider},
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao registrar audit_log da troca de provider: %s", exc)
+
+    return {"provider": data.provider}
+
+
+@router.get("/llm-custo", response_class=HTMLResponse)
+async def llm_custo_page(request: Request):
+    """Página de custo/telemetria real dos providers LLM (Postgres
+    `metricas_llm`, ver analise_custo_real_llm.md)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/llm_custo.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/llm-custo/data")
+async def llm_custo_data(request: Request, horas: int = 24):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.observability_repository import ObservabilityRepository
+    from src.infrastructure.adapters.llm_factory import _provider_global_ativo
+
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = ObservabilityRepository(session)
+            resumo     = await repo.get_metricas_dashboard(horas)
+            por_rota   = await repo.get_metricas_por_rota(horas)
+            por_provider = await repo.get_metricas_por_provider(horas)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler telemetria de custo: %s", exc)
+        return {"error": "Falha ao consultar métricas."}
+
+    return {
+        "provider_global_ativo": _provider_global_ativo(),
+        "resumo": resumo,
+        "por_rota": por_rota,
+        "por_provider": por_provider,
+        "horas": horas,
+    }
 
 
 @router.get("/agents/{name}/prompt", response_class=HTMLResponse)

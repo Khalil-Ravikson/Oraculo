@@ -1,0 +1,216 @@
+{% extends "hub/_base.html" %}
+{% block title %}Custo & Providers LLM — Oráculo UEMA{% endblock %}
+
+{% block content %}
+<style>
+  :root {
+    --bg: #090b0d; --surface: #0f1214; --surface2: #141719;
+    --border: #1e2225; --border-hover: #2e3235;
+    --accent: #ff6b35; --accent-dim: rgba(255,107,53,.1);
+    --green: #2eb872; --red: #e84040; --blue: #5a8dee;
+    --text: #c8d0d8; --muted: #5a6370;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  .header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(9,11,13,.92); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px; height: 58px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-icon { width: 30px; height: 30px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; display: grid; place-items: center; font-size: 14px; }
+  .brand-title { font-size: 14px; font-weight: 700; }
+  .brand-sub { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+  .back-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); padding: 5px 12px; border-radius: 5px; cursor: pointer; font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-decoration: none; transition: all .2s; }
+  .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .main { padding: 32px 28px; max-width: 1100px; margin: 0 auto; }
+
+  .section-label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: 16px; margin-top: 32px; display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  .notice {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--blue); border-radius: 8px;
+    padding: 12px 16px; margin-bottom: 24px;
+    font-size: 12px; color: var(--muted); line-height: 1.5;
+  }
+
+  .provider-switch {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  }
+  .provider-switch select {
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 12px; font-family: var(--mono); font-size: 12px;
+  }
+  .provider-switch button {
+    font-family: var(--mono); font-size: 11px; padding: 8px 14px; border-radius: 6px;
+    cursor: pointer; border: 1px solid var(--accent); background: var(--accent-dim); color: var(--accent);
+  }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .stat-label { font-family: var(--mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .stat-value { font-size: 22px; font-weight: 700; margin-top: 6px; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { text-align: left; padding: 10px 12px; font-size: 12px; border-bottom: 1px solid var(--border); }
+  th { font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  td.mono { font-family: var(--mono); }
+  .badge { font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); }
+  .badge.gemini   { color: var(--blue); border-color: var(--blue); }
+  .badge.deepseek { color: var(--green); border-color: var(--green); }
+  .badge.groq     { color: var(--accent); border-color: var(--accent); }
+
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--surface); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 12px 18px;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--accent); z-index: 1000;
+    opacity: 0; transform: translateY(8px);
+    transition: all .3s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+</style>
+
+<header class="header">
+  <div class="brand">
+    <div class="brand-icon">💰</div>
+    <div>
+      <div class="brand-title">Custo & Providers LLM</div>
+      <div class="brand-sub">Telemetria real — Postgres</div>
+    </div>
+  </div>
+  <a href="/hub/" class="back-btn">← Hub</a>
+</header>
+
+<main class="main">
+  <div class="notice">
+    ℹ️ Dados de <code>metricas_llm</code> (Postgres), gravados pelo
+    <code>MonitoredLLMProvider</code> a cada chamada real de LLM — ver
+    <code>analise_custo_real_llm.md</code> para o histórico de por que isso
+    não existia antes.
+  </div>
+
+  <div class="provider-switch">
+    <div>
+      <div class="stat-label">Provider global ativo agora</div>
+      <div style="font-family:var(--mono); font-size:18px; margin-top:4px;" id="provider-atual">—</div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <select id="provider-select">
+        <option value="gemini">gemini</option>
+        <option value="deepseek">deepseek</option>
+        <option value="groq">groq</option>
+      </select>
+      <button onclick="trocarProvider()">Trocar agora</button>
+    </div>
+  </div>
+
+  <div class="section-label">// últimas 24h — resumo</div>
+  <div class="stat-grid" id="stat-grid">
+    <div style="color:var(--muted); font-family:var(--mono); font-size:12px;">Carregando...</div>
+  </div>
+
+  <div class="section-label">// custo por provider</div>
+  <table id="tbl-provider">
+    <thead><tr><th>Provider</th><th>Chamadas</th><th>Tokens</th><th>Custo (USD)</th><th>Latência média (ms)</th></tr></thead>
+    <tbody><tr><td colspan="5" style="color:var(--muted)">Carregando...</td></tr></tbody>
+  </table>
+
+  <div class="section-label">// custo por rota</div>
+  <table id="tbl-rota">
+    <thead><tr><th>Rota</th><th>Chamadas</th><th>Custo (USD)</th><th>CRAG médio</th><th>Latência média (ms)</th></tr></thead>
+    <tbody><tr><td colspan="5" style="color:var(--muted)">Carregando...</td></tr></tbody>
+  </table>
+</main>
+
+<div id="toast"></div>
+
+<script>
+function toast(msg, type='ok') {
+  const el = document.getElementById('toast');
+  el.textContent = type === 'ok' ? '✅ ' + msg : '❌ ' + msg;
+  el.style.borderColor = type === 'ok' ? 'var(--green)' : 'var(--red)';
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+async function carregar() {
+  try {
+    const r = await fetch('/hub/llm-custo/data?horas=24');
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'err'); return; }
+
+    document.getElementById('provider-atual').textContent = d.provider_global_ativo;
+    document.getElementById('provider-select').value = d.provider_global_ativo;
+
+    const resumo = d.resumo || {};
+    document.getElementById('stat-grid').innerHTML = `
+      <div class="stat-card"><div class="stat-label">Mensagens</div><div class="stat-value">${resumo.total_msgs ?? '—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Tokens totais</div><div class="stat-value">${resumo.tokens_total ?? '—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Custo (USD)</div><div class="stat-value">$${resumo.custo_usd ?? '0'}</div></div>
+      <div class="stat-card"><div class="stat-label">Latência média</div><div class="stat-value">${resumo.latencia_media_ms ?? '—'}ms</div></div>
+      <div class="stat-card"><div class="stat-label">Cache hit %</div><div class="stat-value">${resumo.cache_hit_pct ?? '0'}%</div></div>
+      <div class="stat-card"><div class="stat-label">Usuários únicos</div><div class="stat-value">${resumo.usuarios_unicos ?? '—'}</div></div>
+    `;
+
+    const porProvider = d.por_provider || [];
+    document.querySelector('#tbl-provider tbody').innerHTML = porProvider.length
+      ? porProvider.map(p => `
+          <tr>
+            <td><span class="badge ${p.provider}">${p.provider}</span></td>
+            <td class="mono">${p.total}</td>
+            <td class="mono">${p.tokens_total ?? 0}</td>
+            <td class="mono">$${p.custo_usd ?? 0}</td>
+            <td class="mono">${p.latencia_media_ms ?? '—'}</td>
+          </tr>`).join('')
+      : `<tr><td colspan="5" style="color:var(--muted)">Sem chamadas registradas ainda nas últimas 24h.</td></tr>`;
+
+    const porRota = d.por_rota || [];
+    document.querySelector('#tbl-rota tbody').innerHTML = porRota.length
+      ? porRota.map(row => `
+          <tr>
+            <td class="mono">${row.rota ?? '?'}</td>
+            <td class="mono">${row.total}</td>
+            <td class="mono">$${row.custo_usd ?? 0}</td>
+            <td class="mono">${row.crag_medio ?? '—'}</td>
+            <td class="mono">${row.latencia_media_ms ?? '—'}</td>
+          </tr>`).join('')
+      : `<tr><td colspan="5" style="color:var(--muted)">Sem chamadas registradas ainda nas últimas 24h.</td></tr>`;
+  } catch (e) {
+    toast('Erro ao carregar telemetria: ' + e.message, 'err');
+  }
+}
+
+async function trocarProvider() {
+  const provider = document.getElementById('provider-select').value;
+  try {
+    const r = await fetch('/hub/llm/provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider }),
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'err'); return; }
+    document.getElementById('provider-atual').textContent = d.provider;
+    toast(`Provider global trocado para '${d.provider}'.`);
+  } catch (e) {
+    toast('Erro: ' + e.message, 'err');
+  }
+}
+
+carregar();
+</script>
+{% endblock %}
