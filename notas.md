@@ -1670,14 +1670,16 @@ contradição real). Suite reconfirmada depois do merge: 240 passed, mesmas
 
 ### 13.6 Pendente / próximos passos explícitos
 
-1. Deploy real (`docker compose --profile core --profile monitoring
-   --profile app --profile gateway up -d --build` — precisa rebuild,
-   dependências novas) + `alembic upgrade head` de verdade.
+1. ~~Deploy real~~ — feito pelo usuário no mesmo dia (2026-08-15), achou 3
+   bugs reais de verdade (ver §13.8 abaixo, já corrigidos e pushados,
+   commit `13bffc2`). `alembic upgrade head` ainda precisa rodar contra o
+   Postgres real do usuário (colunas `provider`/`llm_provider`/`llm_model`
+   não existiam no banco dele até o momento do log).
 2. Colar `DEEPSEEK_API_KEY`/`GROQ_API_KEY` reais no `.env` (não no HUB
    ainda — `/hub/config` tem UI pra "Salvar Todas" as API keys, mas o
    endpoint que ela chama, `POST /api/admin/system/env`, **não existe no
-   backend** — achado real ao checar antes de responder essa pergunta pro
-   usuário; hoje esse botão dá 404).
+   backend** — confirmado de novo, hoje esse botão dá 404). Ver plano
+   detalhado em §13.9.
 3. Migrar os 6 call sites restantes pro `llm_factory`.
 4. Ver dashboard Grafana renderizado de verdade pela 1ª vez.
 5. Unir telemetria de STT/TTS/Vision (métricas multimodais próprias, §11/§12
@@ -1685,3 +1687,109 @@ contradição real). Suite reconfirmada depois do merge: 240 passed, mesmas
    separados.
 6. RBAC testado na `main` (ainda bloqueia a decisão do LangGraph, ver
    `.claude.md`).
+
+### 13.7 Confusão do usuário sobre telemetria — esclarecido nesta rodada
+
+Usuário achou o aviso "Dados de metricas_llm (Postgres)" (`/hub/llm-custo`)
+confuso e perguntou o que é Prometheus/Grafana/Postgres nesse contexto.
+Resposta registrada aqui pra não se perder:
+
+- **Postgres (`metricas_llm`)** — 1 linha por chamada LLM, guardada pra
+  sempre (até decidirem limpar). É o "extrato bancário": dá pra perguntar
+  "quanto gastei em agosto com DeepSeek na rota SIGAA". `/hub/llm-custo`
+  lê DAQUI, direto — não passa pelo Grafana.
+- **Prometheus** — contador em memória, "raspado" (scrape) periodicamente,
+  bom pra "o que está acontecendo AGORA", não guarda histórico detalhado
+  indefinidamente. É o painel do carro, não o extrato bancário.
+- **Grafana** — só a TELA que desenha gráficos em cima do Prometheus (e,
+  se configurado, outras fontes). Não guarda dado nenhum sozinho.
+
+Por que os dois existem separados: Postgres é auditável/histórico exato;
+Prometheus é operacional/tempo-real sem crescer sem limite. O aviso na
+página só existe pra deixar claro que aqueles números específicos vêm do
+Postgres (não do Grafana), porque as duas fontes têm dados parecidos mas
+não idênticos (Prometheus é agregado, Postgres é por-chamada).
+
+### 13.8 Bugs reais achados no primeiro deploy de verdade (2026-08-15, mesmo dia)
+
+Usuário rodou o Docker de verdade pela 1ª vez com o multi-provider — 3
+bugs reais apareceram no log, corrigidos no commit `13bffc2`:
+
+1. `INTERVAL ':horas hours'` em `observability_repository.py` — o
+   Postgres lia o bind param como texto literal DENTRO das aspas em vez de
+   substituir de verdade ("the server expects 0 arguments... 1 was
+   passed"). 4 ocorrências: 3 pré-existentes (`get_metricas_dashboard`,
+   `get_metricas_por_rota`, a query de NPS semanal — nenhuma delas escrita
+   nesta sessão, só nunca tinham sido exercitadas contra Postgres real
+   antes) + 1 minha (`get_metricas_por_provider`, copiei o padrão sem
+   perceber que já estava quebrado). Fix: `make_interval(hours =>
+   :horas)`.
+2. `salvar_audit()`: `:detalhes::jsonb` — o parser de bind params do
+   SQLAlchemy se confunde com `::` logo depois do nome do parâmetro,
+   virava SQL inválido pro asyncpg. Bug pré-existente, só apareceu porque
+   o endpoint novo `/hub/llm/provider` foi o primeiro consumidor real
+   dessa função. Fix: `CAST(:detalhes AS jsonb)`.
+3. `pricing.py` — preços DeepSeek estavam errados (eu tinha usado
+   $0.14/$0.28, o oficial é $0.20/$1.20 + cache $0.02, confirmado pelo
+   usuário via `api-docs.deepseek.com`). Corrigido. Achado extra: a
+   tabela oficial de "Production Models" do Groq não lista mais
+   `llama-3.3-70b-versatile` (settings default atual) — só
+   `openai/gpt-oss-120b`/`20b`. Adicionados como alternativa, mas **qual
+   modelo Groq usar de fato ainda não foi decidido com o usuário**.
+
+**Lição registrada**: nenhum destes 3 bugs (nem os 2 pré-existentes) tinha
+sido pego pelos testes, porque `tests/unit` mocka a sessão do banco —
+só apareceram no primeiro contato com Postgres real. Reforça o valor do
+CI novo (§13.3) rodando contra services de verdade, mas também mostra que
+"testes passando" não significa "SQL válido" quando o SQL usa `text()` cru
+com sintaxe específica do dialect.
+
+### 13.9 Plano pra próxima conversa (registrado a pedido do usuário, nada implementado ainda)
+
+Usuário pediu explicitamente pra planejar antes de agir — quatro frentes,
+nessa ordem de prioridade:
+
+**Fase 1 — `/hub/config` de verdade (hoje é decorativo, botão dá 404)**
+- Remover a seção Langfuse do `templates/hub/config.html` (decisão já
+  tomada de não usar, `pesquisa_arquitetura_producao.md` §4.5).
+- Adicionar seções DeepSeek (API key + model) e Groq (API key + model),
+  mesmo padrão visual das seções Gemini/Evolution já existentes
+  (`key-row` com `data-env`).
+- Implementar o endpoint que falta: `POST /api/admin/system/env` em
+  `src/api/routers/admin/admin_api.py` (mesmo router de `/system`,
+  `require_admin_jwt`) — grava no `.env` real do servidor. **Trade-off a
+  discutir antes de implementar**: escrever segredo em texto puro num
+  arquivo via request HTTP é o padrão que a UI já pressupõe (não inventar
+  um novo), mas vale registrar que não é o ideal de segurança — decisão
+  consciente de manter simples por ora, não redesenhar sem necessidade.
+
+**Fase 2 — Pricing editável sem rebuild**
+- `pricing.py` hoje é uma tabela Python hardcoded — qualquer mudança de
+  preço exige rebuild da imagem. Usuário quer poder atualizar preço sem
+  isso ("essas porras mudam né").
+- Proposta: tabela Postgres nova (`llm_pricing`: provider, modelo,
+  input_por_1m, output_por_1m, cache_por_1m, atualizado_em,
+  atualizado_por), mesmo espírito do catálogo de agentes
+  (`agentes_catalogo`). `pricing.py::calcular_custo_usd` passa a checar
+  essa tabela primeiro (via cache Redis curto, mesmo padrão do override
+  de provider por agente em `llm_factory.py::_override_do_agente`),
+  caindo no dicionário Python hardcoded só como seed/fallback. UI de
+  edição em `/hub/config` ou `/hub/llm-custo`.
+
+**Fase 3 — Telemetria detalhada (input/output/cache) na página de custo**
+- `metricas_llm` já tem `tokens_entrada`/`tokens_saida`/`cache_hit`/
+  `cache_layer` separados (schema desde a migration `001`) — só não estão
+  todos expostos na UI ainda. Estender `/hub/llm-custo` pra mostrar
+  breakdown input vs output (não só total) e taxa de cache_hit por
+  provider/rota.
+- **Esclarecer pro usuário a diferença entre os DOIS caches que existem**
+  (confusão real nesta conversa): cache SEMÂNTICO (Redis, cosine > 0.92,
+  já implementado, evita a chamada LLM inteira — é o que `cache_hit_pct`
+  mede hoje) vs cache DE PROMPT do provider (desconto de preço quando o
+  prefixo repete, ex. DeepSeek `cache_por_1m` — **não implementado em
+  nenhum adapter ainda**, é mecanismo diferente).
+
+**Fase 4 — Retomar o roadmap que ficou pra trás**
+- Migrar os 6 call sites restantes pro `llm_factory` (ver §13.6 item 3).
+- RBAC testado na `main`.
+- Unir telemetria multimodal (STT/TTS/Vision) com `metricas_llm`.
