@@ -6,11 +6,25 @@ Substitui a constante hardcoded e desatualizada que existia em
 comentário "Custo Gemini 2.5 Flash" mas com valores de preço antigo do
 Gemini 1.5 Flash — achado registrado em `analise_custo_real_llm.md` §4).
 
-Preços em USD por 1M tokens, pesquisados em 2026-08-15 (ver fontes abaixo).
-Preços de LLM mudam com frequência — revisar periodicamente, não tratar como
-verdade eterna. Fonte oficial Gemini: https://ai.google.dev/gemini-api/docs/pricing
-(há divergência entre essa página e rastreadores de mercado de terceiros —
-ver `analise_custo_real_llm.md` §5 para o detalhe).
+Preços em USD por 1M tokens. Gemini pesquisado em 2026-08-15 (ver
+`analise_custo_real_llm.md` §5 — havia divergência entre a página oficial e
+rastreadores de terceiros). DeepSeek atualizado em 2026-08-15 com os
+valores exatos da doc oficial (https://api-docs.deepseek.com/quick_start/pricing),
+trazida pelo usuário. Preços de LLM mudam com frequência — revisar
+periodicamente, não tratar como verdade eterna.
+
+Groq: **modelo default incerto.** `settings.GROQ_MODEL` está em
+`llama-3.3-70b-versatile`, mas a tabela oficial de "Production Models" do
+Groq (console.groq.com/docs/model/..., trazida pelo usuário em 2026-08-15)
+só lista `openai/gpt-oss-120b`/`openai/gpt-oss-20b` nessa categoria hoje —
+Llama 3.3 70B pode ter saído da lista de produção. Preço de
+`openai/gpt-oss-120b` adicionado como alternativa; decidir com o usuário
+qual modelo Groq usar de fato antes de confiar neste número em produção.
+
+`cache_por_1m` documentado mas **não aplicado ainda** — nenhum dos
+adapters (`gemini_provider.py`/`openai_compatible_provider.py`) implementa
+prompt caching hoje (side não pedido nesta rodada); o campo existe pra não
+perder o dado quando isso for implementado.
 """
 from __future__ import annotations
 
@@ -19,8 +33,9 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class PrecoModelo:
-    input_por_1m:  float  # USD por 1M tokens de entrada
-    output_por_1m: float  # USD por 1M tokens de saída
+    input_por_1m:  float        # USD por 1M tokens de entrada
+    output_por_1m: float        # USD por 1M tokens de saída
+    cache_por_1m:  float | None = None  # USD por 1M tokens de input em cache (não aplicado ainda)
 
 
 # provider -> modelo -> preço. Chave "default" cobre modelo não listado
@@ -34,11 +49,14 @@ _PRECOS: dict[str, dict[str, PrecoModelo]] = {
         "default":               PrecoModelo(0.30, 2.50),
     },
     "deepseek": {
-        "deepseek-chat": PrecoModelo(0.14, 0.28),
-        "default":       PrecoModelo(0.14, 0.28),
+        # Oficial (api-docs.deepseek.com/quick_start/pricing, 2026-08-15)
+        "deepseek-chat": PrecoModelo(0.20, 1.20, cache_por_1m=0.02),
+        "default":       PrecoModelo(0.20, 1.20, cache_por_1m=0.02),
     },
     "groq": {
         "llama-3.3-70b-versatile": PrecoModelo(0.59, 0.79),
+        "openai/gpt-oss-120b":     PrecoModelo(0.15, 0.60),
+        "openai/gpt-oss-20b":      PrecoModelo(0.075, 0.30),
         "default":                 PrecoModelo(0.59, 0.79),
     },
     # embeddings — só input, sem geração

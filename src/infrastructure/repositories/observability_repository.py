@@ -109,7 +109,7 @@ class ObservabilityRepository:
                         )                                  AS cache_hit_pct,
                         COUNT(DISTINCT user_id)            AS usuarios_unicos
                     FROM metricas_llm
-                    WHERE ts >= NOW() - INTERVAL ':horas hours'
+                    WHERE ts >= NOW() - make_interval(hours => :horas)
                 """),
                 {"horas": horas},
             )
@@ -132,7 +132,7 @@ class ObservabilityRepository:
                         ROUND(SUM(custo_usd)::numeric, 6) AS custo_usd,
                         ROUND(AVG(crag_score)::numeric, 3) AS crag_medio
                     FROM metricas_llm
-                    WHERE ts >= NOW() - INTERVAL ':horas hours'
+                    WHERE ts >= NOW() - make_interval(hours => :horas)
                     GROUP BY rota
                     ORDER BY total DESC
                 """),
@@ -157,7 +157,7 @@ class ObservabilityRepository:
                         ROUND(SUM(custo_usd)::numeric, 6)  AS custo_usd,
                         ROUND(AVG(latencia_ms))             AS latencia_media_ms
                     FROM metricas_llm
-                    WHERE ts >= NOW() - INTERVAL ':horas hours'
+                    WHERE ts >= NOW() - make_interval(hours => :horas)
                     GROUP BY provider
                     ORDER BY custo_usd DESC
                 """),
@@ -183,7 +183,7 @@ class ObservabilityRepository:
             await self._db.execute(
                 text("""
                     INSERT INTO audit_log (admin_id, action, target, resultado, detalhes, ip)
-                    VALUES (:admin, :action, :target, :resultado, :detalhes::jsonb, :ip)
+                    VALUES (:admin, :action, :target, :resultado, CAST(:detalhes AS jsonb), :ip)
                 """),
                 {
                     "admin":     admin_id[:50] if admin_id else None,
@@ -265,7 +265,7 @@ class ObservabilityRepository:
                     FROM (
                         SELECT rating, COUNT(*) AS cnt
                         FROM feedback_avaliacoes
-                        WHERE ts >= NOW() - INTERVAL ':horas hours'
+                        WHERE ts >= NOW() - make_interval(hours => :horas)
                         GROUP BY rating
                     ) t
                 """),
