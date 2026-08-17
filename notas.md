@@ -1558,3 +1558,130 @@ chegou. Log mostrou dois problemas distintos:
 (`0xFF` + top 3 bits `0xE0`), não só mocka a chamada. Suite completa: 239
 passed, mesmas 14 falhas de sempre (contagem de teste não mudou — testes
 existentes atualizados, não adicionados, pra essa rodada específica).
+
+## 13. Sessão 2026-08-15 — Multi-provider LLM (Gemini/DeepSeek/Groq), monitoramento real de custo, CI/CD, limpeza
+
+> Contexto: preocupação do usuário era puramente financeira — "não quero um
+> projeto de agente que custe 10 mil por mês". Trilha da conversa: pesquisa
+> própria no Grok sobre preço de mercado → dois documentos novos avaliando
+> essa pesquisa contra a arquitetura e o custo REAIS do Oráculo
+> (`pesquisa_arquitetura_producao.md`, `analise_custo_real_llm.md`) → decisão
+> de agir: multi-provider + monitoramento de verdade. Resumo funde as duas
+> pontas (documentos de análise + implementação real feita depois).
+
+### 13.1 Os dois documentos de análise (antes de qualquer código)
+
+- **`pesquisa_arquitetura_producao.md`**: cruza uma pesquisa profunda do
+  Perplexity sobre arquitetura de produção (agentes, CI/CD, observabilidade,
+  MCP, governança) contra o estado real do repo. Achados: RAG híbrido/
+  semantic cache/arquitetura 3 camadas já validam a pesquisa (não precisa
+  reconstruir); CI/CD, observabilidade LLM dedicada e governança formal
+  **não existiam** (a pesquisa assumia que sim). Roadmap em 6 fases proposto.
+- **`analise_custo_real_llm.md`**: avalia uma pesquisa do Grok sobre preços
+  de mercado (caso real UFVJM/SERPRO ~R$105mil/ano, ranking de provedores)
+  contra o fluxo real de chamadas do Oráculo. Achado central: uma mensagem
+  RAG dispara até 6 chamadas Gemini (não 1, como a pesquisa genérica
+  assumia), e **não existia telemetria persistente nenhuma de custo** —
+  `metricas_llm` (Postgres) existia desde a migration `001` e nunca era
+  usada; o único registro real (`registrar_tokens_redis`) tinha TTL de 1h,
+  só pro simulador de avaliação do `/hub`.
+
+### 13.2 Decisão explícita de escopo (a pedido do usuário)
+
+Governança formal e a fusão dos classificadores Orquestrador×Supervisor
+(`notas.md` §1/§5.1) ficaram **de fora** — "pararemos e conversaremos
+depois". Implementado só telemetria de observação sobre o conflito
+(contador `oraculo_router_override_total`), não a resolução dele.
+
+### 13.3 O que foi implementado
+
+- **Multi-provider (Gemini/DeepSeek/Groq)**: `infrastructure/adapters/
+  llm_factory.py::get_llm_provider()` — ponto único de resolução, troca em
+  runtime via Redis (`admin:llm_provider`, editável em `/hub/llm-custo`) ou
+  override por agente (`agentes_catalogo.llm_provider`/`llm_model`,
+  migration `007`, editável em `/hub/agents`). Novo adapter genérico
+  `openai_compatible_provider.py` cobre DeepSeek+Groq com 1 classe só (API
+  compatível OpenAI). `groq_provider.py` antigo (LangChain, código morto)
+  removido.
+- **Migração parcial dos call sites**: dos 9 arquivos que chamavam
+  `genai.Client` direto, migrados os 3 de maior volume/custo
+  (`llm_fallback.py` classify+orchestrate, `planning.py`, `synthesis.py`).
+  **6 continuam não migrados** (`query_transform.py` ×2,
+  `memory_summarizer.py`, `calendar_llm_adapter.py`,
+  `graph_extractor_service.py`, `beat_nightly_memory.py`) — próximo passo
+  natural, mesmo padrão já estabelecido.
+- **Achado que corrige uma afirmação errada minha de sessão anterior**: eu
+  tinha dito que "model routing small/large já existe implicitamente" — mentira,
+  vinha só da tabela em `arquitetura_oraculo.md` §4.3, o código real usa uma
+  ÚNICA `settings.GEMINI_MODEL` pra tudo. Lição: não confiar em doc de
+  arquitetura sem checar o código (mesma lição de `notas.md` §9.8 sobre
+  `message_stream.py`).
+- **Telemetria real conectada**: `MonitoredLLMProvider` (mesmo arquivo do
+  factory) grava toda chamada em `metricas_llm` (Postgres, finalmente usada)
+  + Prometheus (`oraculo_llm_cost_usd_total`/`_tokens_total`/`_calls_total`,
+  label `provider`) + `pricing.py` novo corrige a constante de custo
+  desatualizada que existia em `synthesis.py`. 4 métricas de observação do
+  roteamento (`notas.md` §5.2) também implementadas.
+- **Grafana nunca estava conectado**: achado real — `observability/grafana/
+  provisioning/` existia no repo mas o `docker-compose.yml` nunca montava
+  esse volume no serviço `grafana`. Corrigido. Dashboard novo
+  `llm_custo_providers.json` criado (não visto renderizado ainda).
+- **HUB como portal**: `/hub/agents` ganhou seletor de provider/modelo por
+  agente; `/hub/llm-custo` (página nova) mostra custo real por
+  provider/rota e troca o provider global.
+- **CI/CD**: `pytest`/`pytest-asyncio` nunca estiveram declarados em
+  arquivo nenhum do repo (achado real, por isso nunca existiu CI). Novo
+  `requirements-dev.txt` + `pytest.ini` (markers nunca registrados) +
+  `.github/workflows/tests.yml` com services Redis+Postgres reais (mesmos
+  defaults que `tests/conftest.py` já hardcodava) rodando `alembic upgrade
+  head` + `tests/unit` (exceto `test_registration_repository.py`, falha
+  pré-existente documentada) + eval do wiki CTIC.
+- **Limpeza**: removidos `oracle_chain.bak`, `eval_copy.bak`,
+  `eval_dashboard.bak`, `gmail_tool.py` (confirmado zero chamadores antes de
+  apagar). `DISABLE_DOCLING` implementado (pendência exata de §8.5).
+  `.env.example` criado (não existia — e um bug real no `.gitignore`, a
+  negação `!.env.example` vinha ANTES de `.env.*` e por isso nunca
+  funcionava, corrigido).
+
+### 13.4 Testado de verdade nesta sessão (sem Docker — só pip local)
+
+`pytest tests/unit`: **240 passed**, 12 falhas confirmadas como precisando
+de Postgres/Redis real (mesma classe de falha de sempre, o CI novo resolve
+isso) + 1 regressão real que eu causei
+(`test_agent_catalog_repository.py`, corrigida na hora — mock não tinha os
+campos novos `llm_provider`/`llm_model`). Migration `007` validada via
+`alembic.script.ScriptDirectory` (cadeia resolve, head único), nunca rodada
+contra Postgres real. **Chamadas reais a DeepSeek/Groq nunca foram
+testadas** (sem chave configurada) — só a mecânica HTTP/parsing foi
+validada.
+
+### 13.5 Git — commit "nada" nunca tinha sido enviado (achado ao final)
+
+Usuário achava que já tinha enviado pro GitHub — na verdade só existia um
+commit LOCAL com mensagem "nada" (36 arquivos, toda a sessão), nunca
+pushado. Reescrito (`git commit --amend`, seguro porque ainda não tinha ido
+ao remoto) com mensagem descritiva. Push inicial rejeitado — branch
+`research/rest-mcp-estudos` no GitHub tinha avançado 2 commits nesse meio
+tempo (outra sessão implementando STT/TTS/Multimodal, ver §11/§12 acima).
+`git pull --rebase` com conflitos reais em 2 arquivos (`.claude.md`,
+`settings.py`) — resolvidos mantendo as duas contribuições (aditivas, sem
+contradição real). Suite reconfirmada depois do merge: 240 passed, mesmas
+12 falhas de infra, zero regressão nova. Push final bem-sucedido.
+
+### 13.6 Pendente / próximos passos explícitos
+
+1. Deploy real (`docker compose --profile core --profile monitoring
+   --profile app --profile gateway up -d --build` — precisa rebuild,
+   dependências novas) + `alembic upgrade head` de verdade.
+2. Colar `DEEPSEEK_API_KEY`/`GROQ_API_KEY` reais no `.env` (não no HUB
+   ainda — `/hub/config` tem UI pra "Salvar Todas" as API keys, mas o
+   endpoint que ela chama, `POST /api/admin/system/env`, **não existe no
+   backend** — achado real ao checar antes de responder essa pergunta pro
+   usuário; hoje esse botão dá 404).
+3. Migrar os 6 call sites restantes pro `llm_factory`.
+4. Ver dashboard Grafana renderizado de verdade pela 1ª vez.
+5. Unir telemetria de STT/TTS/Vision (métricas multimodais próprias, §11/§12
+   acima) com `metricas_llm`/custo por provider — hoje são dois mundos
+   separados.
+6. RBAC testado na `main` (ainda bloqueia a decisão do LangGraph, ver
+   `.claude.md`).
