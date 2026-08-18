@@ -41,7 +41,7 @@
 
   /* ── Cards de ferramentas externas ── */
   .tools-grid {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
     margin-bottom: 0;
   }
   .tool-card {
@@ -229,12 +229,6 @@
         <div class="tool-desc">Coleta de métricas, alertas e exploração de séries</div>
         <div class="tool-url">localhost:9090 ↗</div>
       </a>
-      <a class="tool-card" href="http://localhost:3000" target="_blank">
-        <div class="tool-icon">🔍</div>
-        <div class="tool-name">Langfuse</div>
-        <div class="tool-desc">Tracing LangChain, custo de tokens e avaliação de qualidade</div>
-        <div class="tool-url">localhost:3000 ↗</div>
-      </a>
     </div>
   </div>
 
@@ -290,22 +284,32 @@
         </div>
       </div>
 
-      <!-- Langfuse -->
+      <!-- DeepSeek -->
       <div class="key-group">
-        <div class="key-group-label">🔍 Langfuse (Tracing LLM)</div>
+        <div class="key-group-label">🧠 DeepSeek</div>
         <div class="key-row">
-          <span class="key-name">LANGFUSE_SECRET_KEY</span>
-          <input class="key-input" type="password" id="key-lf-secret" placeholder="sk-lf-..." data-env="LANGFUSE_SECRET_KEY">
-          <button class="key-toggle" onclick="toggleKey('key-lf-secret')">👁</button>
+          <span class="key-name">DEEPSEEK_API_KEY</span>
+          <input class="key-input" type="password" id="key-deepseek" placeholder="sk-..." data-env="DEEPSEEK_API_KEY">
+          <button class="key-toggle" onclick="toggleKey('key-deepseek')">👁</button>
         </div>
         <div class="key-row">
-          <span class="key-name">LANGFUSE_PUBLIC_KEY</span>
-          <input class="key-input" type="password" id="key-lf-public" placeholder="pk-lf-..." data-env="LANGFUSE_PUBLIC_KEY">
-          <button class="key-toggle" onclick="toggleKey('key-lf-public')">👁</button>
+          <span class="key-name">DEEPSEEK_MODEL</span>
+          <input class="key-input" type="text" id="key-deepseek-model" placeholder="deepseek-chat" data-env="DEEPSEEK_MODEL">
+          <span style="width:44px"></span>
+        </div>
+      </div>
+
+      <!-- Groq -->
+      <div class="key-group">
+        <div class="key-group-label">⚡ Groq</div>
+        <div class="key-row">
+          <span class="key-name">GROQ_API_KEY</span>
+          <input class="key-input" type="password" id="key-groq" placeholder="gsk_..." data-env="GROQ_API_KEY">
+          <button class="key-toggle" onclick="toggleKey('key-groq')">👁</button>
         </div>
         <div class="key-row">
-          <span class="key-name">LANGFUSE_HOST</span>
-          <input class="key-input" type="text" id="key-lf-host" placeholder="http://langfuse:3000" data-env="LANGFUSE_HOST">
+          <span class="key-name">GROQ_MODEL</span>
+          <input class="key-input" type="text" id="key-groq-model" placeholder="openai/gpt-oss-120b" data-env="GROQ_MODEL">
           <span style="width:44px"></span>
         </div>
       </div>
@@ -494,7 +498,8 @@ async function loadCurrentConfig() {
     if (sys.gemini_model)      document.getElementById('key-gemini-model').value = sys.gemini_model;
     if (sys.evolution_url)     document.getElementById('key-evolution-url').value = sys.evolution_url;
     if (sys.evolution_instance) document.getElementById('key-evolution-inst').value = sys.evolution_instance;
-    if (sys.langfuse_host)     document.getElementById('key-lf-host').value = sys.langfuse_host;
+    if (sys.deepseek_model)    document.getElementById('key-deepseek-model').value = sys.deepseek_model;
+    if (sys.groq_model)        document.getElementById('key-groq-model').value = sys.groq_model;
     if (sys.redis_url)         document.getElementById('key-redis').value = sys.redis_url;
     if (sys.dev_mode != null) {
       document.getElementById('key-dev-mode').value = sys.dev_mode ? 'True' : 'False';

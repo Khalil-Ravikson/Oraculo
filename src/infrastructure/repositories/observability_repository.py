@@ -57,6 +57,7 @@ class ObservabilityRepository:
         chunks_count:   int   = 0,
         custo_usd:      float = 0.0,
         modelo:         str   = "",
+        provider:       str   = "",
     ) -> None:
         try:
             await self._db.execute(
@@ -64,11 +65,11 @@ class ObservabilityRepository:
                     INSERT INTO metricas_llm
                         (user_id, rota, tokens_entrada, tokens_saida, tokens_total,
                          latencia_ms, crag_score, cache_hit, cache_layer,
-                         chunks_count, custo_usd, modelo)
+                         chunks_count, custo_usd, modelo, provider)
                     VALUES
                         (:user_id, :rota, :tok_in, :tok_out, :tok_total,
                          :lat, :crag, :cache_hit, :cache_layer,
-                         :chunks, :custo, :modelo)
+                         :chunks, :custo, :modelo, :provider)
                 """),
                 {
                     "user_id":     user_id[-20:] if user_id else None,
@@ -83,6 +84,7 @@ class ObservabilityRepository:
                     "chunks":      chunks_count,
                     "custo":       round(custo_usd, 8),
                     "modelo":      modelo[:50] if modelo else None,
+                    "provider":    provider[:20] if provider else None,
                 },
             )
             await self._db.commit()
@@ -107,7 +109,7 @@ class ObservabilityRepository:
                         )                                  AS cache_hit_pct,
                         COUNT(DISTINCT user_id)            AS usuarios_unicos
                     FROM metricas_llm
-                    WHERE ts >= NOW() - INTERVAL ':horas hours'
+                    WHERE ts >= NOW() - make_interval(hours => :horas)
                 """),
                 {"horas": horas},
             )
@@ -130,7 +132,7 @@ class ObservabilityRepository:
                         ROUND(SUM(custo_usd)::numeric, 6) AS custo_usd,
                         ROUND(AVG(crag_score)::numeric, 3) AS crag_medio
                     FROM metricas_llm
-                    WHERE ts >= NOW() - INTERVAL ':horas hours'
+                    WHERE ts >= NOW() - make_interval(hours => :horas)
                     GROUP BY rota
                     ORDER BY total DESC
                 """),
@@ -139,6 +141,37 @@ class ObservabilityRepository:
             return [dict(r._mapping) for r in result.fetchall()]
         except Exception as e:
             logger.error("❌ [OBS] get_metricas_por_rota falhou: %s", e)
+        return []
+
+    async def get_metricas_por_provider(self, horas: int = 24) -> list[dict]:
+        """Distribuição de chamadas/custo por provider LLM (Gemini/DeepSeek/Groq)
+        nas últimas N horas — base da página de custo do /hub e do dashboard
+        Grafana "LLM Custo & Providers"."""
+        try:
+            result = await self._db.execute(
+                text("""
+                    SELECT
+                        COALESCE(provider, 'desconhecido') AS provider,
+                        COUNT(*)                            AS total,
+                        SUM(tokens_total)                  AS tokens_total,
+                        SUM(tokens_entrada)                AS tokens_entrada,
+                        SUM(tokens_saida)                  AS tokens_saida,
+                        ROUND(
+                          100.0 * SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0),
+                          1
+                        )                                  AS cache_hit_pct,
+                        ROUND(SUM(custo_usd)::numeric, 6)  AS custo_usd,
+                        ROUND(AVG(latencia_ms))             AS latencia_media_ms
+                    FROM metricas_llm
+                    WHERE ts >= NOW() - make_interval(hours => :horas)
+                    GROUP BY provider
+                    ORDER BY custo_usd DESC
+                """),
+                {"horas": horas},
+            )
+            return [dict(r._mapping) for r in result.fetchall()]
+        except Exception as e:
+            logger.error("❌ [OBS] get_metricas_por_provider falhou: %s", e)
         return []
 
     # ─── Audit Log ────────────────────────────────────────────────────────────
@@ -156,7 +189,7 @@ class ObservabilityRepository:
             await self._db.execute(
                 text("""
                     INSERT INTO audit_log (admin_id, action, target, resultado, detalhes, ip)
-                    VALUES (:admin, :action, :target, :resultado, :detalhes::jsonb, :ip)
+                    VALUES (:admin, :action, :target, :resultado, CAST(:detalhes AS jsonb), :ip)
                 """),
                 {
                     "admin":     admin_id[:50] if admin_id else None,
@@ -238,7 +271,7 @@ class ObservabilityRepository:
                     FROM (
                         SELECT rating, COUNT(*) AS cnt
                         FROM feedback_avaliacoes
-                        WHERE ts >= NOW() - INTERVAL ':horas hours'
+                        WHERE ts >= NOW() - make_interval(hours => :horas)
                         GROUP BY rating
                     ) t
                 """),
@@ -273,6 +306,7 @@ def salvar_metrica_sync(
     chunks_count:   int   = 0,
     custo_usd:      float = 0.0,
     modelo:         str   = "",
+    provider:       str   = "",
 ) -> None:
     """
     Versão síncrona para uso em tasks Celery.
@@ -290,7 +324,7 @@ def salvar_metrica_sync(
                 latencia_ms=latencia_ms, crag_score=crag_score,
                 cache_hit=cache_hit, cache_layer=cache_layer,
                 chunks_count=chunks_count, custo_usd=custo_usd,
-                modelo=modelo,
+                modelo=modelo, provider=provider,
             )
 
     try:

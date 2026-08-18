@@ -87,6 +87,9 @@ async def _executar(task, event: dict) -> dict:
     ms = int((time.monotonic() - t0) * 1000)
     _RAG_LATENCY.observe(ms)
     _CHUNKS_HIST.observe(len(chunks))
+    if not chunks:
+        from src.infrastructure.observability.metrics import PrometheusMetrics
+        PrometheusMetrics().increment_rag_zero_chunks(doc_type)
 
     payload = {
         "plan_id":    plan_id,

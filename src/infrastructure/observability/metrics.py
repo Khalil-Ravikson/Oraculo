@@ -108,13 +108,40 @@ class PrometheusMetrics:
         # Usado nos Painéis 2 e 3 do Grafana Dashboard
         self._llm_tokens_total = _get_or_create(
             Counter, f"{ns}_llm_tokens_total",
-            "Total de tokens consumidos pelo LLM", ["direction"])
-        # direction = "input" | "output"
+            "Total de tokens consumidos pelo LLM", ["direction", "provider"])
+        # direction = "input" | "output"; provider = "gemini" | "deepseek" | "groq"
 
         self._llm_cost_usd_total = _get_or_create(
             Counter, f"{ns}_llm_cost_usd_total",
-            "Custo acumulado em USD das chamadas ao LLM")
-        # Incrementado a cada geração com o custo estimado daquela chamada
+            "Custo acumulado em USD das chamadas ao LLM", ["provider"])
+        # Incrementado a cada geração com o custo real (usage_metadata) daquela chamada
+
+        self._llm_calls_total = _get_or_create(
+            Counter, f"{ns}_llm_calls_total",
+            "Total de chamadas ao LLM por provider/modelo/rota",
+            ["provider", "modelo", "rota"])
+
+        # ── Counters de roteamento — pegam os bugs reais já documentados em
+        # notas.md §5.1/§5.2 antes de virarem sintoma em produção. Só
+        # observação: nenhum destes contadores decide nada, só mede o que
+        # o código já faz hoje (conflito Orquestrador/Supervisor incluso —
+        # ver notas.md §1, resolução do conflito é decisão separada).
+        self._router_override_total = _get_or_create(
+            Counter, f"{ns}_router_override_total",
+            "Vezes que o Orquestrador sobrescreveu a rota do Supervisor",
+            ["orchestrator_action", "supervisor_rota", "mudou"])
+
+        self._planner_worker_not_found_total = _get_or_create(
+            Counter, f"{ns}_planner_worker_not_found_total",
+            "Worker do plano não encontrado no registry", ["worker"])
+
+        self._orchestrator_json_parse_failures_total = _get_or_create(
+            Counter, f"{ns}_orchestrator_json_parse_failures_total",
+            "Falhas de parse de JSON na resposta do Orquestrador")
+
+        self._rag_zero_chunks_total = _get_or_create(
+            Counter, f"{ns}_rag_zero_chunks_total",
+            "Buscas RAG que retornaram 0 chunks, por doc_type", ["doc_type"])
 
         # ── Histograms ─────────────────────────────────────────────────────────
         self._request_latency = _get_or_create(
@@ -139,8 +166,8 @@ class PrometheusMetrics:
 
         self._llm_generation_latency = _get_or_create(
             Histogram, f"{ns}_llm_generation_latency_ms",
-            "Latência da geração LLM (Gemini) em ms",
-            buckets=_REQUEST_BUCKETS)
+            "Latência da geração LLM por provider em ms",
+            ["provider"], buckets=_REQUEST_BUCKETS)
 
         self._tokens_per_request = _get_or_create(
             Histogram, f"{ns}_tokens_per_request",
@@ -268,33 +295,53 @@ class PrometheusMetrics:
         output_tokens: int,
         cost_usd: float,
         latency_ms: int = 0,
+        provider: str = "gemini",
+        modelo: str = "",
+        rota: str = "",
     ) -> None:
         """
-        Registra uma chamada LLM completa: tokens, custo e latência.
-
-        Deve ser chamado em _step_generate() após obter response.usage_metadata.
-
-        Exemplo:
-            metrics.record_llm_usage(
-                input_tokens=tokens_in,
-                output_tokens=tokens_out,
-                cost_usd=custo_usd,
-                latency_ms=ms,
-            )
+        Registra uma chamada LLM completa: tokens, custo, latência e
+        provider/modelo/rota. Chamado a partir de
+        `infrastructure/adapters/llm_factory.py::MonitoredLLMProvider` — um
+        único ponto de instrumentação para todo o pipeline (Gemini, DeepSeek
+        e Groq), em vez de cada call site incrementar métricas na mão.
         """
         if not self._enabled:
             return
         if input_tokens:
-            self._llm_tokens_total.labels(direction="input").inc(input_tokens)
+            self._llm_tokens_total.labels(direction="input", provider=provider).inc(input_tokens)
         if output_tokens:
-            self._llm_tokens_total.labels(direction="output").inc(output_tokens)
+            self._llm_tokens_total.labels(direction="output", provider=provider).inc(output_tokens)
         total_tokens = input_tokens + output_tokens
         if total_tokens:
             self._tokens_per_request.observe(total_tokens)
         if cost_usd:
-            self._llm_cost_usd_total.inc(cost_usd)
+            self._llm_cost_usd_total.labels(provider=provider).inc(cost_usd)
         if latency_ms:
-            self._llm_generation_latency.observe(latency_ms)
+            self._llm_generation_latency.labels(provider=provider).observe(latency_ms)
+        self._llm_calls_total.labels(provider=provider, modelo=modelo or "?", rota=rota or "?").inc()
+
+    # ── Métodos de observabilidade de roteamento (notas.md §5.2) ──────────────
+
+    def increment_router_override(self, orchestrator_action: str, supervisor_rota: str, mudou: bool) -> None:
+        if self._enabled:
+            self._router_override_total.labels(
+                orchestrator_action=orchestrator_action or "?",
+                supervisor_rota=supervisor_rota or "?",
+                mudou="sim" if mudou else "nao",
+            ).inc()
+
+    def increment_planner_worker_not_found(self, worker: str) -> None:
+        if self._enabled:
+            self._planner_worker_not_found_total.labels(worker=worker or "?").inc()
+
+    def increment_orchestrator_json_parse_failure(self) -> None:
+        if self._enabled:
+            self._orchestrator_json_parse_failures_total.inc()
+
+    def increment_rag_zero_chunks(self, doc_type: str) -> None:
+        if self._enabled:
+            self._rag_zero_chunks_total.labels(doc_type=doc_type or "geral").inc()
 
     # ── Observabilidade de latências ──────────────────────────────────────────
 

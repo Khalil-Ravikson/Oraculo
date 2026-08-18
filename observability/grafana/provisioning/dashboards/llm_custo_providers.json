@@ -1,0 +1,109 @@
+{
+  "title": "Oráculo — LLM Custo & Providers",
+  "uid": "oraculo-llm-custo",
+  "tags": ["oraculo", "llm", "custo"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Custo acumulado por provider (USD)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum by (provider) (oraculo_llm_cost_usd_total)", "legendFormat": "{{provider}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 4 }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "title": "Chamadas por provider/rota",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum by (provider) (oraculo_llm_calls_total)", "legendFormat": "{{provider}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Tokens totais por provider",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum by (provider) (oraculo_llm_tokens_total)", "legendFormat": "{{provider}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Custo por minuto por provider",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum by (provider) (rate(oraculo_llm_cost_usd_total[5m])) * 60", "legendFormat": "{{provider}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "title": "Latência de geração por provider (p50/p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (provider, le) (rate(oraculo_llm_generation_latency_ms_bucket[5m])))", "legendFormat": "p50 {{provider}}" },
+        { "expr": "histogram_quantile(0.95, sum by (provider, le) (rate(oraculo_llm_generation_latency_ms_bucket[5m])))", "legendFormat": "p95 {{provider}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "title": "Tokens input/output por provider",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum by (provider, direction) (rate(oraculo_llm_tokens_total[5m])) * 60", "legendFormat": "{{provider}}/{{direction}}" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Cache hit rate (Redis semântico)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum by (doc_type) (rate(oraculo_cache_hits_total[5m]))", "legendFormat": "{{doc_type}}" }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Conflito Orquestrador × Supervisor (override_total)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "datasource": "Prometheus",
+      "description": "Só observação — não decide nada. Ver notas.md §1 e §5.1 sobre a fusão dos classificadores (decisão em aberto, fora de escopo desta rodada).",
+      "targets": [
+        { "expr": "sum by (mudou) (rate(oraculo_router_override_total[5m])) * 60", "legendFormat": "mudou={{mudou}}" }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Falhas do pipeline (parse JSON / worker não encontrado / RAG zero chunks)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(oraculo_orchestrator_json_parse_failures_total[5m]) * 60", "legendFormat": "orchestrator_json_parse_failure" },
+        { "expr": "sum(rate(oraculo_planner_worker_not_found_total[5m])) * 60", "legendFormat": "planner_worker_not_found" },
+        { "expr": "sum by (doc_type) (rate(oraculo_rag_zero_chunks_total[5m])) * 60", "legendFormat": "rag_zero_chunks/{{doc_type}}" }
+      ]
+    }
+  ]
+}

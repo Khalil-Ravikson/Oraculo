@@ -25,20 +25,12 @@ completo de HITL/memória que depende da ordem atual das duas chamadas.
 """
 from __future__ import annotations
 
-import json
 import logging
 import re
 
-from prometheus_client import Counter
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
-
-_FLASH_TOKENS = Counter(
-    "oraculo_router_gemini_flash_tokens_total",
-    "Tokens consumidos pelo Gemini Flash no router",
-    ["direction"],
-)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,49 +69,33 @@ Sua única responsabilidade é analisar a mensagem de entrada e classificá-la e
 
 
 async def _classificar_com_flash(query: str, ctx: dict, session_id: str | None = None):
-    """Usa Gemini Flash para classificação zero-shot da rota/intenção."""
-    from src.infrastructure.settings import settings
-    import google.genai as genai
-    from google.genai import types
+    """Usa o provider LLM ativo (Gemini/DeepSeek/Groq, ver llm_factory.py)
+    para classificação zero-shot da rota/intenção."""
     from src.router.contracts import RouterDecision, ROTAS_VALIDAS
+    from src.infrastructure.adapters.llm_factory import get_llm_provider
 
     ctx_str = f"Aluno de {ctx['curso']}" if ctx.get("curso") else ""
     prompt = f"{ctx_str}\nMensagem: \"{query[:300]}\"\nClassifique:"
 
     try:
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        response = await client.aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=_SYSTEM_ROUTER,
-                temperature=0.0,
-                max_output_tokens=150,
-                response_mime_type="application/json",
-                response_schema=RoutingDecision,
-            ),
+        provider = get_llm_provider(agente="router", rota="router_classify")
+        decision_validated = await provider.gerar_resposta_estruturada_async(
+            prompt=prompt,
+            response_schema=RoutingDecision,
+            system_instruction=_SYSTEM_ROUTER,
+            temperatura=0.0,
+            user_id=session_id or "",
+            rota="router_classify",
         )
+        if decision_validated is None:
+            raise RuntimeError("provider não devolveu decisão válida")
 
-        # Métricas de tokens
-        usage = response.usage_metadata
-        if usage:
-            _FLASH_TOKENS.labels(direction="input").inc(usage.prompt_token_count or 0)
-            _FLASH_TOKENS.labels(direction="output").inc(usage.candidates_token_count or 0)
-            if session_id:
-                from src.infrastructure.redis_client import registrar_tokens_redis
-                registrar_tokens_redis(session_id, usage.prompt_token_count or 0, usage.candidates_token_count or 0)
-
-        # Parsing seguro do JSON
-        texto = response.text.strip()
-        if texto.startswith("```json"):
-            texto = texto[7:-3].strip()
-        elif texto.startswith("```"):
-            texto = texto[3:-3].strip()
-
-        data = json.loads(texto or "{}")
-
-        # Validação via Pydantic schema
-        decision_validated = RoutingDecision(**data)
+        if session_id:
+            tokens_in, tokens_out = provider.ultimo_uso_tokens
+            # Mantido em paralelo à telemetria persistente (llm_factory.py) —
+            # é o cache curto que o simulador de avaliação do /hub consome.
+            from src.infrastructure.redis_client import registrar_tokens_redis
+            registrar_tokens_redis(session_id, tokens_in, tokens_out)
 
         rota = decision_validated.rota.upper()
         if rota not in ROTAS_VALIDAS:
@@ -193,16 +169,6 @@ Analise a mensagem e decida a ação correta:
 
 Você é uma API. RETORNE EXCLUSIVAMENTE UM JSON VÁLIDO obedecendo ao schema exigido. NÃO RETORNE MARKDOWN, NEM TEXTO EXPLICATIVO."""
 
-_client = None
-def _get_client():
-    global _client
-    if _client is None:
-        from src.infrastructure.settings import settings
-        import google.genai as genai
-        _client = genai.Client(api_key=settings.GEMINI_API_KEY)
-    return _client
-
-
 async def orchestrate(
     message: str,
     history_summary: str = "",
@@ -211,9 +177,7 @@ async def orchestrate(
     user_context: dict | None = None,
     session_id: str = "",
 ) -> OrchestratorDecision:
-    from src.infrastructure.settings import settings
-    import google.genai as genai
-    from google.genai import types
+    from src.infrastructure.adapters.llm_factory import get_llm_provider
 
     ctx_parts = []
     if history_summary:
@@ -233,33 +197,32 @@ async def orchestrate(
     prompt = "\n\n".join(ctx_parts + [f"Mensagem: \"{message[:300]}\""])
 
     try:
-        client = _get_client()
-        response = await client.aio.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=_SYSTEM,
-                temperature=0.0,
-                max_output_tokens=120,
-                response_mime_type="application/json",
-                response_schema=OrchestratorDecision,
-            ),
+        provider = get_llm_provider(agente="router", rota="orchestrate")
+        decision = await provider.gerar_resposta_estruturada_async(
+            prompt=prompt,
+            response_schema=OrchestratorDecision,
+            system_instruction=_SYSTEM,
+            temperatura=0.0,
+            user_id=session_id or "",
+            rota="orchestrate",
         )
 
-        usage = response.usage_metadata
-        if usage and session_id:
+        if session_id:
+            tokens_in, tokens_out = provider.ultimo_uso_tokens
+            # Mantido em paralelo à telemetria persistente (llm_factory.py) —
+            # é o cache curto que o simulador de avaliação do /hub consome.
             from src.infrastructure.redis_client import registrar_tokens_redis
-            registrar_tokens_redis(session_id,
-                                   usage.prompt_token_count or 0,
-                                   usage.candidates_token_count or 0)
+            registrar_tokens_redis(session_id, tokens_in, tokens_out)
 
-        # 1. Extrair e limpar o texto (Remove blocos markdown ```json ... ```)
-        raw_text = response.text or "{}"
-        clean_text = re.sub(r'^```json\s*|\s*```$', '', raw_text.strip(), flags=re.IGNORECASE|re.MULTILINE)
-
-        # 2. Parse seguro
-        data = json.loads(clean_text)
-        decision = OrchestratorDecision(**data)
+        if decision is None:
+            # Provider não conseguiu gerar/validar JSON estruturado — mesma
+            # classe de falha que antes aparecia como JSONDecodeError aqui
+            # (agora tratada dentro do adapter, ver GeminiProvider/
+            # OpenAICompatibleProvider.gerar_resposta_estruturada_async).
+            from src.infrastructure.observability.metrics import PrometheusMetrics
+            PrometheusMetrics().increment_orchestrator_json_parse_failure()
+            logger.error("❌ [ORCHESTRATOR] provider não devolveu decisão válida | '%s'", message[:60])
+            return OrchestratorDecision(action="call_rag", reasoning="fallback_json", route_hint="GERAL")
 
         if decision.action not in ACTIONS:
             decision.action = "call_rag"
@@ -268,9 +231,6 @@ async def orchestrate(
                     decision.action, decision.route_hint, message[:40])
         return decision
 
-    except json.JSONDecodeError as e:
-        logger.error(f"❌ [ORCHESTRATOR] JSON Inválido: '{raw_text}' | Erro: {e}")
-        return OrchestratorDecision(action="call_rag", reasoning="fallback_json", route_hint="GERAL")
     except Exception as e:
         logger.warning("⚠️  [ORCHESTRATOR] falhou, fallback call_rag: %s", e)
         return OrchestratorDecision(action="call_rag", reasoning="fallback", route_hint="GERAL")

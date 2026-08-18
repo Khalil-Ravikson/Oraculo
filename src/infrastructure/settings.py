@@ -49,6 +49,20 @@ class Settings(BaseSettings):
     TTS_PROVIDER: str  = "kokoro"   # opções: kokoro, gtts
     KOKORO_VOICE: str  = "pm_alex"  # opções: pf_dora (fem.), pm_alex/pm_santa (masc.)
 
+    # ── Multi-provider de texto (ver infrastructure/adapters/llm_factory.py) ─
+    # Provider ativo por padrão — trocável em runtime via Redis
+    # (`admin:llm_provider`, sem restart) ou override por agente no
+    # catálogo (`agentes_catalogo.llm_provider`, migration 007).
+    LLM_PROVIDER: str = "gemini"  # "gemini" | "deepseek" | "groq"
+
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_MODEL:   str = "deepseek-chat"
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
+
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL:   str = "llama-3.3-70b-versatile"
+    GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
+
     # Nightly Memory flag
     ENABLE_NIGHTLY_MEMORY: bool = False
     
@@ -73,6 +87,13 @@ class Settings(BaseSettings):
     HF_TOKEN:             str = ""
     DATA_DIR:             str = "/app/dados"
     MAX_HISTORY_MESSAGES: int = 20
+
+    # Docling é o parser padrão pra PDF/DOCX em ParserFactory.auto(), mas
+    # carrega modelos ML pesados no pre-load do worker — causa real de
+    # SIGKILL sob pressão de memória (notas.md §8.5/8.6). Não havia
+    # nenhuma forma de desativar sem desinstalar o pacote manualmente
+    # antes desta flag existir.
+    DISABLE_DOCLING: bool = False
 
     # ── Admin ─────────────────────────────────────────────────────
     ADMIN_USERNAME:            str = "admin"

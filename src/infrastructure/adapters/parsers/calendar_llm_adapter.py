@@ -10,18 +10,11 @@ from __future__ import annotations
 import logging
 import os
 import fitz  # PyMuPDF
-from google import genai
-from google.genai import types
 from src.domain.ports.document_parser import IDocumentParser
-from src.infrastructure.settings import settings
 
 logger = logging.getLogger(__name__)
 
 class CalendarLLMAdapter(IDocumentParser):
-    def __init__(self):
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self.model = "gemini-2.5-flash"
-
     def parse(self, file_path: str, instruction: str = "") -> str:
         if not os.path.exists(file_path):
             logger.error("❌ Arquivo não encontrado: %s", file_path)
@@ -57,15 +50,12 @@ Texto Bruto:
 """
 
             logger.info("🤖 Iniciando estruturação LLM do Calendário Acadêmico...")
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0
-                )
-            )
+            from src.infrastructure.adapters.llm_factory import get_llm_provider
 
-            structured_text = response.text.strip()
+            provider = get_llm_provider(rota="calendario_parser")
+            resp = provider.gerar_resposta_sincrono(prompt=prompt, temperatura=0.0, max_tokens=8192)
+
+            structured_text = (resp.conteudo or "").strip()
             logger.debug("📄 Calendar LLM gerou %d caracteres estruturados.", len(structured_text))
             
             return structured_text

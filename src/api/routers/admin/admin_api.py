@@ -55,6 +55,9 @@ class PromptRequest(BaseModel):
 class MaintenanceRequest(BaseModel):
     ativo: bool
 
+class EnvRequest(BaseModel):
+    env: dict[str, str]
+
 class UserUpdateRequest(BaseModel):
     role:        str | None = None
     status:      str | None = None
@@ -288,10 +291,21 @@ async def system_flags(_: TokenPayload = Depends(require_admin_jwt)):
     except Exception:
         prompt_custom = bool(r.get("admin:system_prompt"))
 
+    # Campos não sensíveis (sem API keys) para pré-preencher /hub/config.
+    from src.infrastructure.settings import settings
+
     return {
         "manutencao":     r.get("admin:maintenance_mode") == "1",
         "gemini_bloq":    r.get("admin:gemini_blocked") == "1",
         "prompt_custom":  prompt_custom,
+        "gemini_model":       settings.GEMINI_MODEL,
+        "deepseek_model":     settings.DEEPSEEK_MODEL,
+        "groq_model":         settings.GROQ_MODEL,
+        "embedding_provider": settings.EMBEDDING_PROVIDER,
+        "evolution_url":      settings.EVOLUTION_BASE_URL,
+        "evolution_instance": settings.EVOLUTION_INSTANCE_NAME,
+        "redis_url":          settings.REDIS_URL,
+        "dev_mode":           settings.DEV_MODE,
     }
 
 
@@ -322,6 +336,78 @@ async def set_prompt(
     )
 
     return {"ok": True, "msg": msg}
+
+
+_ENV_KEYS_PERMITIDAS = {
+    "GEMINI_API_KEY", "GEMINI_MODEL", "EMBEDDING_PROVIDER",
+    "DEEPSEEK_API_KEY", "DEEPSEEK_MODEL",
+    "GROQ_API_KEY", "GROQ_MODEL",
+    "EVOLUTION_API_KEY", "EVOLUTION_BASE_URL", "EVOLUTION_INSTANCE_NAME",
+    "DATABASE_URL", "REDIS_URL",
+    "ADMIN_JWT_SECRET", "ADMIN_API_KEY", "ADMIN_NUMBERS",
+    "LLAMA_CLOUD_API_KEY", "HF_TOKEN", "DEV_MODE",
+}
+
+
+def _gravar_env_inplace(caminho: str, updates: dict[str, str]) -> None:
+    """Reescreve o `.env` no lugar (sem tempfile+rename). `dotenv.set_key`
+    cria o arquivo temporário no DIRETÓRIO do `.env` (não no arquivo em si)
+    — em produção `/app` é `root:root` (imagem), então mesmo com o `.env`
+    liberado pro grupo do container, `set_key` batia em
+    `PermissionError` ao criar o tempfile. Reescrever com `open(..., "w")`
+    só precisa de permissão de escrita no PRÓPRIO arquivo, que é o que o
+    bind-mount + `chgrp`/`chmod` do host já concede."""
+    with open(caminho, "r", encoding="utf-8") as f:
+        linhas = f.readlines()
+
+    pendentes = dict(updates)
+    saida = []
+    for linha in linhas:
+        stripped = linha.strip()
+        chave = stripped.split("=", 1)[0].strip() if ("=" in stripped and not stripped.startswith("#")) else None
+        if chave and chave in pendentes:
+            valor = pendentes.pop(chave).replace("\\", "\\\\").replace('"', '\\"')
+            saida.append(f'{chave}="{valor}"\n')
+        else:
+            saida.append(linha)
+
+    if pendentes and saida and not saida[-1].endswith("\n"):
+        saida[-1] += "\n"
+
+    for chave, valor in pendentes.items():
+        valor_escapado = valor.replace("\\", "\\\\").replace('"', '\\"')
+        saida.append(f'{chave}="{valor_escapado}"\n')
+
+    with open(caminho, "w", encoding="utf-8") as f:
+        f.writelines(saida)
+
+
+@router.post("/system/env")
+async def set_env(
+    body:    EnvRequest,
+    payload: TokenPayload = Depends(require_admin_jwt),
+):
+    """Grava pares chave/valor no `.env` real do servidor (fonte que
+    `Settings` — pydantic-settings — lê no boot). Requer reiniciar os
+    serviços para o valor novo entrar em vigor. Só aceita chaves na
+    allowlist — o body é um POST JSON, não confiar cegamente no que o
+    cliente manda."""
+    from src.infrastructure.paths import ENV_FILE
+
+    updates = {k: v for k, v in body.env.items() if k in _ENV_KEYS_PERMITIDAS}
+    if not updates:
+        raise HTTPException(400, "Nenhuma chave válida para gravar.")
+
+    _gravar_env_inplace(str(ENV_FILE), updates)
+    escritas = list(updates.keys())
+
+    from src.infrastructure.adapters.redis_audit_log import RedisAuditLog
+    await RedisAuditLog().registar(
+        admin_id=payload.sub, action="set_env",
+        target=None, payload={"chaves": escritas}, resultado="ok",
+    )
+
+    return {"ok": True, "written": escritas}
 
 
 @router.post("/system/maintenance")

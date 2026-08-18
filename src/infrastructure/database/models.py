@@ -1,6 +1,6 @@
 # src/infrastructure/database/models.py
 from __future__ import annotations
-from sqlalchemy import Boolean, Column, DateTime, Enum as SQLEnum, BigInteger, ForeignKey, Text, Integer, String, func
+from sqlalchemy import Boolean, Column, DateTime, Enum as SQLEnum, BigInteger, ForeignKey, Text, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase
 # Importa os Enums do domínio para tipar as colunas
 from src.domain.entities.enums import RoleEnum, CentroEnum, StatusMatriculaEnum,TurnoEnum
@@ -238,7 +238,29 @@ class AgenteCatalogo(Base):
     descricao      = Column(Text, nullable=True)
     permissions    = Column(ARRAY(String), server_default="{}", nullable=False)
     ativo          = Column(Boolean, server_default="true", nullable=False)
+    # Override de provider/modelo LLM por agente (migration 007). NULL nos
+    # dois = herda o provider/modelo global (settings.LLM_PROVIDER ou
+    # override em runtime via Redis `admin:llm_provider`).
+    llm_provider   = Column(String(20), nullable=True)
+    llm_model      = Column(String(50), nullable=True)
     criado_em      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    atualizado_por = Column(String(100), nullable=True)
+
+
+class LlmPricing(Base):
+    """Tabela de preço/1M tokens por provider+modelo (migration 008),
+    editável via `/hub/llm-custo` — fonte de verdade que substitui
+    `pricing.py::_PRECOS` hardcoded (que passa a ser só seed/fallback)."""
+    __tablename__ = "llm_pricing"
+    __table_args__ = (UniqueConstraint("provider", "modelo", name="uq_llm_pricing_provider_modelo"),)
+
+    id             = Column(Integer, primary_key=True)
+    provider       = Column(String(20), nullable=False)
+    modelo         = Column(String(50), nullable=False)
+    input_por_1m   = Column(Numeric(10, 4), nullable=False)
+    output_por_1m  = Column(Numeric(10, 4), nullable=False)
+    cache_por_1m   = Column(Numeric(10, 4), nullable=True)
     atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     atualizado_por = Column(String(100), nullable=True)
 

@@ -250,6 +250,12 @@ async def processar(
             # "Falha ao localizar worker crud_confirm no registry". Rota e
             # hint têm que mudar juntos.
             from src.router.supervisor import _dag_hint_para_rota
+            from src.infrastructure.observability.metrics import PrometheusMetrics
+            PrometheusMetrics().increment_router_override(
+                orchestrator_action=orch_decision.action,
+                supervisor_rota=decision.rota,
+                mudou=(decision.rota != decision_rota),
+            )
             decision.rota = decision_rota
             decision.dag_hint = _dag_hint_para_rota(decision_rota, message)
 
@@ -578,6 +584,8 @@ async def _despachar_workers(plan) -> None:
             logger.info("📤 [DISPATCHER] Canvas Chain disparado para worker=%s plan=%s",
                         other_step["worker"], plan.plan_id[:8])
         else:
+            from src.infrastructure.observability.metrics import PrometheusMetrics
+            PrometheusMetrics().increment_planner_worker_not_found(other_step["worker"])
             logger.error("❌ [DISPATCHER] Falha ao localizar worker %s no registry", other_step["worker"])
     else:
         logger.error("❌ [DISPATCHER] Plano inválido ou vazio para plan=%s", plan.plan_id)

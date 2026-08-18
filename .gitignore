@@ -1,8 +1,11 @@
 # Segurança (NUNCA REMOVA ISSO)
 .env
 .env.local
-!.env.example
 .env.*
+# Ordem importa: a negação precisa vir DEPOIS de ".env.*" pra valer — regra
+# anterior (!.env.example antes de .env.*) nunca funcionou de verdade,
+# achado real ao tentar rastrear o .env.example criado nesta sessão.
+!.env.example
 .venv
 
 # Sessões do WhatsApp e Dados do Banco

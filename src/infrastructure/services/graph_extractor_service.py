@@ -57,21 +57,14 @@ class GraphExtractorService:
 
     async def _extrair(self, text: str) -> GraphResult:
         try:
-            from src.infrastructure.settings import settings
-            import google.genai as genai
-            from google.genai import types
+            from src.infrastructure.adapters.llm_factory import get_llm_provider
 
-            client = genai.Client(api_key=settings.GEMINI_API_KEY)
-            response = await client.aio.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=_PROMPT.format(texto=text[:3000]),
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    max_output_tokens=800,
-                    response_mime_type="application/json",
-                ),
+            provider = get_llm_provider(rota="extracao_grafo")
+            resp = await provider.gerar_resposta_async(
+                prompt=_PROMPT.format(texto=text[:3000]),
+                temperatura=0.0, max_tokens=800,
             )
-            data = json.loads(response.text or "{}")
+            data = json.loads(resp.conteudo or "{}")
             return GraphResult(
                 ok=True,
                 entities=data.get("entities", []),
