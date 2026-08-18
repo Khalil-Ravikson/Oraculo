@@ -1793,3 +1793,144 @@ nessa ordem de prioridade:
 - Migrar os 6 call sites restantes pro `llm_factory` (ver §13.6 item 3).
 - RBAC testado na `main`.
 - Unir telemetria multimodal (STT/TTS/Vision) com `metricas_llm`.
+
+## 14. Sessão 2026-08-17 — Fases 1-4 do plano anterior implementadas, aplicadas no stack real, e `/hub/chat` reescrito pro pipeline de produção
+
+Continuação direta do §13.9 — usuário pediu as 4 fases de uma vez ("bora
+pra todas"). Diferente das sessões anteriores, desta vez o trabalho foi
+aplicado e testado contra o stack Docker real do usuário (não só código +
+`pytest` local), o que expôs mais bugs reais — mesmo padrão do §13.8.
+
+### 14.1 Fase 1 — `/hub/config` de verdade
+- `templates/hub/config.html`: removida a seção Langfuse (card externo +
+  grupo de API keys — nunca foi instalado de fato, confirmado em
+  `pesquisa_arquitetura_producao.md` linha 66). Adicionados grupos
+  DeepSeek (`DEEPSEEK_API_KEY`/`DEEPSEEK_MODEL`) e Groq
+  (`GROQ_API_KEY`/`GROQ_MODEL`, campo livre — modelo Groq "oficial" segue
+  em aberto, não travar na UI).
+- `src/api/routers/admin/admin_api.py`: implementado `POST
+  /api/admin/system/env` (não existia — era o 404 do §13.9), com allowlist
+  explícita de chaves e audit log só com a lista de chaves alteradas
+  (nunca os valores). `GET /api/admin/system` passou a devolver os campos
+  não sensíveis que o JS de `loadCurrentConfig()` já esperava e nunca
+  recebia (`gemini_model`, `deepseek_model`, `groq_model`,
+  `embedding_provider`, `evolution_url`, `evolution_instance`,
+  `redis_url`, `dev_mode`).
+
+### 14.2 Fase 2 — Pricing editável sem rebuild
+- Migration `008_llm_pricing.py`: tabela `llm_pricing` (provider, modelo,
+  input/output/cache por 1M, auditoria), seed com os mesmos valores que já
+  estavam hardcoded em `pricing.py::_PRECOS`.
+- `LlmPricing` (models.py) + `LlmPricingRepository` (novo), mesmo padrão
+  de `AgenteCatalogo`/`AgentCatalogRepository`.
+- `pricing.py::calcular_custo_usd` passou a checar primeiro uma chave
+  Redis `pricing:{provider}:{modelo}` (write-through, sem TTL — mesmo
+  padrão do override de LLM por agente em `llm_factory.py`), caindo no
+  dicionário hardcoded só como fallback.
+- Endpoints `GET/POST /hub/llm-pricing(/data)` em `hub.py` (Postgres +
+  write-through Redis) e tabela editável inline em `/hub/llm-custo`.
+
+### 14.3 Fase 3 — Telemetria detalhada
+- `observability_repository.py::get_metricas_por_provider` passou a trazer
+  `tokens_entrada`/`tokens_saida`/`cache_hit_pct` por provider.
+- `/hub/llm-custo`: colunas novas na tabela por provider + aviso explicando
+  os dois caches (semântico, Redis, já mede `cache_hit_pct`; de prompt do
+  provider, tipo o `cache_por_1m` do DeepSeek, **não implementado em
+  nenhum adapter ainda**).
+
+### 14.4 Fase 4 — migração de call sites (escopo revisado)
+Dos "6 call sites restantes" do §13.6 item 3, só 5 são geração de texto de
+verdade (`genai.Client(...).generate_content`) e migraram pra
+`get_llm_provider()`: `beat_nightly_memory.py`, `calendar_llm_adapter.py`
+(síncrono, usa `gerar_resposta_sincrono`), `graph_extractor_service.py`,
+`query_transform.py`, `memory_summarizer.py` — cada um com uma `rota` nova
+própria, visível em "custo por rota" no hub. O 6º,
+`gemini_stt_provider.py`, é transcrição de áudio (Gemini multimodal) — não
+se encaixa em `ILLMProvider` (DeepSeek/Groq não fazem STT), fica de fora
+deliberadamente. RBAC-na-`main` e unificação de telemetria de voz ficaram
+fora do escopo (dependem de decisão própria, não são só código).
+
+### 14.5 Achado real #1 — `.env` nunca existia dentro do container
+Ao testar o `POST /system/env` contra o Docker real, deu 500:
+`PermissionError` tentando criar um tempfile em `/app`. Investigando:
+`docker-compose.yml` só tinha `env_file: .env` (âncora `x-app-env`) — isso
+injeta as variáveis como env vars do processo no boot, mas **não monta o
+arquivo `.env` dentro do container**. `/app/.env` simplesmente não
+existia. Fix: adicionado `- ./.env:/app/.env` nos volumes do serviço `api`
+(`docker-compose.yml`), com container recriado (`docker compose up -d
+api`, não só restart — mudança de volume exige recriar).
+
+### 14.6 Achado real #2 — mismatch de UID host↔container
+Com o `.env` montado, o erro mudou pra `PermissionError` de verdade: o
+arquivo é do host (`khachy`, uid 1000), o processo dentro do container
+roda como `oraculo` (uid 1001, `Dockerfile` linha 46-47) — sem grupo em
+comum. `chgrp`/`chmod` exigem root, que eu não tenho no host. Usuário
+rodou `sudo chgrp 1001 .env && chmod 664 .env` — meio caminho andado.
+
+### 14.7 Achado real #3 — `dotenv.set_key` precisa de permissão no DIRETÓRIO, não no arquivo
+Mesmo com o `.env` liberado pro grupo do container, o 500 continuou.
+Causa: `python-dotenv`'s `set_key()` faz escrita atômica (cria um
+tempfile no MESMO DIRETÓRIO do alvo, depois renomeia por cima) — ou seja,
+precisa de permissão de escrita em `/app` (o diretório), não só no
+`.env`. `/app` é `root:root` (nunca veio de um `COPY --chown`, só das
+subpastas). Fix: troquei `set_key()` por uma escrita in-place
+(`_gravar_env_inplace`, `admin_api.py`) que abre o MESMO arquivo com
+`open(path, "w")` — só precisa de permissão no arquivo, não no diretório.
+
+### 14.8 Achado real #4 — corrupção por falta de newline final
+Primeiro teste da escrita in-place corrompeu o `.env`: a última linha do
+arquivo (`GitHub_Api_Key=...`) não tinha `\n` no final, e meu código
+apendava a chave nova (`DEEPSEEK_MODEL=...`) direto na lista de linhas sem
+garantir separador — resultado: as duas chaves grudaram numa linha só
+(`...oumDEEPSEEK_MODEL="deepseek-chat"`), inutilizando ambas. Corrigido o
+`.env` manualmente e o código (`_gravar_env_inplace` agora garante `\n` no
+final da última linha existente antes de apensar chaves novas).
+
+### 14.9 Achado real #5 — minha própria edição resetou a permissão do §14.6
+Ao corrigir a corrupção do §14.8 com a ferramenta de edição, o arquivo foi
+reescrito por inteiro — o que troca o inode e reseta dono/grupo pro
+padrão do processo que escreveu (`khachy:khachy` de novo, perdendo o
+`chgrp 1001` do usuário). Pendência registrada: usuário precisa rodar
+`sudo chgrp 1001 .env && chmod 664 .env` **de novo** antes do próximo
+teste do `POST /system/env`. Lição pra próxima sessão: qualquer
+reescrita-inteira do `.env` (editor externo, `git checkout`, etc.) derruba
+essa permissão — só a escrita in-place do próprio endpoint (§14.7) não
+mexe no dono/grupo, porque usa o mesmo inode.
+
+### 14.10 `/hub/chat` estava desatualizado — reescrito pro pipeline real
+Ao tentar validar a Fase 4 sem WhatsApp (usuário sem celular), tentei
+indicar `/hub/chat` como forma de testar — usuário lembrou que esse
+simulador está desatualizado. Investigando, confirmei: `chat_stream()`
+(`hub.py`) reimplementava manualmente uma orquestração PRÓPRIA e ANTIGA
+(`router.supervisor.rotear()` + `application.chain.planner.criar_plano()`
++ `application.runtime.dispatcher._despachar_workers()` + uma máquina de
+estados HITL própria em Redis pra SIGAA/mídia), enquanto o WhatsApp real
+(`process_message_task.py` linha 405) já usa incondicionalmente
+`dispatcher_langgraph.processar()` (LangGraph, `AsyncRedisSaver`, resume
+de `interrupt()` automático, delega SIGAA/comandos/GREETING pro
+`dispatcher.py` original que já tem seu próprio HITL de SIGAA embutido).
+Ou seja: dois pipelines paralelos, um deles morto/divergente.
+
+Fix: reescrevi `chat_stream()` inteiro (~450 linhas → ~65) pra chamar
+`dispatcher_langgraph.processar()` direto, igual o WhatsApp faz — mesma
+`user_context`, mesma persistência de memória (`mem_svc.persistir_turno`),
+mesmos eventos SSE que o frontend (`static/js/chat-debugger.js`, que é
+agnóstico ao número/nome dos steps) já consumia. Testado ao vivo via curl
+com cookie de admin: `"Oi"` → `GREETING` real; pergunta de calendário →
+`CALENDARIO` real (RAG + LLM, ~25s); confirmado em `metricas_llm` que a
+rota `query_transform` (Fase 4) foi exercitada de verdade pelo pipeline de
+produção. Efeito colateral bom: funis de ticket/CRUD agora resumem entre
+mensagens no simulador (checkpointer do LangGraph), sem nenhum código
+extra.
+
+### 14.11 Estado no fim da sessão
+- Fases 1-4 implementadas, migration 008 aplicada no Postgres real
+  (8 linhas seedadas, confirmado via `psql`), container `oraculo_api`
+  recriado com o `.env` montado e rodando código novo, `pytest tests/unit`
+  com as mesmas 14 falhas pré-existentes (nada novo quebrado — confirmado
+  rodando os mesmos testes no `git stash` antes das mudanças).
+- `/hub/chat` reescrito e validado contra o pipeline real.
+- **Pendente pra abrir a próxima conversa**: usuário precisa rodar `sudo
+  chgrp 1001 .env && chmod 664 .env` de novo (§14.9) antes de eu poder
+  confirmar que `POST /api/admin/system/env` grava de ponta a ponta sem
+  corromper o arquivo.

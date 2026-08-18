@@ -17,9 +17,7 @@ async def summarize(session_id: str) -> dict:
     """Resume o histórico quando excede o budget de tokens."""
     try:
         from src.infrastructure.redis_client import get_redis_text
-        from src.infrastructure.settings import settings
-        import google.genai as genai
-        from google.genai import types
+        from src.infrastructure.adapters.llm_factory import get_llm_provider
 
         r   = get_redis_text()
         raw = r.lrange(f"chat:{session_id}", 0, -1)
@@ -33,13 +31,12 @@ async def summarize(session_id: str) -> dict:
             turns.append(f"{p}: {d['content'][:200]}")
         conversa = "\n".join(turns)
 
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        resp   = await client.aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"Resuma esta conversa em 3-5 bullet points preservando fatos importantes:\n{conversa}",
-            config=types.GenerateContentConfig(temperature=0.1, max_output_tokens=200),
+        provider = get_llm_provider(rota="memoria_resumo")
+        resp = await provider.gerar_resposta_async(
+            prompt=f"Resuma esta conversa em 3-5 bullet points preservando fatos importantes:\n{conversa}",
+            temperatura=0.1, max_tokens=200,
         )
-        summary = (resp.text or "").strip()
+        summary = (resp.conteudo or "").strip()
 
         # Substitui histórico pelo resumo
         summary_entry = json.dumps(

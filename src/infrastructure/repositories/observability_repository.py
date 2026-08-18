@@ -154,6 +154,12 @@ class ObservabilityRepository:
                         COALESCE(provider, 'desconhecido') AS provider,
                         COUNT(*)                            AS total,
                         SUM(tokens_total)                  AS tokens_total,
+                        SUM(tokens_entrada)                AS tokens_entrada,
+                        SUM(tokens_saida)                  AS tokens_saida,
+                        ROUND(
+                          100.0 * SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0),
+                          1
+                        )                                  AS cache_hit_pct,
                         ROUND(SUM(custo_usd)::numeric, 6)  AS custo_usd,
                         ROUND(AVG(latencia_ms))             AS latencia_media_ms
                     FROM metricas_llm

@@ -72,6 +72,20 @@
   .badge.deepseek { color: var(--green); border-color: var(--green); }
   .badge.groq     { color: var(--accent); border-color: var(--accent); }
 
+  .notice.cache-explainer { border-left-color: var(--accent); }
+
+  .price-input {
+    width: 90px; background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 8px; font-family: var(--mono); font-size: 11px;
+    border-radius: 5px; outline: none;
+  }
+  .price-input:focus { border-color: var(--accent); }
+  .price-save-btn {
+    font-family: var(--mono); font-size: 10px; padding: 5px 10px; border-radius: 5px;
+    cursor: pointer; border: 1px solid var(--green); background: rgba(46,184,114,.1); color: var(--green);
+  }
+  .price-save-btn:hover { background: rgba(46,184,114,.2); }
+
   #toast {
     position: fixed; bottom: 24px; right: 24px;
     background: var(--surface); border: 1px solid var(--accent);
@@ -103,6 +117,17 @@
     não existia antes.
   </div>
 
+  <div class="notice cache-explainer">
+    🗂️ <strong>Dois caches diferentes, não confundir:</strong> o
+    <strong>cache semântico</strong> (Redis, similaridade de embeddings
+    &gt; 0.92) evita a chamada de LLM inteira — é o que "Cache hit %"
+    mede abaixo. Já o <strong>cache de prompt do provider</strong>
+    (ex.: coluna "Cache" na tabela de preços, o desconto de $0.02/1M do
+    DeepSeek) é um desconto de preço quando o prefixo do prompt repete —
+    <strong>não está implementado em nenhum adapter ainda</strong>, é um
+    mecanismo totalmente separado do cache semântico.
+  </div>
+
   <div class="provider-switch">
     <div>
       <div class="stat-label">Provider global ativo agora</div>
@@ -125,14 +150,26 @@
 
   <div class="section-label">// custo por provider</div>
   <table id="tbl-provider">
-    <thead><tr><th>Provider</th><th>Chamadas</th><th>Tokens</th><th>Custo (USD)</th><th>Latência média (ms)</th></tr></thead>
-    <tbody><tr><td colspan="5" style="color:var(--muted)">Carregando...</td></tr></tbody>
+    <thead><tr>
+      <th>Provider</th><th>Chamadas</th><th>Tokens in</th><th>Tokens out</th>
+      <th>Cache hit %</th><th>Custo (USD)</th><th>Latência média (ms)</th>
+    </tr></thead>
+    <tbody><tr><td colspan="7" style="color:var(--muted)">Carregando...</td></tr></tbody>
   </table>
 
   <div class="section-label">// custo por rota</div>
   <table id="tbl-rota">
     <thead><tr><th>Rota</th><th>Chamadas</th><th>Custo (USD)</th><th>CRAG médio</th><th>Latência média (ms)</th></tr></thead>
     <tbody><tr><td colspan="5" style="color:var(--muted)">Carregando...</td></tr></tbody>
+  </table>
+
+  <div class="section-label">// tabela de preços (editável, sem rebuild)</div>
+  <table id="tbl-pricing">
+    <thead><tr>
+      <th>Provider</th><th>Modelo</th><th>Input $/1M</th><th>Output $/1M</th>
+      <th>Cache $/1M</th><th></th>
+    </tr></thead>
+    <tbody><tr><td colspan="6" style="color:var(--muted)">Carregando...</td></tr></tbody>
   </table>
 </main>
 
@@ -172,11 +209,13 @@ async function carregar() {
           <tr>
             <td><span class="badge ${p.provider}">${p.provider}</span></td>
             <td class="mono">${p.total}</td>
-            <td class="mono">${p.tokens_total ?? 0}</td>
+            <td class="mono">${p.tokens_entrada ?? 0}</td>
+            <td class="mono">${p.tokens_saida ?? 0}</td>
+            <td class="mono">${p.cache_hit_pct ?? 0}%</td>
             <td class="mono">$${p.custo_usd ?? 0}</td>
             <td class="mono">${p.latencia_media_ms ?? '—'}</td>
           </tr>`).join('')
-      : `<tr><td colspan="5" style="color:var(--muted)">Sem chamadas registradas ainda nas últimas 24h.</td></tr>`;
+      : `<tr><td colspan="7" style="color:var(--muted)">Sem chamadas registradas ainda nas últimas 24h.</td></tr>`;
 
     const porRota = d.por_rota || [];
     document.querySelector('#tbl-rota tbody').innerHTML = porRota.length
@@ -191,6 +230,49 @@ async function carregar() {
       : `<tr><td colspan="5" style="color:var(--muted)">Sem chamadas registradas ainda nas últimas 24h.</td></tr>`;
   } catch (e) {
     toast('Erro ao carregar telemetria: ' + e.message, 'err');
+  }
+}
+
+async function carregarPrecos() {
+  try {
+    const r = await fetch('/hub/llm-pricing/data');
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'err'); return; }
+
+    const precos = d.precos || [];
+    document.querySelector('#tbl-pricing tbody').innerHTML = precos.length
+      ? precos.map((p, i) => `
+          <tr>
+            <td><span class="badge ${p.provider}">${p.provider}</span></td>
+            <td class="mono">${p.modelo}</td>
+            <td><input class="price-input" type="number" step="0.0001" id="price-in-${i}" value="${p.input_por_1m}"></td>
+            <td><input class="price-input" type="number" step="0.0001" id="price-out-${i}" value="${p.output_por_1m}"></td>
+            <td><input class="price-input" type="number" step="0.0001" id="price-cache-${i}" value="${p.cache_por_1m ?? ''}" placeholder="—"></td>
+            <td><button class="price-save-btn" onclick="salvarPreco(${i}, '${p.provider}', '${p.modelo}')">SALVAR</button></td>
+          </tr>`).join('')
+      : `<tr><td colspan="6" style="color:var(--muted)">Nenhum preço cadastrado.</td></tr>`;
+  } catch (e) {
+    toast('Erro ao carregar preços: ' + e.message, 'err');
+  }
+}
+
+async function salvarPreco(i, provider, modelo) {
+  const input_por_1m  = parseFloat(document.getElementById(`price-in-${i}`).value);
+  const output_por_1m = parseFloat(document.getElementById(`price-out-${i}`).value);
+  const cacheRaw       = document.getElementById(`price-cache-${i}`).value;
+  const cache_por_1m   = cacheRaw === '' ? null : parseFloat(cacheRaw);
+
+  try {
+    const r = await fetch('/hub/llm-pricing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, modelo, input_por_1m, output_por_1m, cache_por_1m }),
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'err'); return; }
+    toast(`Preço de ${provider}/${modelo} atualizado — já vale pra próxima chamada.`);
+  } catch (e) {
+    toast('Erro: ' + e.message, 'err');
   }
 }
 
@@ -212,5 +294,6 @@ async function trocarProvider() {
 }
 
 carregar();
+carregarPrecos();
 </script>
 {% endblock %}

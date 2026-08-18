@@ -28,7 +28,11 @@ perder o dado quando isso for implementado.
 """
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -67,16 +71,52 @@ _PRECOS: dict[str, dict[str, PrecoModelo]] = {
 }
 
 
+def chave_redis_preco(provider: str, modelo: str) -> str:
+    """Chave do cache Redis (write-through, sem TTL) que espelha
+    `llm_pricing` (Postgres, migration 008) — mesmo padrão de
+    `llm_factory._override_do_agente`. Usada tanto na leitura (aqui) quanto
+    na escrita (endpoint `/hub/llm-pricing` em `hub.py`)."""
+    return f"pricing:{provider}:{modelo}"
+
+
+def _preco_do_cache(provider: str, modelo: str) -> PrecoModelo | None:
+    """Lê o preço editável via hub no Redis (fonte de verdade é o Postgres
+    `llm_pricing`; o Redis é só o espelho de leitura rápida do caminho
+    quente, igual ao override de provider por agente). Sem exceção nunca
+    propagada — telemetria não pode derrubar uma resposta real."""
+    try:
+        from src.infrastructure.redis_client import get_redis_text
+        raw = get_redis_text().get(chave_redis_preco(provider, modelo))
+        if not raw:
+            return None
+        dados = json.loads(raw if isinstance(raw, str) else raw.decode())
+        return PrecoModelo(
+            input_por_1m=dados["input_por_1m"],
+            output_por_1m=dados["output_por_1m"],
+            cache_por_1m=dados.get("cache_por_1m"),
+        )
+    except Exception as exc:
+        logger.warning("⚠️ [PRICING] Falha ao ler cache Redis de preço (%s/%s): %s", provider, modelo, exc)
+        return None
+
+
 def calcular_custo_usd(provider: str, modelo: str, tokens_in: int, tokens_out: int) -> float:
     """Calcula custo real em USD para uma chamada, dado provider+modelo reais.
+
+    Checa primeiro o preço editável via `/hub/llm-custo` (Postgres
+    `llm_pricing`, espelhado no Redis sem TTL — `_preco_do_cache`); sem
+    cache, cai na tabela Python `_PRECOS` hardcoded abaixo.
 
     Nunca levanta exceção — provider/modelo desconhecidos caem no preço
     "default" do provider (ou 0.0 se o provider nem existir na tabela),
     porque isto roda no caminho de telemetria: uma tabela de preço
     desatualizada não pode derrubar uma resposta real ao usuário.
     """
-    tabela = _PRECOS.get(provider or "gemini", {})
-    preco = tabela.get(modelo) or tabela.get("default")
+    provider = provider or "gemini"
+    preco = _preco_do_cache(provider, modelo)
+    if preco is None:
+        tabela = _PRECOS.get(provider, {})
+        preco = tabela.get(modelo) or tabela.get("default")
     if preco is None:
         return 0.0
     return (tokens_in / 1_000_000 * preco.input_por_1m) + (tokens_out / 1_000_000 * preco.output_por_1m)

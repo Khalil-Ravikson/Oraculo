@@ -221,6 +221,13 @@ services:
       - ./migrations:/app/migrations
       - ./templates:/app/templates
       - ./static:/app/static
+      # Bind-mount do .env real: sem isso, `env_file:` só injeta as
+      # variáveis como env vars no boot — o arquivo em si não existe dentro
+      # do container, então `POST /api/admin/system/env` (Fase 1,
+      # notas.md §13.9) não tem onde escrever. Com o mount, o processo
+      # ganha o mesmo acesso de leitura/escrita ao `.env` que a UI de
+      # "Salvar Todas" já pressupõe.
+      - ./.env:/app/.env
     networks:
       - oraculo_net
     depends_on:
