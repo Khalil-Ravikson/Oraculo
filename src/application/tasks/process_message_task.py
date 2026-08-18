@@ -465,7 +465,7 @@ async def _handle_message(**kwargs) -> None:
         return
 
 
-_TTS_TIMEOUT_S = 45.0  # Celery pickup (queue=media) + cold-load do Kokoro (>15s em container
+_TTS_TIMEOUT_S = 1000.0  # Celery pickup (queue=media) + cold-load do Kokoro (>15s em container
                        # com CPU mais fraca que dev local, confirmado real: 1º pedido de áudio
                        # após subir o worker estourou 25s — ver notas.md seção 12) + polling
 
