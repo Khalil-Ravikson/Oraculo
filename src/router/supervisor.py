@@ -119,6 +119,17 @@ _RE_TICKET_ABERTURA = re.compile(
     r'suporte\s+t[ée]cnico|problema\s+(no|com)\s+.*sistema)',
     re.I
 )
+# Layer 0 (fusão Router+Orquestrador, ver notas.md §5.1): heurística barata pra
+# "e aí, já saiu?" tipo de pergunta — sem LLM, mas só dispara quando existe uma
+# tarefa recente (`task_history.last_worker`) pra não colidir com pergunta nova.
+# Preserva a precedência que o antigo orchestrate() tinha (contexto de memória
+# vencendo ANTES do regex de conteúdo L1) sem pagar chamada LLM pra isso.
+_RE_CHECK_STATUS = re.compile(
+    r'\b(j[áa]\s+(saiu|saíram|ficou|ficaram|terminou|terminaram|deu)|status|'
+    r'andamento|resultado\s+d[ao]|como\s+ficou|deu\s+certo|conseguiu|'
+    r'aquilo\s+que\s+(eu\s+)?pedi)\b',
+    re.I,
+)
 
 
 def _regex_rapido(query: str) -> str | None:
@@ -155,6 +166,27 @@ async def rotear(
 ) -> RouterDecision:
     t0 = time.monotonic()
     ctx = user_context or {}
+
+    # ── Layer 0: Heurística de CHECK_STATUS (barata, sem LLM) ─────────
+    # Roda ANTES do L1 pra não perder pra um regex de conteúdo (ex: "notas"
+    # bate em SIGAA) quando a pergunta é claramente um follow-up de tarefa
+    # recente — mesma precedência que o antigo orchestrate() tinha, achado
+    # numa revisão crítica desta fusão (ver notas.md §5.1).
+    if session_id:
+        try:
+            from src.memory.services.redis_memory_service import get_cognitive_memory
+            task_history = await get_cognitive_memory().get_task_history(session_id)
+        except Exception:
+            task_history = {}
+        if task_history.get("last_worker") and _RE_CHECK_STATUS.search(query):
+            ms = int((time.monotonic() - t0) * 1000)
+            _LATENCY.observe(ms)
+            _CACHE_HIT.labels(layer="check_status_heuristic").inc()
+            return RouterDecision(
+                rota="CHECK_STATUS", confianca=0.85, motivo="layer_0_status_heuristic",
+                cache_hit=True, cache_layer="regex", latencia_ms=ms,
+                dag_hint=_dag_hint_para_rota("CHECK_STATUS", query),
+            )
 
     # ── Layer 1: Fast-path (Hardcoded Regex) ─────────
     rota_rapida = _regex_rapido(query)
@@ -314,5 +346,8 @@ def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) 
         "GREETING":    {"steps": ["greeting"],                             "k": 0},
         "GERAL":       {"steps": ["rag_search"], "doc_type": "geral",      "k": 6},
         "SIGAA":       {"steps": ["sigaa_biblioteca"],                     "k": 0},
+        # dispatcher.py intercepta CHECK_STATUS antes do Planner (responde a
+        # partir de task_history direto) — nunca chega aqui de verdade.
+        "CHECK_STATUS": {"steps": [],                                      "k": 0},
     }
     return _HINTS.get(rota, _HINTS["GERAL"])

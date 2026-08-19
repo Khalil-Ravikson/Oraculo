@@ -176,88 +176,49 @@ async def processar(
         if crud_result is not None:
             return crud_result
 
-        # ── 0b. Fast Path: comandos explícitos ───────────────────────────────
-        # ! @ $ → vai direto pro router semântico existente (sem gastar tokens no LLM)
-        # linguagem natural → Orchestrator decide a ação
-        is_command = message.startswith(("!", "@", "$"))
-
-        if not is_command:
-            from src.router.llm_fallback import orchestrate
-            from src.memory.services.redis_memory_service import get_cognitive_memory
-
-            mem = get_cognitive_memory()
-            op_mem = await mem.get_operational(session_id)
-
-            orch_decision = await orchestrate(
-                message=message,
-                history_summary=await mem.format_history(session_id),
-                task_history=await mem.get_task_history(session_id),
-                operational_memory=op_mem,
-                user_context=user_context,
-                session_id=session_id,
-            )
-
-            logger.info(f"⏱️ Tempo Orquestrador: {time.monotonic() - t0}s")
-
-            # Atualiza operational memory
-            await mem.set_operational(session_id, {
-                "last_action": orch_decision.action,
-                "route_hint": orch_decision.route_hint,
-                "status": "routing",
-            })
-
-            # check_status → responde com o histórico de task sem acionar RAG
-            if orch_decision.action == "check_status":
-                th = await mem.get_task_history(session_id)
-                answer = (
-                    f"Última tarefa: *{th.get('last_worker', '?')}*\n"
-                    f"Resultado: {th.get('last_result', 'Nenhuma tarefa anterior encontrada.')}"
-                ) if th else "Nenhuma tarefa anterior registrada nesta sessão."
-                ms = int((time.monotonic() - t0) * 1000)
-                return OSResult(answer=answer, plan_id="check_status",
-                                rota="GERAL", cache_hit=True, total_ms=ms, status="ok")
-
-            # reply_direct → greeting inline
-            if orch_decision.action == "reply_direct":
-                decision_rota = "GREETING"
-            # call_sigaa → força rota SIGAA
-            elif orch_decision.action == "call_sigaa":
-                decision_rota = "SIGAA"
-            elif orch_decision.action == "call_media":
-                decision_rota = "MEDIA_DOWNLOAD"
-            elif orch_decision.action == "call_ticket":
-                decision_rota = "TICKET_ABERTURA"
-            elif orch_decision.action == "call_crud_update":
-                decision_rota = "CRUD"
-            else:
-                # call_rag → usa route_hint do orquestrador
-                decision_rota = orch_decision.route_hint or "GERAL"
-        else:
-            decision_rota = None  # deixa o Supervisor decidir
-
-        # ── 1. Supervisor (só para comandos ou quando o Orchestrator pediu RAG) ──
+        # ── 1. Supervisor — ÚNICA chamada de roteamento ───────────────────────
+        # Fusão Router+Orquestrador (Fase 3, notas.md §5.1): antes disso havia
+        # um Orquestrador (LLM, sempre rodava) decidindo `action`/`route_hint`
+        # e SEMPRE sobrescrevendo a classificação do Supervisor por baixo —
+        # até 2 chamadas LLM pagas só pra decidir a rota, com o resultado do
+        # Supervisor descartado sempre que havia divergência (inclusive num
+        # bug documentado: fallback de exceção do Orquestrador, indistinguível
+        # de decisão real, apagando classificações corretas). `rotear()` agora
+        # absorve isso — CHECK_STATUS/MEDIA_DOWNLOAD entram no mesmo espaço de
+        # rotas que CALENDARIO/EDITAL/etc. (ver router/llm_fallback.py).
         from src.router.supervisor import rotear
         decision = await rotear(message, session_id, user_context)
 
-        # Orchestrator tem prioridade sobre o Supervisor para linguagem natural
-        if not is_command and decision_rota:
-            # BUG corrigido: antes só `decision.rota` era trocado, e o
-            # `dag_hint` ficava com o valor calculado para a rota ORIGINAL do
-            # Supervisor (ex: rota virava "GERAL" mas o hint ainda dizia
-            # {"steps": ["ticket_abertura"]}). O Planner (Gemini Pro) recebia
-            # rota e hint contraditórios e "resolvia" sozinho escolhendo um
-            # worker da sua whitelist que nem existe de verdade — daí o erro
-            # "Falha ao localizar worker crud_confirm no registry". Rota e
-            # hint têm que mudar juntos.
-            from src.router.supervisor import _dag_hint_para_rota
-            from src.infrastructure.observability.metrics import PrometheusMetrics
-            PrometheusMetrics().increment_router_override(
-                orchestrator_action=orch_decision.action,
-                supervisor_rota=decision.rota,
-                mudou=(decision.rota != decision_rota),
-            )
-            decision.rota = decision_rota
-            decision.dag_hint = _dag_hint_para_rota(decision_rota, message)
+        logger.info(f"⏱️ Tempo Router: {time.monotonic() - t0}s")
+
+        # Atualiza operational memory (mesma frequência de antes: toda mensagem
+        # não-comando; agora também comandos, já que `is_command` não existe
+        # mais como distinção de roteamento — ver notas.md §5.1). Bookkeeping
+        # não-crítico: não deixa um soluço de Redis derrubar o pipeline inteiro
+        # (antes, um `!comando` nunca chegava a tocar memória; hoje toca, mas
+        # sem travar nada se falhar).
+        from src.memory.services.redis_memory_service import get_cognitive_memory
+        mem = get_cognitive_memory()
+        try:
+            await mem.set_operational(session_id, {
+                "last_action": decision.rota,
+                "route_hint": decision.rota,
+                "status": "routing",
+            })
+        except Exception as e:
+            logger.debug("Falha ao gravar memória operacional (ignorado): %s", e)
+
+        # CHECK_STATUS → responde com o histórico de task sem acionar RAG
+        # (mesma posição relativa de antes: antes de circuit-breaker/cache)
+        if decision.rota == "CHECK_STATUS":
+            th = await mem.get_task_history(session_id)
+            answer = (
+                f"Última tarefa: *{th.get('last_worker', '?')}*\n"
+                f"Resultado: {th.get('last_result', 'Nenhuma tarefa anterior encontrada.')}"
+            ) if th else "Nenhuma tarefa anterior registrada nesta sessão."
+            ms = int((time.monotonic() - t0) * 1000)
+            return OSResult(answer=answer, plan_id="check_status",
+                            rota="CHECK_STATUS", cache_hit=True, total_ms=ms, status="ok")
 
         # ── Circuit-breaker por agente (liga/desliga em /hub/agents) ──────────
         from src.capabilities.persistence.agent_config import is_agent_enabled
@@ -292,26 +253,24 @@ async def processar(
                 )
 
         # 1b. Semantic Cache de Respostas (Cosine Similarity > 0.92)
-        if decision_rota or decision.rota:
-            rota_efetiva = decision_rota or decision.rota
-            if rota_efetiva not in ("SIGAA", "MEDIA_DOWNLOAD", "GREETING"):
-                from src.infrastructure.semantic_cache import SemanticCache
-                sem_cache = SemanticCache(threshold=0.92)
+        if decision.rota not in ("SIGAA", "MEDIA_DOWNLOAD", "GREETING"):
+            from src.infrastructure.semantic_cache import SemanticCache
+            sem_cache = SemanticCache(threshold=0.92)
 
-                cached_response = await sem_cache.get(query=message, rota=rota_efetiva)
-                if cached_response:
-                    _OS_REQUESTS.labels(status="cache_hit").inc()
-                    ms = int((time.monotonic() - t0) * 1000)
-                    _OS_LATENCY.observe(ms)
-                    return OSResult(
-                        answer=cached_response.get("answer", ""),
-                        plan_id="sem_cache",
-                        rota=rota_efetiva,
-                        cache_hit=True,
-                        total_ms=ms,
-                        status="ok",
-                        action_buttons=cached_response.get("action_buttons", [])
-                    )
+            cached_response = await sem_cache.get(query=message, rota=decision.rota)
+            if cached_response:
+                _OS_REQUESTS.labels(status="cache_hit").inc()
+                ms = int((time.monotonic() - t0) * 1000)
+                _OS_LATENCY.observe(ms)
+                return OSResult(
+                    answer=cached_response.get("answer", ""),
+                    plan_id="sem_cache",
+                    rota=decision.rota,
+                    cache_hit=True,
+                    total_ms=ms,
+                    status="ok",
+                    action_buttons=cached_response.get("action_buttons", [])
+                )
 
         # ── Fast-Path GREETING ────────────────────────────────────────────────
         if decision.rota == "GREETING":

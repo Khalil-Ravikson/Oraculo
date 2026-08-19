@@ -13,7 +13,8 @@ from dataclasses import dataclass
 
 # ── Rotas válidas ──────────────────────────────────────────────────────────────
 ROTAS_VALIDAS = frozenset({
-    "CALENDARIO", "EDITAL", "CONTATOS", "WIKI", "CRUD", "TICKET_ABERTURA", "GREETING", "GERAL", "MEDIA_DOWNLOAD", "SIGAA"
+    "CALENDARIO", "EDITAL", "CONTATOS", "WIKI", "CRUD", "TICKET_ABERTURA", "GREETING", "GERAL", "MEDIA_DOWNLOAD", "SIGAA",
+    "CHECK_STATUS",
 })
 
 # ── Workers Celery válidos para o Planner ──────────────────────────────────────

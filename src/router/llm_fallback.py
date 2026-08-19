@@ -13,15 +13,15 @@ por application/chain/cognitive_os.py, decomposto na Fase 3):
      (ex-`application/routing/llm_orchestrator.py`, hoje chamado
      "terceiro cérebro" por rodar em paralelo ao classificador de rota).
 
-NOTA DE ESCOPO (Fase 2): os dois fallbacks foram apenas RELOCADOS para este
-módulo, preservando comportamento e assinatura idênticos (a fusão física em
-um único arquivo já elimina a duplicação de "onde mexer" quando se quer
-trocar de modelo/parâmetros). A fusão *comportamental* das duas chamadas
-(hoje cognitive_os.py invoca as duas em sequência para toda mensagem que não
-é comando) é lógica de orquestração de `cognitive_os.py` e será tratada na
-Fase 3, quando esse arquivo for decomposto — não faz sentido arriscar mudança
-de comportamento aqui só para "ter um cérebro só" sem re-testar o fluxo
-completo de HITL/memória que depende da ordem atual das duas chamadas.
+NOTA DE ESCOPO (Fase 3 — fusão em andamento, ver notas.md §5.1): `orchestrate()`
+foi absorvido por `_classificar_com_flash()`, que agora também recebe contexto
+de memória (histórico/tarefa anterior/memória operacional) e classifica
+CHECK_STATUS/MEDIA_DOWNLOAD junto com as rotas de conteúdo — um único
+classificador em vez de dois brigando por precedência em
+`application/runtime/dispatcher.py`. `orchestrate()`/`OrchestratorDecision`/
+`ACTIONS`/`_SYSTEM` abaixo ficam sem call site nesta etapa (mantidos por um
+ciclo de deploy como rede de segurança de rollback) e serão removidos num
+commit separado depois de validado em produção.
 """
 from __future__ import annotations
 
@@ -39,14 +39,15 @@ logger = logging.getLogger(__name__)
 
 class RoutingDecision(BaseModel):
     """Esquema Pydantic para validação estruturada da decisão de roteamento pelo Gemini."""
-    rota: str = Field(description="A rota: CALENDARIO, EDITAL, CONTATOS, WIKI, CRUD, TICKET_ABERTURA, GREETING, SIGAA, ou GERAL")
+    rota: str = Field(description="A rota: CALENDARIO, EDITAL, CONTATOS, WIKI, CRUD, TICKET_ABERTURA, GREETING, SIGAA, MEDIA_DOWNLOAD, CHECK_STATUS, ou GERAL")
     confianca: float = Field(description="Nível de certeza da decisão (0.0 a 1.0)")
     motivo: str = Field(description="Justificativa breve da decisão (máx 60 caracteres)")
 
 
 _SYSTEM_ROUTER = """<system_instruction>
 Você é um classificador semântico de alta precisão para o Oráculo UEMA.
-Sua única responsabilidade é analisar a mensagem de entrada e classificá-la em EXATAMENTE uma das rotas válidas.
+Sua única responsabilidade é analisar a mensagem de entrada (e o contexto de memória,
+se fornecido) e classificá-la em EXATAMENTE uma das rotas válidas.
 
 <rotas_validas>
 - CALENDARIO: Dúvidas gerais sobre datas acadêmicas do calendário geral da UEMA, início/fim de aulas, recessos, prazos e matrículas.
@@ -57,25 +58,59 @@ Sua única responsabilidade é analisar a mensagem de entrada e classificá-la e
 - TICKET_ABERTURA: Pedidos para abrir/registrar um chamado ou ticket de suporte técnico (ex: "quero abrir um chamado", "preciso de um ticket", "problema no sistema, preciso de suporte"). Diferente de CRUD: aqui o usuário quer relatar um problema/pedido novo, não alterar seu próprio cadastro.
 - GREETING: Saudações puras (ex: "olá", "bom dia"), agradecimentos (ex: "obrigado", "valeu"), ou perguntas sobre sua própria identidade e capacidades (ex: "como você pode me ajudar?", "quem é você?", "o que você faz?").
 - SIGAA: Consultas a dados acadêmicos pessoais do discente no SIGAA, incluindo notas, média, histórico escolar, coeficiente de rendimento (CR), índice de rendimento acadêmico (IRA), turmas do semestre, salas de aula, horários, professores, carga horária e estrutura curricular.
+- MEDIA_DOWNLOAD: Pedidos para baixar/receber um vídeo, áudio, ou criar um sticker (ex: "manda um vídeo de gatos aí", "quero um sticker dessa foto"), mesmo sem os verbos "buscar"/"baixar" explícitos.
+- CHECK_STATUS: Usuário pergunta sobre o andamento/resultado de uma tarefa ou pedido ANTERIOR (ex: "e aí, já saiu?", "como ficou aquilo que pedi?"), ou faz referência direta à "requisição anterior". Só classifique assim se houver contexto de [ÚLTIMA TAREFA]/[MEMÓRIA OPERACIONAL] abaixo indicando que existe algo pendente a checar — sem esse contexto, uma pergunta sobre "status"/"andamento" de algo que não foi mencionado antes é GERAL.
 - GERAL: Perguntas fora do escopo oficial da UEMA, conversas informais ou mensagens totalmente ambíguas que não se encaixam em nenhuma outra rota.
 </rotas_validas>
 
 <regras_de_classificacao>
 1. Se a mensagem for mista contendo uma saudação e uma pergunta factual (ex: "Oi, boa tarde! Qual a data de matrícula?"), desconsidere a saudação e classifique estritamente pela pergunta factual (neste caso, "CALENDARIO").
 2. Se o usuário estiver perguntando sobre suas funcionalidades ("o que você pode fazer?", "me ajuda"), classifique como "GREETING" para que ele receba a resposta de apresentação.
-3. Responda estritamente com o JSON estruturado conforme o esquema Pydantic, sem formatações adicionais ou blocos markdown.
+3. Se houver bloco [ÚLTIMA TAREFA] e a pergunta atual for claramente sobre o resultado dela, classifique como "CHECK_STATUS" em vez da rota de conteúdo que a palavra-chave sugeriria isoladamente.
+4. Se houver bloco [MEMÓRIA OPERACIONAL] e o usuário estiver só reagindo a uma informação prévia (confirmando, agradecendo), considere "GREETING" ou "CHECK_STATUS" conforme o caso.
+5. Responda estritamente com o JSON estruturado conforme o esquema Pydantic, sem formatações adicionais ou blocos markdown.
 </regras_de_classificacao>
 </system_instruction>"""
 
 
 async def _classificar_com_flash(query: str, ctx: dict, session_id: str | None = None):
     """Usa o provider LLM ativo (Gemini/DeepSeek/Groq, ver llm_factory.py)
-    para classificação zero-shot da rota/intenção."""
+    para classificação zero-shot da rota/intenção — absorve o antigo
+    orchestrate() (Fase 3, ver notas.md §5.1): quando há session_id, também
+    injeta contexto de memória (histórico/última tarefa/memória operacional)
+    no prompt, o suficiente pra decidir CHECK_STATUS sem precisar de uma
+    segunda chamada LLM separada."""
     from src.router.contracts import RouterDecision, ROTAS_VALIDAS
     from src.infrastructure.adapters.llm_factory import get_llm_provider
 
     ctx_str = f"Aluno de {ctx['curso']}" if ctx.get("curso") else ""
-    prompt = f"{ctx_str}\nMensagem: \"{query[:300]}\"\nClassifique:"
+
+    ctx_parts = [ctx_str] if ctx_str else []
+    if session_id:
+        try:
+            from src.memory.services.redis_memory_service import get_cognitive_memory
+            mem = get_cognitive_memory()
+            history_summary = await mem.format_history(session_id)
+            task_history = await mem.get_task_history(session_id)
+            operational_memory = await mem.get_operational(session_id)
+        except Exception:
+            history_summary, task_history, operational_memory = "", {}, {}
+
+        if history_summary:
+            ctx_parts.append(f"[HISTÓRICO RECENTE]\n{history_summary[-800:]}")
+        if task_history and task_history.get("last_worker"):
+            ctx_parts.append(
+                f"[ÚLTIMA TAREFA]\nWorker: {task_history['last_worker']}\n"
+                f"Resultado: {task_history.get('last_result', '')[:200]}\n"
+                f"(DICA: Se a pergunta for sobre o resultado acima, classifique como 'CHECK_STATUS')"
+            )
+        if operational_memory and operational_memory.get("last_action"):
+            ctx_parts.append(
+                f"[MEMÓRIA OPERACIONAL]\nÚltima ação: {operational_memory['last_action']}\n"
+                f"Se o usuário estiver apenas reagindo a uma informação prévia, considere 'GREETING' ou 'CHECK_STATUS'."
+            )
+
+    prompt = "\n\n".join(ctx_parts + [f"Mensagem: \"{query[:300]}\"\nClassifique:"])
 
     try:
         provider = get_llm_provider(agente="router", rota="router_classify")
@@ -88,6 +123,8 @@ async def _classificar_com_flash(query: str, ctx: dict, session_id: str | None =
             rota="router_classify",
         )
         if decision_validated is None:
+            from src.infrastructure.observability.metrics import PrometheusMetrics
+            PrometheusMetrics().increment_orchestrator_json_parse_failure()
             raise RuntimeError("provider não devolveu decisão válida")
 
         if session_id:

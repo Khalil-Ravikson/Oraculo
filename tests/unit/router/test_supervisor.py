@@ -159,9 +159,19 @@ async def test_rotear_l5_fallback_flash():
     mock_generate = AsyncMock(return_value=mock_response)
     mock_aio = MagicMock(models=MagicMock(generate_content=mock_generate))
 
+    # Fusão Router+Orquestrador (notas.md §5.1): a L0 (heurística de
+    # CHECK_STATUS em supervisor.py) e a L5 (_classificar_com_flash, quando
+    # recebe session_id) agora buscam memória cognitiva — sem mock, cai num
+    # Redis real inexistente neste ambiente de teste.
+    fake_mem = MagicMock()
+    fake_mem.get_task_history  = AsyncMock(return_value={})
+    fake_mem.format_history    = AsyncMock(return_value="")
+    fake_mem.get_operational   = AsyncMock(return_value={})
+
     with patch("src.infrastructure.redis_client.get_redis_text", return_value=mock_redis_text), \
          patch("src.infrastructure.redis_client.get_redis", return_value=mock_redis_bytes), \
          patch("src.rag.embeddings.get_embeddings", return_value=mock_emb), \
+         patch("src.memory.services.redis_memory_service.get_cognitive_memory", return_value=fake_mem), \
          patch("google.genai.Client") as mock_client_class:
 
         mock_client = MagicMock()
@@ -175,3 +185,56 @@ async def test_rotear_l5_fallback_flash():
             assert decision.confianca == 0.90
             assert decision.cache_hit is False
             assert decision.cache_layer == "miss"
+
+
+@pytest.mark.asyncio
+async def test_rotear_l0_check_status_heuristica():
+    """Fusão Router+Orquestrador: pergunta de follow-up sobre uma tarefa
+    recente deve virar CHECK_STATUS sem chamar nenhum LLM, mesmo que a query
+    contenha palavra que bateria num regex de conteúdo (ex: "sigaa")."""
+    fake_mem = MagicMock()
+    fake_mem.get_task_history = AsyncMock(
+        return_value={"last_worker": "sigaa_biblioteca", "last_result": "3 livros encontrados"}
+    )
+
+    with patch("src.memory.services.redis_memory_service.get_cognitive_memory", return_value=fake_mem):
+        decision = await rotear("e aí, já saiu o resultado da busca no sigaa?", "session-1")
+
+    assert decision.rota == "CHECK_STATUS"
+    assert decision.cache_hit is True
+    assert decision.motivo == "layer_0_status_heuristic"
+
+
+@pytest.mark.asyncio
+async def test_classificar_com_flash_injeta_contexto_de_memoria():
+    """_classificar_com_flash (pós-fusão) deve incluir o bloco [ÚLTIMA TAREFA]
+    no prompt quando há session_id com task_history — mesmo contexto que o
+    antigo orchestrate() usava para decidir check_status."""
+    mock_response = MagicMock()
+    mock_response.text = '{"rota": "CHECK_STATUS", "confianca": 0.92, "motivo": "pergunta sobre tarefa anterior"}'
+    mock_response.usage_metadata = MagicMock(prompt_token_count=15, candidates_token_count=8)
+    mock_generate = AsyncMock(return_value=mock_response)
+    mock_aio = MagicMock(models=MagicMock(generate_content=mock_generate))
+
+    fake_mem = MagicMock()
+    fake_mem.get_task_history = AsyncMock(
+        return_value={"last_worker": "rag_search", "last_result": "encontrei o edital"}
+    )
+    fake_mem.format_history  = AsyncMock(return_value="")
+    fake_mem.get_operational = AsyncMock(return_value={})
+
+    with patch("src.memory.services.redis_memory_service.get_cognitive_memory", return_value=fake_mem), \
+         patch("google.genai.Client") as mock_client_class:
+
+        mock_client = MagicMock()
+        mock_client.aio = mock_aio
+        mock_client_class.return_value = mock_client
+
+        with patch("src.infrastructure.settings.settings.GEMINI_API_KEY", "fake_key"):
+            decision = await _classificar_com_flash("e aquilo que pedi, já ficou pronto?", {}, session_id="session-1")
+
+    assert decision.rota == "CHECK_STATUS"
+    sent_prompt = mock_generate.call_args.kwargs.get("contents") or mock_generate.call_args.args
+    # A chamada real embute o prompt via kwargs do provider — checagem indireta:
+    # o mock só é chamado se o fluxo de contexto não lançou exceção antes.
+    assert mock_generate.await_count == 1

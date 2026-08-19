@@ -157,10 +157,6 @@ async def test_processar_com_audio_substitui_message_pelo_transcript():
     fake_mem.set_operational   = AsyncMock(return_value=None)
     fake_mem.add_turn          = AsyncMock(return_value=None)
 
-    fake_orch_decision = MagicMock()
-    fake_orch_decision.action     = "call_rag"
-    fake_orch_decision.route_hint = "GERAL"
-
     with patch("src.infrastructure.redis_client.get_redis_text", return_value=mock_redis), \
          patch(
              "src.application.runtime.dispatcher._transcrever_audio_recebido",
@@ -168,7 +164,6 @@ async def test_processar_com_audio_substitui_message_pelo_transcript():
              return_value="estou com erro no sistema",
          ), \
          patch("src.memory.services.redis_memory_service.get_cognitive_memory", return_value=fake_mem), \
-         patch("src.router.llm_fallback.orchestrate", new_callable=AsyncMock, return_value=fake_orch_decision), \
          patch("src.router.supervisor.rotear", new_callable=AsyncMock, return_value=mock_decision) as mock_rotear, \
          patch("src.capabilities.persistence.agent_config.is_agent_enabled", new_callable=AsyncMock, return_value=True):
 
