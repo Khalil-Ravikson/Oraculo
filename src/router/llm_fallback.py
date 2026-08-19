@@ -1,27 +1,19 @@
 """
 src/router/llm_fallback.py
 ============================
-Camadas de fallback via LLM do Supervisor — chamadas ao Gemini quando as
+Camada de fallback via LLM do Supervisor (L5) — chamada ao Gemini quando as
 camadas rápidas (regex/heurística/KNN) de `supervisor.py` não resolvem.
 
-Reúne dois classificadores que hoje coexistem no fluxo (chamados em sequência
-por application/chain/cognitive_os.py, decomposto na Fase 3):
-
-  1. classificar_com_flash(): classifica a ROTA/intenção da mensagem
-     (ex-`application/routing/semantic_router.py::_classificar_com_flash`).
-  2. orchestrate(): decide a AÇÃO de alto nível para linguagem natural
-     (ex-`application/routing/llm_orchestrator.py`, hoje chamado
-     "terceiro cérebro" por rodar em paralelo ao classificador de rota).
-
-NOTA DE ESCOPO (Fase 3 — fusão em andamento, ver notas.md §5.1): `orchestrate()`
-foi absorvido por `_classificar_com_flash()`, que agora também recebe contexto
-de memória (histórico/tarefa anterior/memória operacional) e classifica
+FUSÃO ROUTER+ORQUESTRADOR (Fase 3, ver notas.md §5.1): este módulo já
+abrigou dois classificadores concorrentes (`_classificar_com_flash`, rota de
+conteúdo, e um `orchestrate()` que decidia ação de alto nível e SEMPRE
+sobrescrevia o Supervisor em `application/runtime/dispatcher.py` — até 2
+chamadas LLM pagas por mensagem, brigando por precedência, já causa de 2
+incidentes documentados). `orchestrate()` foi absorvido por
+`_classificar_com_flash()`, que agora também recebe contexto de memória
+(histórico/última tarefa/memória operacional) e classifica
 CHECK_STATUS/MEDIA_DOWNLOAD junto com as rotas de conteúdo — um único
-classificador em vez de dois brigando por precedência em
-`application/runtime/dispatcher.py`. `orchestrate()`/`OrchestratorDecision`/
-`ACTIONS`/`_SYSTEM` abaixo ficam sem call site nesta etapa (mantidos por um
-ciclo de deploy como rede de segurança de rollback) e serão removidos num
-commit separado depois de validado em produção.
+classificador, uma única chamada LLM no pior caso.
 """
 from __future__ import annotations
 
@@ -177,97 +169,3 @@ def _regex_fallback(query: str) -> str:
     if re.search(r"sigaa|senha|wifi|sistema|suporte|laborat", q):
         return "WIKI"
     return "GERAL"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. Classificador de ação de alto nível (ex llm_orchestrator.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
-ACTIONS = ["reply_direct", "call_rag", "call_sigaa", "check_status", "call_media", "call_ticket", "call_crud_update"]
-
-
-class OrchestratorDecision(BaseModel):
-    action: str = Field(description=f"Uma de: {ACTIONS}")
-    reasoning: str = Field(description="Motivo da decisão em até 60 chars")
-    route_hint: str = Field(default="GERAL",
-        description="Sub-rota opcional: CALENDARIO, EDITAL, CONTATOS, WIKI, GERAL")
-
-
-_SYSTEM = """Você é o orquestrador do Oráculo UEMA.
-Analise a mensagem e decida a ação correta:
-
-- reply_direct: saudação, agradecimento, pergunta sobre você mesmo
-- call_rag: dúvida sobre documentos, calendário, editais, contatos, wiki
-- call_sigaa: notas, histórico, turmas, CR, IRA, estrutura curricular
-- check_status: usuário pergunta sobre andamento, solicita o resultado de uma tarefa/requisição anterior, ou faz referência à 'requisição anterior'.
-- call_media: usuário pede para baixar um vídeo, áudio, criar sticker, ou processar mídia
-- call_ticket: usuário quer ABRIR um chamado/ticket de suporte técnico novo (ex: "quero abrir um chamado", "preciso de um ticket", "problema no sistema, preciso de suporte"). Diferente de call_crud_update: aqui é um problema/pedido NOVO, não uma alteração do próprio cadastro.
-- call_crud_update: usuário quer ATUALIZAR/ALTERAR seus próprios dados de cadastro já existentes (ex: "quero mudar meu telefone", "atualizar meu setor", "alterar meu centro"). Diferente de call_ticket: aqui não há problema técnico a relatar, só um dado a corrigir.
-
-Você é uma API. RETORNE EXCLUSIVAMENTE UM JSON VÁLIDO obedecendo ao schema exigido. NÃO RETORNE MARKDOWN, NEM TEXTO EXPLICATIVO."""
-
-async def orchestrate(
-    message: str,
-    history_summary: str = "",
-    task_history: dict | None = None,
-    operational_memory: dict | None = None,
-    user_context: dict | None = None,
-    session_id: str = "",
-) -> OrchestratorDecision:
-    from src.infrastructure.adapters.llm_factory import get_llm_provider
-
-    ctx_parts = []
-    if history_summary:
-        ctx_parts.append(f"[HISTÓRICO RECENTE]\n{history_summary[-800:]}")
-    if task_history and task_history.get("last_worker"):
-        ctx_parts.append(
-            f"[ÚLTIMA TAREFA]\nWorker: {task_history['last_worker']}\n"
-            f"Resultado: {task_history.get('last_result', '')[:200]}\n"
-            f"(DICA: Se a pergunta for sobre o resultado acima, retorne a ação 'check_status')"
-        )
-    if operational_memory and operational_memory.get("last_action"):
-        ctx_parts.append(
-            f"[MEMÓRIA OPERACIONAL]\nÚltima ação: {operational_memory['last_action']}\n"
-            f"Se o usuário estiver apenas reagindo a uma informação prévia, considere 'reply_direct' ou 'check_status'."
-        )
-
-    prompt = "\n\n".join(ctx_parts + [f"Mensagem: \"{message[:300]}\""])
-
-    try:
-        provider = get_llm_provider(agente="router", rota="orchestrate")
-        decision = await provider.gerar_resposta_estruturada_async(
-            prompt=prompt,
-            response_schema=OrchestratorDecision,
-            system_instruction=_SYSTEM,
-            temperatura=0.0,
-            user_id=session_id or "",
-            rota="orchestrate",
-        )
-
-        if session_id:
-            tokens_in, tokens_out = provider.ultimo_uso_tokens
-            # Mantido em paralelo à telemetria persistente (llm_factory.py) —
-            # é o cache curto que o simulador de avaliação do /hub consome.
-            from src.infrastructure.redis_client import registrar_tokens_redis
-            registrar_tokens_redis(session_id, tokens_in, tokens_out)
-
-        if decision is None:
-            # Provider não conseguiu gerar/validar JSON estruturado — mesma
-            # classe de falha que antes aparecia como JSONDecodeError aqui
-            # (agora tratada dentro do adapter, ver GeminiProvider/
-            # OpenAICompatibleProvider.gerar_resposta_estruturada_async).
-            from src.infrastructure.observability.metrics import PrometheusMetrics
-            PrometheusMetrics().increment_orchestrator_json_parse_failure()
-            logger.error("❌ [ORCHESTRATOR] provider não devolveu decisão válida | '%s'", message[:60])
-            return OrchestratorDecision(action="call_rag", reasoning="fallback_json", route_hint="GERAL")
-
-        if decision.action not in ACTIONS:
-            decision.action = "call_rag"
-
-        logger.info("🎯 [ORCHESTRATOR] action=%s route=%s | '%s'",
-                    decision.action, decision.route_hint, message[:40])
-        return decision
-
-    except Exception as e:
-        logger.warning("⚠️  [ORCHESTRATOR] falhou, fallback call_rag: %s", e)
-        return OrchestratorDecision(action="call_rag", reasoning="fallback", route_hint="GERAL")
