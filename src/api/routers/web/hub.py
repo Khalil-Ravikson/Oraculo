@@ -242,6 +242,22 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
     async def _generator():
         import json as _json
         t_total = _t.monotonic()
+
+        # Lock por sessão — sem isso, um EventSource que reconecta sozinho
+        # (browser, em qualquer soluço de rede) reprocessa a mesma mensagem
+        # do zero, pagando Router+Orchestrator+Planner de novo. Mesmo padrão
+        # de `lock:msg:{phone}` do WhatsApp (process_message_task.py), que
+        # este endpoint nunca teve.
+        lock_key = f"lock:hub_chat:{thread_id}" if thread_id else None
+        r_lock = None
+        if lock_key:
+            from src.infrastructure.redis_client import get_redis_text
+            r_lock = get_redis_text()
+            if not r_lock.set(lock_key, "1", nx=True, ex=60):
+                yield f"data: {_json.dumps({'type': 'error', 'msg': 'Pergunta anterior ainda em processamento — aguarde a resposta.'})}\n\n"
+                yield f"data: {_json.dumps({'type': 'done'})}\n\n"
+                return
+
         try:
             yield _sse_step("pipeline", "running", "Processando via Cognitive OS (LangGraph)…")
             t0 = _t.monotonic()
@@ -298,6 +314,11 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
             logger.exception("SSE /chat/stream error: %s", e)
             yield f"data: {_json.dumps({'type':'error','msg':str(e)[:200]})}\n\n"
         finally:
+            if r_lock is not None:
+                try:
+                    r_lock.delete(lock_key)
+                except Exception:
+                    pass
             yield f"data: {_json.dumps({'type':'done'})}\n\n"
 
     return StreamingResponse(

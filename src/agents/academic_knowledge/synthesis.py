@@ -110,7 +110,8 @@ class SynthesisService:
         try:
             from src.infrastructure.adapters.llm_factory import get_llm_provider
 
-            provider = get_llm_provider(agente="academic_knowledge", rota=plan_ctx.get("rota", ""))
+            rota_efetiva = plan_ctx.get("route", plan_ctx.get("route_hint", "GERAL"))
+            provider = get_llm_provider(agente="academic_knowledge", rota=rota_efetiva)
             resposta = await provider.gerar_resposta_async(
                 prompt=prompt,
                 system_instruction=system,
@@ -121,7 +122,7 @@ class SynthesisService:
                 # como fallback dá pelo menos atribuição por sessão em vez
                 # de deixar a coluna sempre vazia.
                 user_id=str(plan_ctx.get("user_id") or plan_ctx.get("session_id", "")),
-                rota=plan_ctx.get("rota", ""),
+                rota=rota_efetiva,
             )
 
             tokens_in, tokens_out = resposta.input_tokens, resposta.output_tokens
