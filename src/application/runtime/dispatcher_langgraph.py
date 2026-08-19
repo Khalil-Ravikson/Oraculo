@@ -119,7 +119,10 @@ def _rota_from_route(route: str) -> str:
     return _ROUTE_TO_ROTA.get(route, (route or "GERAL").upper())
 
 
-def _reset_payload_para_rota(session_id: str, message: str, route: str) -> dict:
+def _reset_payload_para_rota(
+    session_id: str, message: str, route: str,
+    rota: str = "", history: str = "", fatos: list[str] | None = None,
+) -> dict:
     """Payload inicial pro ainvoke() de um funil NOVO — reseta explicitamente
     os campos daquele funil (não os do outro), pra não herdar dado de uma
     execução anterior no mesmo thread_id (ver ATENÇÃO 2 na docstring do
@@ -130,8 +133,16 @@ def _reset_payload_para_rota(session_id: str, message: str, route: str) -> dict:
     (langgraph_experiment/nodes.py), todo funil novo nessa mesma sessão
     aceita a 1ª resposta e vai direto pro __end__, sem nunca perguntar o
     resto (reproduzido em teste real: 1x "sair", todo ticket seguinte
-    quebrado)."""
-    payload = {"session_id": session_id, "message": message, "route": route, "cancelado": False}
+    quebrado).
+
+    `rota`/`history`/`fatos` (Fase 3.5): contexto que antes se perdia ao
+    entrar no grafo — só faz sentido pra `route == "rag"` (ticket/crud não
+    usam RAG), mas incluir sempre é inofensivo (nodes.py só lê quando
+    relevante)."""
+    payload = {
+        "session_id": session_id, "message": message, "route": route, "cancelado": False,
+        "rota": rota, "history": history, "fatos": fatos or [],
+    }
     if route == "ticket":
         payload.update(ticket_data={}, ticket_error="", ticket_confirmed=None)
     elif route == "crud":
@@ -283,7 +294,12 @@ async def processar(
                 pergunta_pendente = ""
                 if state.tasks and state.tasks[0].interrupts:
                     pergunta_pendente = state.tasks[0].interrupts[0].value.get("question", "")
-                resposta_rag = await responder_rag_direto(message)
+                # history/fatos não disponíveis aqui (resposta a um interrupt
+                # pendente, não a invocação inicial) — sem regressão: hoje já
+                # não tinha nenhum contexto nesse ponto.
+                resposta_rag = await responder_rag_direto(
+                    message, rota=decision.rota, session_id=session_id,
+                )
                 answer = f"{resposta_rag}\n\n📋 Voltando ao que estávamos fazendo:\n{pergunta_pendente}"
                 ms = int((time.monotonic() - t0) * 1000)
                 logger.info(
@@ -316,5 +332,9 @@ async def processar(
     route = {"TICKET_ABERTURA": "ticket", "CRUD": "crud"}.get(decision.rota, "rag")
     logger.info("🧪 [LANGGRAPH] rota=%s → node=%s (session=%s)", decision.rota, route, session_id)
 
-    result = await app.ainvoke(_reset_payload_para_rota(session_id, message, route), config=config)
+    payload = _reset_payload_para_rota(
+        session_id, message, route,
+        rota=decision.rota, history=history, fatos=fatos,
+    )
+    result = await app.ainvoke(payload, config=config)
     return _to_os_result(result, decision.rota, t0)

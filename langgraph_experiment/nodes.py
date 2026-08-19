@@ -31,31 +31,86 @@ def classify_node(state: OraculoState) -> dict:
     return {"route": route}
 
 
-async def responder_rag_direto(mensagem: str) -> str:
+def _doc_type_para_rota(rota: str, query: str) -> str:
+    """Reaproveita o mapeamento rota→doc_type que já existe no Supervisor
+    (`_dag_hint_para_rota`) em vez de duplicar a tabela CALENDARIO→"calendario"/
+    EDITAL→"edital"/etc. aqui."""
+    from src.router.supervisor import _dag_hint_para_rota
+    return _dag_hint_para_rota(rota, query).get("doc_type", "geral")
+
+
+# Rotas que não fazem sentido cachear: SIGAA/MEDIA_DOWNLOAD são consultas
+# dinâmicas de sistema externo, GREETING/CHECK_STATUS são respondidas sem RAG
+# em outro lugar, CRUD é ação de escrita — mesma lista usada por
+# worker_synthesis.py/dispatcher.py, consolidada aqui pra não divergir.
+from src.router.contracts import ROTAS_SEM_CACHE
+
+
+async def responder_rag_direto(
+    mensagem: str,
+    rota: str = "GERAL",
+    history: str = "",
+    fatos: list[str] | None = None,
+    session_id: str = "",
+) -> str:
     """Chama RAGSearchService/SynthesisService reais e devolve só o texto da
     resposta — extraído de rag_node pra ser reaproveitado também pelo filtro
     de "detour" institucional em dispatcher_langgraph.py (sem duplicar a
-    lógica de busca+síntese)."""
+    lógica de busca+síntese).
+
+    Fase 3.5: antes disso, `rota`/`history`/`fatos`/`session_id` não existiam
+    aqui — toda pergunta RAG via LangGraph rodava com `doc_type="geral"` (sem
+    filtro de taxonomia), tratada como rota "GERAL" na síntese (afeta seleção
+    de provider/modelo por rota), sem histórico de conversa nem fatos do
+    usuário, e sem `session_id` na telemetria (`metricas_llm.user_id` vazio)."""
     from src.agents.academic_knowledge.service import RAGSearchService
     from src.agents.academic_knowledge.synthesis import SynthesisService
+    from src.infrastructure.semantic_cache import SemanticCache
+
+    fatos = fatos or []
+    cacheavel = rota not in ROTAS_SEM_CACHE
+
+    if cacheavel:
+        cached = await SemanticCache().get(query=mensagem, rota=rota)
+        if cached:
+            return cached.get("answer", "")
 
     rag = RAGSearchService()
-    result = await rag.buscar(mensagem)
+    result = await rag.buscar(
+        mensagem,
+        doc_type=_doc_type_para_rota(rota, mensagem),
+        rota=rota,
+        fatos=fatos,
+        historico=history,
+    )
     if not result.ok or not result.data.get("found"):
         return result.message or "Não encontrei informações sobre isso nos documentos da UEMA."
 
     synth = SynthesisService()
     synth_result = await synth.sintetizar(
         chunks=result.data.get("chunks", []),
-        plan_ctx={"query": mensagem},
+        plan_ctx={
+            "query": mensagem, "route": rota, "history": history,
+            "fatos": fatos, "session_id": session_id,
+        },
     )
-    return synth_result.answer if synth_result.ok else f"[erro synthesis] {synth_result.error}"
+    if not synth_result.ok:
+        return f"[erro synthesis] {synth_result.error}"
+
+    if cacheavel:
+        await SemanticCache().set(query=mensagem, rota=rota, response={"answer": synth_result.answer})
+
+    return synth_result.answer
 
 
 async def rag_node(state: OraculoState) -> dict:
     """Reaproveita RAGSearchService/SynthesisService reais — nenhuma lógica
     de busca/síntese duplicada, só o orquestrador (LangGraph) muda."""
-    return {"answer": await responder_rag_direto(state.message)}
+    answer = await responder_rag_direto(
+        state.message, rota=state.rota or "GERAL", history=state.history,
+        fatos=state.fatos, session_id=state.session_id,
+    )
+    return {"answer": answer}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

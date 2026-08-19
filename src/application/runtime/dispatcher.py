@@ -252,10 +252,11 @@ async def processar(
                     status="ok",
                 )
 
-        # 1b. Semantic Cache de Respostas (Cosine Similarity > 0.92)
-        if decision.rota not in ("SIGAA", "MEDIA_DOWNLOAD", "GREETING"):
+        # 1b. Semantic Cache de Respostas (threshold por rota, ver semantic_cache.py)
+        from src.router.contracts import ROTAS_SEM_CACHE
+        if decision.rota not in ROTAS_SEM_CACHE:
             from src.infrastructure.semantic_cache import SemanticCache
-            sem_cache = SemanticCache(threshold=0.92)
+            sem_cache = SemanticCache()
 
             cached_response = await sem_cache.get(query=message, rota=decision.rota)
             if cached_response:

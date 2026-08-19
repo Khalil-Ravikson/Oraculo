@@ -296,16 +296,34 @@ persistência descritas abaixo tem efeito real no banco.
 
 ## 11. Cache semântico
 
+> Corrigido na Fase 3.5: até então este documento citava um arquivo
+> duplicado (`infrastructure/cache/semantic_cache.py`) que tinha ZERO
+> chamadores em todo o código — as regras 60-61 nunca estiveram em vigor de
+> verdade, só documentadas. A implementação real
+> (`src/infrastructure/semantic_cache.py`, a única usada por
+> `dispatcher.py`/`worker_synthesis.py`/`langgraph_experiment/nodes.py`)
+> tinha threshold fixo (0.92) e TTL fixo (1h) até esta fase — o arquivo
+> duplicado foi removido, e as regras abaixo passaram a valer de verdade,
+> portadas pro arquivo ativo.
+
 60. TTL do cache varia por rota, refletindo a volatilidade real da
     informação: Calendário 6h, Edital 24h, Contatos 48h, Wiki 12h,
-    Saudação 2h, Geral 30min. Rotas de escrita (CRUD) nunca são cacheadas.
-    `src/infrastructure/cache/semantic_cache.py:70-78`
+    Geral 30min. Saudação (GREETING), consultas dinâmicas (SIGAA,
+    MEDIA_DOWNLOAD), ação de escrita (CRUD) e meta-resposta (CHECK_STATUS)
+    nunca são cacheadas — não é "TTL curto", é exclusão total.
+    `src/infrastructure/semantic_cache.py:TTL_POR_ROTA` +
+    `src/router/contracts.py::ROTAS_SEM_CACHE`
 61. Aceita pergunta "parecida" (similaridade semântica), com exigência mais
     rígida pra dado factual (calendário/edital/contatos) do que pra
     conteúdo geral — reduz risco de cache "generoso" em dado sensível a
-    prazo. `semantic_cache.py:80-89`
-62. Ingestão de documento novo invalida automaticamente o cache daquela
-    fonte/rota. `semantic_cache.py:26-29`
+    prazo. `src/infrastructure/semantic_cache.py:THRESHOLD_POR_ROTA`
+62. **Não implementado** (item aspiracional só documentado antes, nunca
+    codificado em lugar nenhum — confirmado por varredura completa do
+    repositório nesta fase): ingestão de documento novo NÃO invalida
+    automaticamente o cache da fonte/rota afetada. Se isso for necessário,
+    é trabalho futuro — hoje a única invalidação é manual, via
+    `invalidar_cache_rota()` (botão "Limpar cache semântico" no `/hub` ou
+    comando `!cache clear`).
 
 ## 12. Avaliação do usuário (`!1` a `!5`)
 

@@ -163,6 +163,16 @@
     <tbody><tr><td colspan="5" style="color:var(--muted)">Carregando...</td></tr></tbody>
   </table>
 
+  <div class="section-label">// cache semântico por rota</div>
+  <div class="notice cache-explainer">
+    ✅ Entradas ativas agora no Redis (<code>semcache:{rota}:*</code>) — cada
+    hit aqui é uma resposta reaproveitada sem chamar LLM nenhum.
+  </div>
+  <table id="tbl-cache">
+    <thead><tr><th>Rota</th><th>Entradas ativas</th><th>TTL</th><th>Threshold</th><th></th></tr></thead>
+    <tbody><tr><td colspan="5" style="color:var(--muted)">Carregando...</td></tr></tbody>
+  </table>
+
   <div class="section-label">// tabela de preços (editável, sem rebuild)</div>
   <table id="tbl-pricing">
     <thead><tr>
@@ -228,8 +238,41 @@ async function carregar() {
             <td class="mono">${row.latencia_media_ms ?? '—'}</td>
           </tr>`).join('')
       : `<tr><td colspan="5" style="color:var(--muted)">Sem chamadas registradas ainda nas últimas 24h.</td></tr>`;
+
+    const cache = d.cache || {};
+    const porRotaCache = cache.por_rota || {};
+    const ttlPorRota = cache.ttl_por_rota || {};
+    const thresholdPorRota = cache.threshold_por_rota || {};
+    const rotasCache = Object.keys(porRotaCache).length
+      ? Object.keys(porRotaCache)
+      : Object.keys(ttlPorRota);
+
+    document.querySelector('#tbl-cache tbody').innerHTML = rotasCache.length
+      ? rotasCache.map(rota => `
+          <tr>
+            <td class="mono">${rota}</td>
+            <td class="mono">${porRotaCache[rota] ?? 0}</td>
+            <td class="mono">${ttlPorRota[rota] ? Math.round(ttlPorRota[rota] / 60) + 'min' : '—'}</td>
+            <td class="mono">${thresholdPorRota[rota] ?? '—'}</td>
+            <td><button class="price-save-btn" style="border-color:var(--red);background:rgba(232,64,64,.1);color:var(--red)" onclick="limparCacheRota('${rota}')">LIMPAR</button></td>
+          </tr>`).join('')
+      : `<tr><td colspan="5" style="color:var(--muted)">Nenhuma rota cacheável configurada.</td></tr>`;
   } catch (e) {
     toast('Erro ao carregar telemetria: ' + e.message, 'err');
+  }
+}
+
+async function limparCacheRota(rota) {
+  try {
+    const r = await fetch(`/api/admin/cache?rota=${encodeURIComponent(rota)}`, {
+      method: 'DELETE', credentials: 'include',
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.detail || 'Falha ao limpar cache', 'err'); return; }
+    toast(`Cache de ${rota} limpo (${d.deleted} entradas).`);
+    carregar();
+  } catch (e) {
+    toast('Erro: ' + e.message, 'err');
   }
 }
 

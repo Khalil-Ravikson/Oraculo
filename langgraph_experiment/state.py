@@ -6,8 +6,20 @@ from pydantic import BaseModel, Field
 class OraculoState(BaseModel):
     session_id: str = ""
     message: str = ""
-    route: str = ""          # "rag" | "ticket" | "crud"
+    route: str = ""          # "rag" | "ticket" | "crud" — decide as edges do grafo
     answer: str = ""
+
+    # ── Contexto compartilhado (Fase 3.5 — cache/memória no LangGraph) ────────
+    # `rota` é a classificação FINA do Supervisor (CALENDARIO/EDITAL/CONTATOS/
+    # WIKI/GERAL/...), distinta de `route` acima — antes desses campos existirem
+    # ela se perdia ao entrar no grafo (colapsada em "rag" só pra decidir a
+    # edge), e RAGSearchService/SynthesisService sempre rodavam com defaults
+    # genéricos (doc_type="geral", rota="GERAL"), mesmo pra pergunta de EDITAL.
+    # `history`/`fatos` (Camadas L1/L4 da memória cognitiva) tinham o mesmo
+    # problema — chegavam em `processar()` mas nunca entravam no state.
+    rota: str = ""
+    history: str = ""
+    fatos: list[str] = Field(default_factory=list)
 
     # ── Funil de ticket ──────────────────────────────────────────────────────
     # dict simples (não um BaseModel aninhado): LangGraph serializa o estado

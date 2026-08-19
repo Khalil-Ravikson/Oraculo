@@ -158,16 +158,22 @@ def executar_comando_admin_task(self, chat_id: str, parametro: str, user_id: str
 # =============================================================================
 
 def _cmd_limpar_cache(chat_id: str) -> None:
-    # Apenas apaga a chave de cache semântico no Redis
+    # Prefixo real gravado pelo SemanticCache é "semcache:", não
+    # "semantic_cache:" (bug encontrado na Fase 3.5: este comando nunca
+    # apagou nada, silenciosamente). Loop até cursor==0: uma única chamada
+    # SCAN não garante retornar todas as chaves (COUNT é só uma dica).
     from src.infrastructure.redis_client import get_redis
     r = get_redis()
-    
+
     try:
-        # Pega todas as chaves de cache e deleta
-        cursor, keys = r.scan(0, match="semantic_cache:*", count=1000)
-        if keys:
-            r.delete(*keys)
-        _enviar(chat_id, f"🗑️ *Cache semântico limpo!*\n• Entradas removidas: {len(keys) if keys else 0}")
+        cursor, total = 0, 0
+        while True:
+            cursor, keys = r.scan(cursor, match="semcache:*", count=1000)
+            if keys:
+                total += r.delete(*keys)
+            if cursor == 0:
+                break
+        _enviar(chat_id, f"🗑️ *Cache semântico limpo!*\n• Entradas removidas: {total}")
     except Exception as e:
         _enviar(chat_id, f"❌ Erro ao limpar cache: {e}")
 

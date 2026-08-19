@@ -697,11 +697,21 @@ async def llm_custo_data(request: Request, horas: int = 24):
         logger.warning("⚠️  [HUB] Falha ao ler telemetria de custo: %s", exc)
         return {"error": "Falha ao consultar métricas."}
 
+    try:
+        from src.infrastructure.semantic_cache import cache_stats, TTL_POR_ROTA, THRESHOLD_POR_ROTA
+        cache = cache_stats()
+        cache["ttl_por_rota"] = TTL_POR_ROTA
+        cache["threshold_por_rota"] = THRESHOLD_POR_ROTA
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler cache_stats: %s", exc)
+        cache = {"total_entradas": 0, "por_rota": {}, "ttl_por_rota": {}, "threshold_por_rota": {}}
+
     return {
         "provider_global_ativo": _provider_global_ativo(),
         "resumo": resumo,
         "por_rota": por_rota,
         "por_provider": por_provider,
+        "cache": cache,
         "horas": horas,
     }
 
