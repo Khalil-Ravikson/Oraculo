@@ -100,6 +100,58 @@ def _preco_do_cache(provider: str, modelo: str) -> PrecoModelo | None:
         return None
 
 
+_CHAVE_BRL_RATE = "admin:usd_brl_rate"
+_CHAVE_BRL_RATE_AUTO = "admin:usd_brl_rate:auto"
+
+
+def taxa_brl_ativa() -> float:
+    """Taxa USD→BRL ativa, por precedência:
+    1. Override manual (`admin:usd_brl_rate`, editável via /hub/llm-custo) —
+       se o admin setou um valor à mão, ele manda.
+    2. Cotação ao vivo (`admin:usd_brl_rate:auto`, atualizada a cada 6h pela
+       task Celery `atualizar_taxa_brl` — open.er-api.com, sem chave).
+    3. `settings.USD_BRL_RATE` (fallback estático, só se nem o beat rodou
+       ainda nem houve override manual).
+    Nunca levanta exceção — telemetria não pode quebrar por causa disso, e
+    NUNCA faz chamada de rede aqui (isso ficaria no caminho quente de toda
+    chamada LLM) — só leitura Redis, já populada pela task periódica."""
+    from src.infrastructure.settings import settings
+    try:
+        from src.infrastructure.redis_client import get_redis_text
+        r = get_redis_text()
+        raw = r.get(_CHAVE_BRL_RATE)
+        if raw:
+            valor = raw if isinstance(raw, str) else raw.decode()
+            return float(valor)
+        raw_auto = r.get(_CHAVE_BRL_RATE_AUTO)
+        if raw_auto:
+            valor = raw_auto if isinstance(raw_auto, str) else raw_auto.decode()
+            return float(valor)
+    except Exception as exc:
+        logger.warning("⚠️ [PRICING] Falha ao ler taxa BRL no Redis: %s", exc)
+    return settings.USD_BRL_RATE
+
+
+def taxa_brl_origem() -> str:
+    """De onde veio a taxa ativa agora — "manual"/"ao_vivo"/"padrao_fixo".
+    Só pra exibir no /hub/llm-custo, não usado no cálculo de custo."""
+    try:
+        from src.infrastructure.redis_client import get_redis_text
+        r = get_redis_text()
+        if r.get(_CHAVE_BRL_RATE):
+            return "manual"
+        if r.get(_CHAVE_BRL_RATE_AUTO):
+            return "ao_vivo"
+    except Exception:
+        pass
+    return "padrao_fixo"
+
+
+def converter_brl(usd: float) -> float:
+    """USD → BRL usando a taxa ativa (`taxa_brl_ativa()`)."""
+    return usd * taxa_brl_ativa()
+
+
 def calcular_custo_usd(provider: str, modelo: str, tokens_in: int, tokens_out: int) -> float:
     """Calcula custo real em USD para uma chamada, dado provider+modelo reais.
 
@@ -113,6 +165,8 @@ def calcular_custo_usd(provider: str, modelo: str, tokens_in: int, tokens_out: i
     desatualizada não pode derrubar uma resposta real ao usuário.
     """
     provider = provider or "gemini"
+    tokens_in = tokens_in or 0
+    tokens_out = tokens_out or 0
     preco = _preco_do_cache(provider, modelo)
     if preco is None:
         tabela = _PRECOS.get(provider, {})

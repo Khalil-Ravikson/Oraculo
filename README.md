@@ -22,7 +22,7 @@
 13. [Configuração e Variáveis de Ambiente](#13-configuração-e-variáveis-de-ambiente)
 14. [Instalação e Execução (Docker)](#14-instalação-e-execução-docker)
 15. [Celery — Tarefas em Background](#15-celery--tarefas-em-background)
-16. [Observabilidade (Langfuse + Prometheus + Grafana)](#16-observabilidade-langfuse--prometheus--grafana)
+16. [Observabilidade (Prometheus + Grafana + /hub/llm-custo)](#16-observabilidade-prometheus--grafana--hubllm-custo)
 17. [Testes](#17-testes)
 18. [Comandos Úteis](#18-comandos-úteis)
 19. [Glossário para Leigos](#19-glossário-para-leigos)
@@ -103,7 +103,6 @@ api/          → endpoints FastAPI (apresentação)
 | Canal WhatsApp | Evolution API | Recebe/envia mensagens |
 | ORM | SQLAlchemy Async | Interface com PostgreSQL |
 | Migrações | Alembic | Versionamento do banco |
-| Tracing LLM | Langfuse | Monitorar chamadas ao Gemini |
 | Métricas | Prometheus | Coleta de dados de performance |
 | Dashboards | Grafana | Visualização de métricas |
 | Containers | Docker + Compose | Deploy e orquestração |
@@ -148,7 +147,7 @@ oraculo-uema/
 │   │   ├── settings.py         # Configurações (.env)
 │   │   ├── celery_app.py       # Configuração Celery
 │   │   ├── logging_config.py   # Logging estruturado
-│   │   └── observability/      # Prometheus, Langfuse
+│   │   └── observability/      # Prometheus (métricas + custo LLM)
 │   │
 │   ├── memory/                 # Sistema de memória em múltiplas camadas
 │   │   ├── ports/              # Interfaces de memória
@@ -463,7 +462,7 @@ Acessível em: `http://localhost:9000/hub/`
 |---|---|---|
 | Grafana | `localhost:3001` | Dashboards visuais de métricas |
 | Prometheus | `localhost:9090` | Raw metrics e alertas |
-| Langfuse | `localhost:3000` | Tracing de chamadas ao LLM |
+| `/hub/llm-custo` | portal admin | Custo por provider/rota, cache semântico (nativo, Postgres) |
 
 ---
 
@@ -506,11 +505,6 @@ ADMIN_CONFIRMATION_TOKEN=token_extra   # token extra para comandos críticos
 # ── Modo de desenvolvimento ────────────────────────────
 DEV_MODE=True                          # False em produção
 DEV_WHITELIST=5598999999999            # só esses números recebem resposta em dev
-
-# ── Observabilidade ────────────────────────────────────
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_HOST=http://langfuse:3000
 
 # ── Dados ──────────────────────────────────────────────
 DATA_DIR=/app/dados                    # pasta dos PDFs
@@ -630,37 +624,55 @@ O `beat` (agendador) executa tarefas periodicamente:
 
 ---
 
-## 16. Observabilidade (Langfuse + Prometheus + Grafana)
+## 16. Observabilidade (Prometheus + Grafana + /hub/llm-custo)
 
-### Langfuse — Tracing LLM
+Não usamos Langfuse/LangSmith — avaliado e descartado (ver
+`pesquisa_arquitetura_producao.md` §4.5): a telemetria de custo/rota/cache
+já roda nativamente em Postgres + Prometheus, sem depender de ferramenta
+externa.
 
-Acesse: `http://localhost:3000`
+### `/hub/llm-custo` — custo por provider/rota (Postgres, nativo)
 
-O que monitorar:
-- Latência de cada chamada ao Gemini
-- Custo em tokens (entrada + saída)
-- Traces completos do pipeline RAG
-- CRAG scores ao longo do tempo
+Acesse pelo portal admin. Mostra custo USD/BRL, tokens e chamadas por
+provider (Gemini/DeepSeek/Groq) e por rota, além de hit rate do cache
+semântico — lê a tabela `metricas_llm`, alimentada por
+`MonitoredLLMProvider` (`src/infrastructure/adapters/llm_factory.py`) em
+toda chamada de geração de texto.
 
 ### Prometheus — Métricas
 
 Acesse: `http://localhost:9090`
 
-Métricas coletadas:
-oraculo_requests_total          → total de mensagens processadas
-oraculo_requests_blocked_total  → bloqueadas pelo Porteiro
-oraculo_cache_hits_total        → hits no cache semântico
-oraculo_request_latency_ms      → histograma de latência
-oraculo_db_latency_ms           → latência do PostgreSQL
+Métricas coletadas (não exaustivo):
+oraculo_requests_total                    → total de mensagens processadas
+oraculo_requests_blocked_total            → bloqueadas pelo Porteiro
+oraculo_semantic_cache_result_total       → hit/miss do cache semântico, por rota
+oraculo_router_cache_hit_total            → qual camada do Supervisor decidiu a rota
+oraculo_llm_cost_usd_total                → custo acumulado por provider
+oraculo_memory_layer_access_total         → acesso por camada de memória (L1-L4)
+oraculo_request_latency_ms                → histograma de latência
+oraculo_db_latency_ms                     → latência do PostgreSQL
 
 ### Grafana — Dashboards
 
-Acesse: `http://localhost:3001`  
-Login padrão: `admin` / `admin`
+Acesse: `http://localhost:3001`
+Login padrão: `admin` / `admin` (via `.env` `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD`)
 
-Dashboards recomendados:
-- Redis Overview (importar da comunidade: #763)
-- Custom: tokens/min, latência P95, hit rate de cache
+Dashboards versionados em `observability/grafana/provisioning/dashboards/`:
+
+- `llm_custo_providers.json` — custo/tokens/cache por provider
+- `comportamento_ia.json` — roteamento, memória, falhas do pipeline
+
+### Jaeger — Tracing distribuído (OpenTelemetry)
+
+Acesse: `http://localhost:16686`. Desativado por padrão — precisa de
+`ENABLE_TRACING=true` no `.env` (o container `jaeger` já sobe com o profile
+`monitoring`, mas sem a flag ligada o SDK do OpenTelemetry nem tenta
+exportar). Correlaciona uma mensagem completa (FastAPI → Celery → chamadas
+Gemini/STT/TTS) num trace só, com atributos `gen_ai.*` (convenção semântica
+oficial). Instrumentação manual nos mesmos pontos-único já usados pra custo
+(`llm_factory.py`, `audio_service.py`) — Celery não usa auto-instrumentação
+de propósito (signals customizados de event loop, ver `celery_app.py`).
 
 ---
 
@@ -763,7 +775,6 @@ print(f'{len(keys)} chunks no Redis')
 | **Docker** | "Contêiner" que empacota o sistema inteiro para rodar em qualquer máquina |
 | **Alembic** | Sistema de versionamento do banco de dados (controla mudanças na estrutura) |
 | **Evolution API** | Software que conecta o sistema ao WhatsApp Business |
-| **Langfuse** | Ferramenta para monitorar e debugar chamadas ao LLM |
 | **Prometheus** | Coleta métricas do sistema (quantas mensagens, latência, erros) |
 | **Grafana** | Cria gráficos bonitos com as métricas do Prometheus |
 

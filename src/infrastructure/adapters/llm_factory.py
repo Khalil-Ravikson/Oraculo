@@ -146,8 +146,13 @@ class MonitoredLLMProvider:
         *,
         user_id: str = "", rota: str = "",
     ) -> LLMResponse:
+        from src.infrastructure.observability.tracing import get_tracer, llm_span
+
         t0 = time.monotonic()
-        resp = await self._provider.gerar_resposta_async(prompt, system_instruction, temperatura, max_tokens)
+        with llm_span(get_tracer(), "chat", self.provider_name, self.model, rota or self._rota_hint) as span:
+            resp = await self._provider.gerar_resposta_async(prompt, system_instruction, temperatura, max_tokens)
+            span.set_attribute("gen_ai.usage.input_tokens", resp.input_tokens)
+            span.set_attribute("gen_ai.usage.output_tokens", resp.output_tokens)
         ms = int((time.monotonic() - t0) * 1000)
         await self._registrar_async(resp.input_tokens, resp.output_tokens, ms, user_id, rota or self._rota_hint)
         return resp
@@ -161,12 +166,17 @@ class MonitoredLLMProvider:
         *,
         user_id: str = "", rota: str = "",
     ) -> T | None:
+        from src.infrastructure.observability.tracing import get_tracer, llm_span
+
         t0 = time.monotonic()
-        resultado = await self._provider.gerar_resposta_estruturada_async(
-            prompt, response_schema, system_instruction, temperatura,
-        )
+        with llm_span(get_tracer(), "chat_structured", self.provider_name, self.model, rota or self._rota_hint) as span:
+            resultado = await self._provider.gerar_resposta_estruturada_async(
+                prompt, response_schema, system_instruction, temperatura,
+            )
+            tokens_in, tokens_out = getattr(self._provider, "ultimo_uso_tokens", (0, 0))
+            span.set_attribute("gen_ai.usage.input_tokens", tokens_in)
+            span.set_attribute("gen_ai.usage.output_tokens", tokens_out)
         ms = int((time.monotonic() - t0) * 1000)
-        tokens_in, tokens_out = getattr(self._provider, "ultimo_uso_tokens", (0, 0))
         await self._registrar_async(tokens_in, tokens_out, ms, user_id, rota or self._rota_hint)
         return resultado
 
@@ -178,8 +188,13 @@ class MonitoredLLMProvider:
         *,
         user_id: str = "", rota: str = "",
     ) -> LLMResponse:
+        from src.infrastructure.observability.tracing import get_tracer, llm_span
+
         t0 = time.monotonic()
-        resp = self._provider.gerar_resposta_sincrono(prompt, temperatura, max_tokens)
+        with llm_span(get_tracer(), "chat", self.provider_name, self.model, rota or self._rota_hint) as span:
+            resp = self._provider.gerar_resposta_sincrono(prompt, temperatura, max_tokens)
+            span.set_attribute("gen_ai.usage.input_tokens", resp.input_tokens)
+            span.set_attribute("gen_ai.usage.output_tokens", resp.output_tokens)
         ms = int((time.monotonic() - t0) * 1000)
         self._registrar_sync(resp.input_tokens, resp.output_tokens, ms, user_id, rota or self._rota_hint)
         return resp

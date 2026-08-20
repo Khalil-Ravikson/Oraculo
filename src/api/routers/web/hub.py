@@ -664,6 +664,53 @@ async def llm_provider_set(request: Request, data: GlobalLLMProviderRequest):
     return {"provider": data.provider}
 
 
+class BrlRateRequest(BaseModel):
+    taxa: float
+
+
+@router.post("/llm-custo/brl-rate")
+async def llm_custo_brl_rate_set(request: Request, data: BrlRateRequest):
+    """Edita a taxa USD→BRL usada em `/hub/llm-custo` (Redis
+    `admin:usd_brl_rate`, mesmo padrão de `admin:llm_provider` — sem API de
+    câmbio externa, decisão deliberada, ver plano de observabilidade)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    if data.taxa <= 0:
+        return {"error": "Taxa precisa ser maior que zero."}
+
+    from src.infrastructure.observability.pricing import _CHAVE_BRL_RATE
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        get_redis_text().set(_CHAVE_BRL_RATE, str(data.taxa))
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao gravar taxa BRL no Redis: %s", exc)
+        return {"error": "Falha ao gravar no Redis. Tente novamente."}
+
+    return {"taxa": data.taxa}
+
+
+@router.post("/llm-custo/brl-rate/auto")
+async def llm_custo_brl_rate_usar_auto(request: Request):
+    """Remove o override manual — volta a usar a cotação ao vivo (ou o
+    fallback fixo, se a task `atualizar_taxa_brl` ainda não rodou)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.observability.pricing import _CHAVE_BRL_RATE, taxa_brl_ativa, taxa_brl_origem
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        get_redis_text().delete(_CHAVE_BRL_RATE)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao remover override manual de taxa BRL: %s", exc)
+        return {"error": "Falha ao gravar no Redis. Tente novamente."}
+
+    return {"taxa": taxa_brl_ativa(), "origem": taxa_brl_origem()}
+
+
 @router.get("/llm-custo", response_class=HTMLResponse)
 async def llm_custo_page(request: Request):
     """Página de custo/telemetria real dos providers LLM (Postgres
@@ -686,6 +733,7 @@ async def llm_custo_data(request: Request, horas: int = 24):
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.repositories.observability_repository import ObservabilityRepository
     from src.infrastructure.adapters.llm_factory import _provider_global_ativo
+    from src.infrastructure.observability.pricing import taxa_brl_ativa, taxa_brl_origem
 
     try:
         async with AsyncSessionLocal() as session:
@@ -696,6 +744,9 @@ async def llm_custo_data(request: Request, horas: int = 24):
     except Exception as exc:
         logger.warning("⚠️  [HUB] Falha ao ler telemetria de custo: %s", exc)
         return {"error": "Falha ao consultar métricas."}
+
+    taxa_brl = taxa_brl_ativa()
+    custo_usd_total = float(resumo.get("custo_usd") or 0)
 
     try:
         from src.infrastructure.semantic_cache import cache_stats, TTL_POR_ROTA, THRESHOLD_POR_ROTA
@@ -713,6 +764,9 @@ async def llm_custo_data(request: Request, horas: int = 24):
         "por_provider": por_provider,
         "cache": cache,
         "horas": horas,
+        "taxa_brl": taxa_brl,
+        "taxa_brl_origem": taxa_brl_origem(),
+        "custo_brl_total": round(custo_usd_total * taxa_brl, 4),
     }
 
 

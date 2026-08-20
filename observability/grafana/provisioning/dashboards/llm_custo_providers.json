@@ -7,6 +7,18 @@
   "version": 1,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "taxa_brl",
+        "type": "textbox",
+        "label": "Taxa USD→BRL",
+        "description": "Mesma taxa manual editada em /hub/llm-custo — edite aqui também se quiser o valor certo nos painéis (Grafana não lê o Redis do hub).",
+        "query": "5.40",
+        "current": { "text": "5.40", "value": "5.40" }
+      }
+    ]
+  },
   "panels": [
     {
       "id": 1,
@@ -74,36 +86,38 @@
     },
     {
       "id": 7,
-      "title": "Cache hit rate (Redis semântico)",
+      "title": "Cache semântico — hit rate por rota",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
       "datasource": "Prometheus",
+      "description": "oraculo_semantic_cache_result_total{rota,result} — SemanticCache real (cosine > 0.92), src/infrastructure/semantic_cache.py.",
       "targets": [
-        { "expr": "sum by (doc_type) (rate(oraculo_cache_hits_total[5m]))", "legendFormat": "{{doc_type}}" }
-      ]
-    },
-    {
-      "id": 8,
-      "title": "Conflito Orquestrador × Supervisor (override_total)",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
-      "datasource": "Prometheus",
-      "description": "Só observação — não decide nada. Ver notas.md §1 e §5.1 sobre a fusão dos classificadores (decisão em aberto, fora de escopo desta rodada).",
-      "targets": [
-        { "expr": "sum by (mudou) (rate(oraculo_router_override_total[5m])) * 60", "legendFormat": "mudou={{mudou}}" }
+        { "expr": "sum by (rota, result) (rate(oraculo_semantic_cache_result_total[5m]))", "legendFormat": "{{rota}}/{{result}}" }
       ]
     },
     {
       "id": 9,
       "title": "Falhas do pipeline (parse JSON / worker não encontrado / RAG zero chunks)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
       "datasource": "Prometheus",
       "targets": [
         { "expr": "rate(oraculo_orchestrator_json_parse_failures_total[5m]) * 60", "legendFormat": "orchestrator_json_parse_failure" },
         { "expr": "sum(rate(oraculo_planner_worker_not_found_total[5m])) * 60", "legendFormat": "planner_worker_not_found" },
         { "expr": "sum by (doc_type) (rate(oraculo_rag_zero_chunks_total[5m])) * 60", "legendFormat": "rag_zero_chunks/{{doc_type}}" }
       ]
+    },
+    {
+      "id": 10,
+      "title": "Custo por minuto por provider (BRL) — inclui STT/TTS unificado",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "datasource": "Prometheus",
+      "description": "Mesma métrica oraculo_llm_cost_usd_total multiplicada pela variável $taxa_brl (editável no topo do dashboard) — inclui rota=stt/tts, ver AudioService._registrar_uso_multimodal.",
+      "targets": [
+        { "expr": "sum by (provider) (rate(oraculo_llm_cost_usd_total[5m])) * 60 * ${taxa_brl}", "legendFormat": "{{provider}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyBRL" }, "overrides": [] }
     }
   ]
 }

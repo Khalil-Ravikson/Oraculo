@@ -92,8 +92,14 @@ class GeminiProvider:
             return LLMResponse(
                 conteudo      = text,
                 model         = self._model,
-                input_tokens  = getattr(usage, "prompt_token_count",     0),
-                output_tokens = getattr(usage, "candidates_token_count", 0),
+                # `or 0`: a API Gemini pode devolver o atributo presente mas
+                # com valor None (resposta truncada/sem candidatos — comum
+                # com max_tokens baixo + thinking habilitado), e getattr só
+                # cobre o atributo AUSENTE, não o valor None. Sem isso,
+                # `pricing.calcular_custo_usd` explodia com
+                # "unsupported operand type(s) for /: 'NoneType' and 'int'".
+                input_tokens  = getattr(usage, "prompt_token_count",     0) or 0,
+                output_tokens = getattr(usage, "candidates_token_count", 0) or 0,
                 sucesso       = bool(text),
             )
         except Exception as exc:
@@ -183,8 +189,14 @@ class GeminiProvider:
             return LLMResponse(
                 conteudo      = text,
                 model         = self._model,
-                input_tokens  = getattr(usage, "prompt_token_count",     0),
-                output_tokens = getattr(usage, "candidates_token_count", 0),
+                # `or 0`: a API Gemini pode devolver o atributo presente mas
+                # com valor None (resposta truncada/sem candidatos — comum
+                # com max_tokens baixo + thinking habilitado), e getattr só
+                # cobre o atributo AUSENTE, não o valor None. Sem isso,
+                # `pricing.calcular_custo_usd` explodia com
+                # "unsupported operand type(s) for /: 'NoneType' and 'int'".
+                input_tokens  = getattr(usage, "prompt_token_count",     0) or 0,
+                output_tokens = getattr(usage, "candidates_token_count", 0) or 0,
                 sucesso       = bool(text),
             )
         except Exception as exc:

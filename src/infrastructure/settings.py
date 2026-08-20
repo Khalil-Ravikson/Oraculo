@@ -1,13 +1,6 @@
 """
-infrastructure/settings.py — Sprint 1 (Langfuse variables)
+infrastructure/settings.py
 ===========================================================
-
-ADICIONADO:
-  LANGFUSE_SECRET_KEY  → chave secreta gerada no painel Langfuse
-  LANGFUSE_PUBLIC_KEY  → chave pública para o SDK
-  LANGFUSE_HOST        → URL do container Langfuse (interno Docker)
-
-Se as chaves estiverem vazias, o tracing é desativado silenciosamente.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from src.infrastructure.paths import ENV_FILE
@@ -104,6 +97,18 @@ class Settings(BaseSettings):
     ADMIN_CONFIRMATION_TOKEN:  str = ""
     STUDENT_NUMBERS:           str = ""
     ALLOWED_GROUP_ID: str = "120363409704662108@g.us"
+    # Fallback quando não há override em `admin:usd_brl_rate` (Redis, editável
+    # via /hub/llm-custo) — cotação aproximada, não uma fonte de câmbio ao
+    # vivo (decisão deliberada: taxa fixa configurável, sem API externa).
+    USD_BRL_RATE: float = 5.40
+
+    # ── Tracing (OpenTelemetry → Jaeger, profile "monitoring") ─────
+    # Desativado por padrão: só faz sentido com o container `jaeger` no ar
+    # (`docker compose --profile monitoring up`). Setup nunca é crítico —
+    # se o endpoint estiver inalcançável, o SDK do OTel só falha silenciosamente
+    # no exporter (mesmo espírito de toda telemetria deste projeto).
+    ENABLE_TRACING: bool = False
+    OTEL_EXPORTER_ENDPOINT: str = "http://jaeger:4317"
     # ── Embedding ─────────────────────────────────────────────────
     EMBEDDING_PROVIDER: str = "google"
     ENV: str = "production"
@@ -111,13 +116,6 @@ class Settings(BaseSettings):
     @property
     def is_dev(self) -> bool:
         return self.ENV.lower() == "dev"
-    # ── Sprint 1: Langfuse (Observabilidade LLM) ──────────────────
-    # Gere as chaves em http://localhost:3000 → Settings → API Keys
-    # Se vazias, o tracing é desativado silenciosamente (sem erro).
-    LANGFUSE_PUBLIC_KEY: str = ""
-    LANGFUSE_SECRET_KEY: str = ""
-    LANGFUSE_HOST: str = "http://langfuse:3000"
-
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         case_sensitive=False,
@@ -134,9 +132,6 @@ class Settings(BaseSettings):
             erros.append("ADMIN_NUMBERS não configurada!")
         if not self.GEMINI_API_KEY:
             erros.append("GEMINI_API_KEY não configurada — bot não funcionará!")
-        # Sprint 1: aviso sobre Langfuse (não é crítico)
-        if not self.LANGFUSE_SECRET_KEY:
-            erros.append("LANGFUSE_SECRET_KEY vazia — tracing LLM desativado.")
         return erros
 
 

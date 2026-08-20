@@ -9,6 +9,11 @@ class TranscriptionResult:
     ok:    bool
     text:  str = ""
     error: str = ""
+    # Uso real de tokens Gemini (quando o provider expõe usage_metadata) —
+    # 0/0 para providers que não cobram por token (ex: local). Alimenta o
+    # custo unificado em AudioService.transcribe().
+    input_tokens:  int = 0
+    output_tokens: int = 0
 
 
 class ISpeechToTextProvider(Protocol):

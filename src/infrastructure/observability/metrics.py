@@ -92,10 +92,6 @@ class PrometheusMetrics:
             Counter, f"{ns}_errors_total",
             "Erros no pipeline por nó", ["node"])
 
-        self._cache_hits_total = _get_or_create(
-            Counter, f"{ns}_cache_hits_total",
-            "Hits no Cache por tipo de documento", ["doc_type"])
-
         self._hitl_total = _get_or_create(
             Counter, f"{ns}_hitl_confirmations_total",
             "Confirmações HITL por resultado", ["resultado"])
@@ -124,13 +120,7 @@ class PrometheusMetrics:
         # ── Counters de roteamento — pegam os bugs reais já documentados em
         # notas.md §5.1/§5.2 antes de virarem sintoma em produção. Só
         # observação: nenhum destes contadores decide nada, só mede o que
-        # o código já faz hoje (conflito Orquestrador/Supervisor incluso —
-        # ver notas.md §1, resolução do conflito é decisão separada).
-        self._router_override_total = _get_or_create(
-            Counter, f"{ns}_router_override_total",
-            "Vezes que o Orquestrador sobrescreveu a rota do Supervisor",
-            ["orchestrator_action", "supervisor_rota", "mudou"])
-
+        # o código já faz hoje.
         self._planner_worker_not_found_total = _get_or_create(
             Counter, f"{ns}_planner_worker_not_found_total",
             "Worker do plano não encontrado no registry", ["worker"])
@@ -275,10 +265,6 @@ class PrometheusMetrics:
         if self._enabled:
             self._errors_total.labels(node=node).inc()
 
-    def increment_cache_hits(self, doc_type: str = "geral") -> None:
-        if self._enabled:
-            self._cache_hits_total.labels(doc_type=doc_type).inc()
-
     def increment_hitl(self, resultado: str) -> None:
         if self._enabled:
             self._hitl_total.labels(resultado=resultado).inc()
@@ -322,14 +308,6 @@ class PrometheusMetrics:
         self._llm_calls_total.labels(provider=provider, modelo=modelo or "?", rota=rota or "?").inc()
 
     # ── Métodos de observabilidade de roteamento (notas.md §5.2) ──────────────
-
-    def increment_router_override(self, orchestrator_action: str, supervisor_rota: str, mudou: bool) -> None:
-        if self._enabled:
-            self._router_override_total.labels(
-                orchestrator_action=orchestrator_action or "?",
-                supervisor_rota=supervisor_rota or "?",
-                mudou="sim" if mudou else "nao",
-            ).inc()
 
     def increment_planner_worker_not_found(self, worker: str) -> None:
         if self._enabled:

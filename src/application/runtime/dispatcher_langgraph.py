@@ -327,7 +327,12 @@ async def processar(
     if decision.rota not in _ROTAS_LANGGRAPH:
         # Não é escopo deste experimento (SIGAA, comandos, greeting...)
         # → delega inteiro pro pipeline original, sem retrabalho nosso.
-        return await _processar_original(message, session_id, user_context, history, fatos)
+        # `decision_pronta=decision`: bug real corrigido (achado analisando
+        # log de produção) — sem isso, `dispatcher.py::processar()`
+        # reclassificava a MESMA mensagem do zero (2ª chamada Gemini Flash
+        # paga, mesmo custo/latência em dobro pra rotear 1 mensagem só).
+        return await _processar_original(message, session_id, user_context, history, fatos,
+                                          decision_pronta=decision)
 
     route = {"TICKET_ABERTURA": "ticket", "CRUD": "crud"}.get(decision.rota, "rag")
     logger.info("🧪 [LANGGRAPH] rota=%s → node=%s (session=%s)", decision.rota, route, session_id)

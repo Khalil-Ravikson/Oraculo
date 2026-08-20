@@ -5,7 +5,6 @@ infrastructure/celery_app.py — Sprint 1 (Recovery Signal + Stream Health)
 MUDANÇAS vs versão anterior:
   ADICIONADO:
     - Signal worker_ready → chama recover_pending_messages() no startup
-    - Signal worker_shutdown → flush Langfuse antes de encerrar
     - Fila "streams" para o recovery task periódico (opcional)
 
   MANTIDO:
@@ -18,7 +17,7 @@ import os
 import logging
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_ready, worker_shutdown
+from celery.signals import worker_ready
 from src.infrastructure.settings import settings as _settings
 celery_broker_url = _settings.REDIS_URL.replace("/0", "/1")
 celery_backend_url = _settings.REDIS_URL.replace("/0", "/2")
@@ -87,6 +86,15 @@ celery_app.conf.update(
             "args":     [{"plan_id": "beat", "session_id": "beat", "nivel": "L"}],
             "options":  {"queue": "default"},
         },
+        # Taxa USD→BRL ao vivo (custo real em dinheiro no /hub/llm-custo) —
+        # a cada 6h é sobra de margem pra câmbio (não é day-trading), evita
+        # martelar a API gratuita. Só ATUALIZA o valor auto; override manual
+        # via /hub/llm-custo continua tendo precedência (ver pricing.py::taxa_brl_ativa).
+        "atualizar_taxa_brl": {
+            "task":     "atualizar_taxa_brl",
+            "schedule": crontab(minute=0, hour="*/6"),
+            "options":  {"queue": "default"},
+        },
     },
 
     # ── Routing ───────────────────────────────────────────────────────────────
@@ -100,6 +108,7 @@ celery_app.conf.update(
         "worker_rag_search":          {"queue": "rag_search"},
         "worker_synthesis":           {"queue": "synthesis"},
         "beat_nightly_memory_sync":   {"queue": "default"},
+        "atualizar_taxa_brl":         {"queue": "default"},
         "worker_audio_to_text":   {"queue": "media"},
         "worker_text_to_audio":   {"queue": "media"},
         "worker_ytb_download":    {"queue": "media"},
@@ -126,7 +135,7 @@ celery_app.autodiscover_tasks([
 logger = logging.getLogger(__name__)
 
 
-from celery.signals import worker_ready, worker_shutdown, worker_process_init, worker_process_shutdown
+from celery.signals import worker_ready, worker_process_init, worker_process_shutdown
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Event loop persistente por processo worker (prefork, single-thread, tasks
@@ -168,6 +177,16 @@ def on_worker_process_init(**kwargs):
     task "reranker" (fila rag_search, só consumida por worker_rag). Setar
     CELERY_PRELOAD_RERANKER=true só no worker_rag (docker-compose.yml).
     """
+    # Tracing (OpenTelemetry) — sem gate, roda em todo worker (leve, sem
+    # lib C pesada) — cada processo Celery precisa do seu próprio
+    # TracerProvider (processo separado do FastAPI). NO-OP se
+    # settings.ENABLE_TRACING=False.
+    try:
+        from src.infrastructure.observability.tracing import setup_tracing
+        setup_tracing(service_name="oraculo-worker")
+    except Exception as e:
+        logger.warning("⚠️ [CELERY] Falha ao configurar tracing: %s", e)
+
     if os.environ.get("CELERY_PRELOAD_RERANKER", "false").lower() != "true":
         return
     try:
@@ -229,24 +248,6 @@ def on_worker_ready(sender=None, **kwargs):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Signal: worker_shutdown — Flush Langfuse antes de encerrar
-# ─────────────────────────────────────────────────────────────────────────────
-
-@worker_shutdown.connect
-def on_worker_shutdown(sender=None, **kwargs):
-    """
-    Garante que todos os spans Langfuse pendentes sejam enviados antes
-    do worker encerrar (SIGTERM / docker stop).
-    """
-    try:
-        from src.infrastructure.observability.langfuse_client import flush_langfuse
-        flush_langfuse()
-        logger.info("✅ [CELERY] Langfuse spans flushed no shutdown.")
-    except Exception as e:
-        logger.debug("ℹ️  [CELERY] Langfuse flush ignorado: %s", e)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Task: stream_recovery (periódica, defensiva)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -264,6 +265,39 @@ def stream_recovery_task(self) -> dict:
     except Exception as e:
         logger.error("❌ stream_recovery_task: %s", e)
         return {"recovered": 0, "status": "error", "error": str(e)}
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: atualizar_taxa_brl (periódica — câmbio USD→BRL ao vivo pro /hub/llm-custo)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@celery_app.task(name="atualizar_taxa_brl", bind=True, max_retries=2)
+def atualizar_taxa_brl_task(self) -> dict:
+    """
+    Busca a cotação USD→BRL ao vivo (open.er-api.com, gratuito, sem chave) e
+    grava em `admin:usd_brl_rate:auto` (Redis, sem TTL — o valor fica até a
+    próxima execução do beat, nunca "expira" pra um fallback ruim no meio do
+    dia). NUNCA sobrescreve com dado ruim: se a chamada falhar, mantém o
+    último valor bom. Override manual via /hub/llm-custo continua tendo
+    precedência — ver `pricing.py::taxa_brl_ativa()`.
+    """
+    import httpx
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        resp = httpx.get("https://open.er-api.com/v6/latest/USD", timeout=10.0)
+        resp.raise_for_status()
+        data = resp.json()
+        taxa = data.get("rates", {}).get("BRL")
+        if not taxa or taxa <= 0:
+            raise ValueError(f"Resposta sem taxa BRL válida: {data}")
+
+        get_redis_text().set("admin:usd_brl_rate:auto", str(taxa))
+        logger.info("💱 [FX] Taxa USD→BRL atualizada: %.4f", taxa)
+        return {"status": "ok", "taxa": taxa}
+    except Exception as e:
+        logger.warning("⚠️ [FX] Falha ao atualizar taxa USD→BRL (mantendo valor anterior): %s", e)
+        return {"status": "error", "error": str(e)}
+
+
 @celery_app.task(name="health_check", bind=True)
 def health_check_task(self) -> dict:
     """Ping para verificar se o worker está vivo."""

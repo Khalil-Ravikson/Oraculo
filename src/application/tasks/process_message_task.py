@@ -204,11 +204,6 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
 
     finally:
         try:
-            from src.infrastructure.observability.langfuse_client import flush_langfuse
-            flush_langfuse()
-        except Exception:
-            pass
-        try:
             lock.release()
         except Exception:
             pass
@@ -295,6 +290,23 @@ def processar_mensagem_whatsapp(
 
 
 async def _handle_message(**kwargs) -> None:
+    """Span raiz por mensagem (OpenTelemetry) — wrapper fino em vez de
+    reindentar `_handle_message_impl` inteiro (função grande, muitos
+    `return` cedo). NO-OP se ENABLE_TRACING=False. Correlaciona plan_id/
+    session_id entre este span e os spans filhos (LLM/STT/TTS) criados nos
+    pontos únicos de telemetria em llm_factory.py/audio_service.py."""
+    from src.infrastructure.observability.tracing import get_tracer
+
+    with get_tracer().start_as_current_span("processar_mensagem_whatsapp") as span:
+        try:
+            span.set_attribute("oraculo.session_id", kwargs.get("sender_jid", ""))
+            span.set_attribute("oraculo.remote_jid", kwargs.get("remote_jid", ""))
+        except Exception:
+            pass
+        await _handle_message_impl(**kwargs)
+
+
+async def _handle_message_impl(**kwargs) -> None:
     from src.infrastructure.redis_client import get_redis_text
     from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
     from src.router.gatekeeper import MessageRouter, DispatchTarget

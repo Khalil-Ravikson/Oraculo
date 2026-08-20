@@ -47,10 +47,16 @@ class GeminiSTTProvider:
                     "Retorne apenas a transcrição, sem comentários.",
                 ],
             )
+            usage = getattr(response, "usage_metadata", None)
+            tokens_in  = getattr(usage, "prompt_token_count", 0) or 0
+            tokens_out = getattr(usage, "candidates_token_count", 0) or 0
+
             text = (response.text or "").strip()
             if not text:
-                return TranscriptionResult(ok=False, error="Transcrição vazia")
-            return TranscriptionResult(ok=True, text=text)
+                return TranscriptionResult(ok=False, error="Transcrição vazia",
+                                            input_tokens=tokens_in, output_tokens=tokens_out)
+            return TranscriptionResult(ok=True, text=text,
+                                        input_tokens=tokens_in, output_tokens=tokens_out)
 
         except Exception as exc:
             logger.exception("❌ GeminiSTTProvider.transcribe | erro: %s", exc)

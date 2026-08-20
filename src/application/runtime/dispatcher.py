@@ -97,9 +97,18 @@ async def processar(
     user_context: dict,
     history: str = "",
     fatos: list[str] | None = None,
+    decision_pronta=None,
 ) -> OSResult:
     """
     Entry point do runtime. Substitui `cognitive_os.processar()`.
+
+    `decision_pronta`: RouterDecision já calculada por um chamador que
+    classificou a mensagem antes de decidir delegar pra cá (hoje só
+    `dispatcher_langgraph.py`, quando a rota cai fora do escopo do
+    experimento LangGraph) — evita reclassificar a mesma mensagem do zero
+    (bug real: 2 chamadas Gemini Flash pagas pra rotear 1 única mensagem,
+    achado analisando log de produção). `None` preserva o comportamento
+    original (classifica aqui).
     """
     t0 = time.monotonic()
     fatos = fatos or []
@@ -186,8 +195,11 @@ async def processar(
         # de decisão real, apagando classificações corretas). `rotear()` agora
         # absorve isso — CHECK_STATUS/MEDIA_DOWNLOAD entram no mesmo espaço de
         # rotas que CALENDARIO/EDITAL/etc. (ver router/llm_fallback.py).
-        from src.router.supervisor import rotear
-        decision = await rotear(message, session_id, user_context)
+        if decision_pronta is not None:
+            decision = decision_pronta
+        else:
+            from src.router.supervisor import rotear
+            decision = await rotear(message, session_id, user_context)
 
         logger.info(f"⏱️ Tempo Router: {time.monotonic() - t0}s")
 

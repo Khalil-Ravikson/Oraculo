@@ -160,6 +160,24 @@ services:
     networks:
       - oraculo_net
 
+  # Jaeger all-in-one: recebe spans via OTLP (porta 4317) e serve a UI de
+  # trace (16686) — 1 container só, sem collector/storage separados
+  # (armazenamento in-memory, perde histórico em restart; suficiente pra
+  # correlacionar plan_id entre FastAPI/Celery/Gemini enquanto o container
+  # roda, não é um requisito de retenção longa).
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: oraculo_jaeger
+    <<: [*restart, *logging, *resources-light]
+    profiles: ["monitoring"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # UI
+      - "4317:4317"     # OTLP gRPC
+    networks:
+      - oraculo_net
+
   grafana:
     image: grafana/grafana:10.4.0
     container_name: oraculo_grafana

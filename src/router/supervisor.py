@@ -130,6 +130,14 @@ _RE_CHECK_STATUS = re.compile(
     r'aquilo\s+que\s+(eu\s+)?pedi)\b',
     re.I,
 )
+# Nomes de sistemas institucionais cobertos pelo wiki CTIC (mesmos hubs
+# curados em `KNOWN_SYSTEM_HUBS`, infrastructure/scraping/implementations/
+# dokuwiki/hierarchy.py) mas SEM cobertura em nenhuma camada L1-L4 —
+# achado real: "Sipac" sozinho caía sempre no Flash (L5), com resultado
+# não-determinístico de mensagem pra mensagem (WIKI/GREETING/GERAL
+# alternando pra texto idêntico, achado analisando log de produção).
+# Rota WIKI (não SIGAA — esses sistemas não são o portal do aluno).
+_RE_SISTEMA_WIKI = re.compile(r'\b(sipac|siguema)\b', re.I)
 
 
 def _regex_rapido(query: str) -> str | None:
@@ -146,6 +154,8 @@ def _regex_rapido(query: str) -> str | None:
         return "TICKET_ABERTURA"
     if _RE_SIGAA.search(query):
         return "SIGAA"
+    if _RE_SISTEMA_WIKI.search(query):
+        return "WIKI"
     return None
 
 
@@ -283,6 +293,7 @@ async def rotear(
         logger.debug("Falha no roteamento por KNN dinâmico: %s", e)
 
     # ── Layer 5: Flash (LLM) ──────────────────────
+    _CACHE_HIT.labels(layer="flash_fallback").inc()
     decision = await _classificar_com_flash(query, ctx, session_id)
     ms = int((time.monotonic() - t0) * 1000)
     _LATENCY.observe(ms)
