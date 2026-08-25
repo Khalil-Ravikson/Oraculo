@@ -349,14 +349,23 @@ async def ticket_confirm(state: OraculoState) -> dict:
     resumo = f"Tipo: {d.get('tipo')}\nCategoria: {d.get('categoria')}\nDescrição: {d.get('queixa')}"
     pergunta = _com_erro(f"{resumo}\n\nConfirma o envio? (sim/não)", state.ticket_error)
     resposta = interrupt({"question": pergunta})
+    # validar_confirmacao() checado ANTES de _eh_saida(): _RE_NEGA já reconhece
+    # "cancela"/"cancelar" como resposta válida de "não" pra ESTA pergunta
+    # específica — checar _eh_saida() primeiro (como nos nodes de pergunta)
+    # sequestrava esse "cancelar" pro texto genérico de saída do atendimento
+    # em vez do "❌ Ticket cancelado." específico do node (achado ao corrigir
+    # o isolamento de teste de Postgres destes cenários, Fase 2a). "sair"/
+    # "desistir"/"abortar"/"encerrar"/"parar" não são reconhecidos por
+    # validar_confirmacao(), então continuam caindo no fallback de saída
+    # global abaixo.
+    ok, valor = validar_confirmacao(str(resposta))
+    if ok:
+        if valor:
+            return {"ticket_confirmed": True, "ticket_error": ""}
+        return {"ticket_confirmed": False, "ticket_error": "", "answer": "❌ Ticket cancelado."}
     if _eh_saida(str(resposta)):
         return _resultado_saida()
-    ok, valor = validar_confirmacao(str(resposta))
-    if not ok:
-        return {"ticket_confirmed": None, "ticket_error": "❌ Não entendi — responda algo como \"sim\"/\"pode enviar\" ou \"não\"/\"cancelar\"."}
-    if valor:
-        return {"ticket_confirmed": True, "ticket_error": ""}
-    return {"ticket_confirmed": False, "ticket_error": "", "answer": "❌ Ticket cancelado."}
+    return {"ticket_confirmed": None, "ticket_error": "❌ Não entendi — responda algo como \"sim\"/\"pode enviar\" ou \"não\"/\"cancelar\"."}
 
 
 def _confirm_route(state: OraculoState) -> str:
@@ -451,14 +460,17 @@ async def crud_confirm(state: OraculoState) -> dict:
     resumo = f"Campo: {d.get('campo')}\nNovo valor: {d.get('valor')}"
     pergunta = _com_erro(f"{resumo}\n\nConfirma a atualização? (sim/não)", state.crud_error)
     resposta = interrupt({"question": pergunta})
+    # Mesmo motivo do ticket_confirm acima: validar_confirmacao() primeiro,
+    # pra "cancelar" cair no "❌ Atualização cancelada." específico em vez do
+    # texto genérico de saída do atendimento.
+    ok, valor = validar_confirmacao(str(resposta))
+    if ok:
+        if valor:
+            return {"crud_confirmed": True, "crud_error": ""}
+        return {"crud_confirmed": False, "crud_error": "", "answer": "❌ Atualização cancelada."}
     if _eh_saida(str(resposta)):
         return _resultado_saida()
-    ok, valor = validar_confirmacao(str(resposta))
-    if not ok:
-        return {"crud_confirmed": None, "crud_error": "❌ Não entendi — responda algo como \"sim\"/\"pode enviar\" ou \"não\"/\"cancelar\"."}
-    if valor:
-        return {"crud_confirmed": True, "crud_error": ""}
-    return {"crud_confirmed": False, "crud_error": "", "answer": "❌ Atualização cancelada."}
+    return {"crud_confirmed": None, "crud_error": "❌ Não entendi — responda algo como \"sim\"/\"pode enviar\" ou \"não\"/\"cancelar\"."}
 
 
 def _crud_confirm_route(state: OraculoState) -> str:

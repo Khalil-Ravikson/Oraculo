@@ -27,6 +27,33 @@ def _fake_decision(rota: str) -> RouterDecision:
     )
 
 
+@pytest.fixture(autouse=True)
+def _sem_postgres_real(monkeypatch):
+    """Isola os testes do funil de ticket da dependência de Postgres real.
+
+    rbac.checar_permissao_chamado() (chamado por ticket_flow.py em cada passo
+    do funil) chama buscar_pessoa_por_telefone(), que abre uma conexão de
+    verdade ao banco — sem Postgres no ambiente de teste, isso derruba os
+    testes com OSError de conexão recusada, não uma falha de lógica do funil.
+    Nenhum teste aqui exercita RBAC/lookup em si, só o funil do grafo/
+    dispatcher, então simula "sem cadastro encontrado" e liga
+    DEV_TEST_SKIP_REGISTRATION pra checar_permissao_chamado sintetizar o
+    usuário de teste permissivo que ela já sabe montar (rbac.py:22-31) sem
+    tocar o banco.
+    """
+    from src.infrastructure import settings as settings_module
+
+    monkeypatch.setattr(settings_module.settings, "DEV_TEST_SKIP_REGISTRATION", True)
+
+    async def _fake_buscar(*a, **k):
+        return None
+
+    monkeypatch.setattr(
+        "src.capabilities.persistence.pessoa_lookup.buscar_pessoa_por_telefone",
+        _fake_buscar,
+    )
+
+
 @pytest.mark.asyncio
 async def test_funil_ticket_completo_com_respostas_validas():
     app = build_graph()
@@ -187,7 +214,7 @@ async def test_dispatcher_detour_institucional_preserva_ticket(monkeypatch):
 
     monkeypatch.setattr("src.router.supervisor.rotear", _rotear_sequencial)
 
-    async def _fake_rag(mensagem: str) -> str:
+    async def _fake_rag(mensagem: str, **kwargs) -> str:
         return "A UEMA foi fundada em 1981."
 
     monkeypatch.setattr("langgraph_experiment.nodes.responder_rag_direto", _fake_rag)

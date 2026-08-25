@@ -25,6 +25,32 @@ def _fake_decision(rota: str) -> RouterDecision:
     )
 
 
+@pytest.fixture(autouse=True)
+def _sem_postgres_real(monkeypatch):
+    """Isola os testes do funil de CRUD da dependência de Postgres real.
+
+    rbac.checar_permissao_chamado() (chamado por crud_tool.py em cada passo do
+    funil) chama buscar_pessoa_por_telefone(), que abre uma conexão de verdade
+    ao banco — sem Postgres no ambiente de teste, isso derruba os testes com
+    OSError de conexão recusada, não uma falha de lógica do funil. Nenhum
+    teste aqui exercita RBAC/lookup em si, só o funil do grafo, então simula
+    "sem cadastro encontrado" e liga DEV_TEST_SKIP_REGISTRATION pra
+    checar_permissao_chamado sintetizar o usuário de teste permissivo que ela
+    já sabe montar (rbac.py:22-31) sem tocar o banco.
+    """
+    from src.infrastructure import settings as settings_module
+
+    monkeypatch.setattr(settings_module.settings, "DEV_TEST_SKIP_REGISTRATION", True)
+
+    async def _fake_buscar(*a, **k):
+        return None
+
+    monkeypatch.setattr(
+        "src.capabilities.persistence.pessoa_lookup.buscar_pessoa_por_telefone",
+        _fake_buscar,
+    )
+
+
 @pytest.mark.asyncio
 async def test_crud_atualizar_setor_completo(monkeypatch):
     from src.infrastructure import settings as settings_module
