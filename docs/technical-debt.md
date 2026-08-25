@@ -19,6 +19,7 @@
 | [TD-010](#td-010--gemini_model-preview-não-fixado) | `GEMINI_MODEL` apontando para versão *preview* | Alta |
 | [TD-011](#td-011--migration-004_recria_tabela_pessoas-sem-explicação-no-histórico) | Migração `004_recria_tabela_pessoas` sem explicação no histórico Alembic | Média |
 | [TD-012](#td-012--testwiki_scraperpy-órfão) | `tests/test_wiki_scraper.py` órfão (import quebrado) | Baixa |
+| [TD-013](#td-013--gatekeeper-ignore-reescrito-incondicionalmente-para-llm) | Gatekeeper: toda decisão `IGNORE` é reescrita pra `LLM` — filtros de segurança inertes | Média |
 
 ---
 
@@ -257,3 +258,32 @@ argumento, tentaria coletá-lo).
 **Escopo desta execução:** documentado, **não removido** (é um arquivo de
 teste — removê-lo sem decisão explícita do usuário não é seguro o
 suficiente para esta rodada de organização).
+
+---
+
+## TD-013 — Gatekeeper `IGNORE` reescrito incondicionalmente para `LLM`
+
+**Problema:** `src/application/tasks/process_message_task.py:353-354` —
+toda decisão `DispatchTarget.IGNORE` do Gatekeeper (`gatekeeper.py::
+MessageRouter.route()`) é reescrita incondicionalmente para `LLM` antes de
+qualquer outra coisa acontecer:
+
+```python
+if decision.target == DispatchTarget.IGNORE:
+    decision.target = DispatchTarget.LLM
+```
+
+**Impacto:** os filtros de segurança do Gatekeeper (grupo estranho, texto
+vazio, não-admin em comando admin, etc.) não bloqueiam nada hoje — só mudam
+o motivo registrado no log (`decision.reason`), nunca o destino real do
+processamento. Pré-existente em `main`, não introduzido pelo plano de
+integração LangGraph/REST/MCP — descoberto durante a auditoria de
+2026-08-25 ao mapear os consumidores do Gatekeeper.
+
+**Evidência:** `process_message_task.py:353-354`; plano de integração
+LangGraph/REST/MCP, achado de arquitetura de 2026-08-25.
+
+**Escopo desta execução:** documentado, **não corrigido** — mexer no
+comportamento do Gatekeeper é decisão de segurança/produto que precisa de
+avaliação própria (por que o override foi introduzido, o que quebraria se
+removido), fora do escopo aprovado do plano de integração (Decisões 00-06).
