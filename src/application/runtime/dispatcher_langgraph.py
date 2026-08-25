@@ -1,14 +1,21 @@
 """
 src/application/runtime/dispatcher_langgraph.py
 ====================================================
-EXPERIMENTO — existe só na worktree/branch `langgraph`. Não é uma versão
-"nova" do dispatcher.py original, é um wrapper fino que intercepta as
-rotas TICKET_ABERTURA, CRUD e RAG (GERAL/CALENDARIO/EDITAL/CONTATOS/WIKI)
-para desviar pro StateGraph do LangGraph (`langgraph_experiment/graph.py`).
-Qualquer outra rota (SIGAA, comandos !@$, etc.) é 100% delegada pro
-`application/runtime/dispatcher.py` ORIGINAL — sem duplicar guardrails,
-Orchestrator, HITL do SIGAA, cache semântico, nem nenhuma outra lógica que
-já existe lá.
+Entry point de produção (ver Decisão 01/Fase 2d do plano de integração,
+docs/decisions/) — em migração progressiva pra assumir 100% das rotas.
+Nasceu como wrapper fino que intercepta só TICKET_ABERTURA/CRUD/RAG
+(GERAL/CALENDARIO/EDITAL/CONTATOS/WIKI) e delega o resto pro
+`application/runtime/dispatcher.py` original; SIGAA/MEDIA_DOWNLOAD/
+GREETING/CHECK_STATUS estão sendo portadas pra nodes nativos do grafo aqui,
+rota a rota — ver `_ROTAS_LANGGRAPH` e o estado de cada uma abaixo.
+`dispatcher.py` deixa de ser chamado em produção quando a última rota
+migrar (fica só pra debug/eval).
+
+Guardrails de input (prompt injection/rate limit) e a continuação de HITL
+legado (`handle_hitl_continuation`, SIGAA CPF/senha via
+`hitl:session:{id}`) rodam DIRETO aqui (não mais só via delegação pro
+dispatcher.py) — precisam existir neste módulo porque ele processa a
+maioria das rotas sem nunca chamar dispatcher.py.
 
 Classificação de rota reaproveita `router/supervisor.py::rotear()` (o
 Supervisor real, 5 camadas) — não o classify_node interno do
@@ -267,6 +274,45 @@ async def processar(
             answer=mcp_resultado["mensagem"], plan_id="mcp_lab", rota="MCP_LAB",
             cache_hit=False, total_ms=ms, status="ok",
         )
+
+    # ── -0c. Guardrails de input + continuação de HITL legado (Fase 2d) ─────
+    # Achado ao preparar a Fase 2d: este módulo nunca rodava
+    # InputGuardrail/handle_hitl_continuation — dependia inteiramente de
+    # delegar pra dispatcher.py::processar() (que roda os dois no topo) nas
+    # rotas fora de _ROTAS_LANGGRAPH. Isso já deixava GERAL/CALENDARIO/
+    # EDITAL/CONTATOS/WIKI/TICKET_ABERTURA/CRUD (sempre tratadas aqui, nunca
+    # delegadas) sem guardrail de prompt injection/rate limit; migrar SIGAA
+    # pra cá (Decisão 01) tornaria isso permanente pra 100% da produção, e
+    # pioraria um bug de roteamento real: o HITL legado de SIGAA
+    # (CPF/senha, `hitl:session:{id}`) não é visível pro Supervisor — sem
+    # este check, uma sessão no meio da coleta de CPF podia ser
+    # reclassificada pelo Supervisor pra uma rota RAG e o CPF digitado virar
+    # query de busca em vez de continuar o login. Mesma ordem/posição
+    # relativa que dispatcher.py já usa (guardrails antes, HITL legado
+    # depois), só que aqui em vez de lá.
+    from src.infrastructure.redis_client import get_redis_text
+
+    r = get_redis_text()
+
+    from src.application.chain.guardrails import get_input_guardrail
+
+    def _validate_sync():
+        return get_input_guardrail().validate(message, session_id, r)
+
+    guard_ok, text_or_error = await asyncio.to_thread(_validate_sync)
+    if not guard_ok:
+        ms = int((time.monotonic() - t0) * 1000)
+        return OSResult(
+            answer=text_or_error, plan_id="", rota="BLOCKED",
+            cache_hit=False, total_ms=ms, status="error",
+        )
+    message = text_or_error  # sanitizado
+
+    from src.agents.sigaa.auth_flow import handle_hitl_continuation
+
+    hitl_result = await handle_hitl_continuation(message, session_id, user_context, r)
+    if hitl_result is not None:
+        return hitl_result
 
     app = await _get_graph()
     config = _thread_config(session_id)

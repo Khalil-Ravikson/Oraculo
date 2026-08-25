@@ -51,6 +51,21 @@ def _sem_postgres_real(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _sem_redis_hitl_legado(monkeypatch):
+    """dispatcher_langgraph.py::processar() passou a chamar
+    handle_hitl_continuation (Fase 2d) antes de rotear — abre uma conexão
+    real ao Redis via redis_state.get_hitl_session(). Nenhum teste deste
+    arquivo cobre o HITL legado (SIGAA), só o funil nativo do grafo, então
+    mocka "sem sessão pendente" sem tocar Redis de verdade."""
+    async def _sem_sessao(*a, **k):
+        return None
+
+    monkeypatch.setattr(
+        "src.capabilities.persistence.redis_state.get_hitl_session", _sem_sessao,
+    )
+
+
 @pytest.mark.asyncio
 async def test_crud_atualizar_setor_completo(monkeypatch):
     from src.infrastructure import settings as settings_module
