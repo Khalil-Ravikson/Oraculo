@@ -58,7 +58,27 @@ class Settings(BaseSettings):
 
     # Nightly Memory flag
     ENABLE_NIGHTLY_MEMORY: bool = False
-    
+
+    # ── Flags do plano de integração LangGraph/REST/MCP (Fase 1) ────
+    # Todas desligadas por padrão (Decisão 00). Cada uma só passa a ser
+    # consumida pelo código quando a fase correspondente do plano é
+    # implementada — até lá, existem aqui só como scaffolding.
+    #
+    # Fase 2b: rag_node/responder_rag_direto despacham RAG/síntese pros
+    # workers Celery especializados (rag_search/synthesis) em vez de
+    # chamar os serviços in-process, como o Planner legado já faz.
+    FEATURE_LANGGRAPH_CELERY_DISPATCH: bool = False
+    # Fase 2d: SIGAA/MEDIA_DOWNLOAD/GREETING/CHECK_STATUS passam a ser
+    # nodes nativos do grafo, em vez de dispatcher_langgraph.py delegar
+    # pra dispatcher.py nessas rotas.
+    FEATURE_LANGGRAPH_NATIVE_ROUTES: bool = False
+    # Fase 3: rest_lab passa a rodar atrás de uma camada de Application
+    # própria em vez de continuar como lab isolado.
+    FEATURE_REST_PRODUCT: bool = False
+    # Fase 4: mcp_lab passa a rodar atrás de uma camada de Application
+    # própria, sem acesso direto a adapters de produção (EvolutionAdapter).
+    FEATURE_MCP_PRODUCT: bool = False
+
     # Workers config
     RAG_SEARCH_TIMEOUT_S:  float = 10.0
     SYNTHESIS_TIMEOUT_S:   float = 12.0
