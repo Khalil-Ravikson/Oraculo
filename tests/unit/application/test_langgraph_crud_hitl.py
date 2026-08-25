@@ -57,12 +57,22 @@ def _sem_redis_hitl_legado(monkeypatch):
     handle_hitl_continuation (Fase 2d) antes de rotear — abre uma conexão
     real ao Redis via redis_state.get_hitl_session(). Nenhum teste deste
     arquivo cobre o HITL legado (SIGAA), só o funil nativo do grafo, então
-    mocka "sem sessão pendente" sem tocar Redis de verdade."""
+    mocka "sem sessão pendente" sem tocar Redis de verdade.
+
+    Também neutraliza o rate limit real de InputGuardrail (mesmo commit) —
+    ver comentário equivalente em test_langgraph_ticket_hitl.py (achado
+    via CI com Redis real: um teste dessa suíte encadeando várias chamadas
+    de dlg.processar() na mesma sessão tropeçava no rate limit real, sem
+    relação com o que o teste queria exercitar)."""
     async def _sem_sessao(*a, **k):
         return None
 
     monkeypatch.setattr(
         "src.capabilities.persistence.redis_state.get_hitl_session", _sem_sessao,
+    )
+    monkeypatch.setattr(
+        "src.application.chain.guardrails.InputGuardrail._check_rate_limit",
+        lambda self, user_id, r: (False, ""),
     )
 
 

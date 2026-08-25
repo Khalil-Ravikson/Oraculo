@@ -60,12 +60,26 @@ def _sem_redis_hitl_legado(monkeypatch):
     handle_hitl_continuation (Fase 2d) antes de rotear — abre uma conexão
     real ao Redis via redis_state.get_hitl_session(). Nenhum teste deste
     arquivo cobre o HITL legado (SIGAA), só o funil nativo do grafo, então
-    mocka "sem sessão pendente" sem tocar Redis de verdade."""
+    mocka "sem sessão pendente" sem tocar Redis de verdade.
+
+    O mesmo commit também passou a rodar InputGuardrail.validate() (Fase
+    2d) — com Redis de verdade disponível (CI), o rate limit real
+    (_RATE_LIMIT_COUNT=8 msgs/60s) derrubava
+    test_dispatcher_nao_vaza_estado_entre_tickets_na_mesma_sessao, que
+    encadeia ~12 chamadas a dlg.processar() na MESMA sessão sem pausa —
+    simula 2 tickets seguidos rápido demais, não é o que o teste quer
+    exercitar (vazamento de estado, não rate limit). Neutraliza só o
+    sub-check de rate limit (o resto do guardrail — tamanho, injection,
+    sanitização — continua ativo)."""
     async def _sem_sessao(*a, **k):
         return None
 
     monkeypatch.setattr(
         "src.capabilities.persistence.redis_state.get_hitl_session", _sem_sessao,
+    )
+    monkeypatch.setattr(
+        "src.application.chain.guardrails.InputGuardrail._check_rate_limit",
+        lambda self, user_id, r: (False, ""),
     )
 
 

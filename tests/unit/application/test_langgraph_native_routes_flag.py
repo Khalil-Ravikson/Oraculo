@@ -17,11 +17,20 @@ import src.application.runtime.dispatcher_langgraph as dlg
 
 @pytest.fixture(autouse=True)
 def _sem_redis_hitl_legado(monkeypatch):
+    """Mesmo motivo das outras suítes de dispatcher_langgraph.py::processar()
+    (Fase 2d): isola do HITL legado (Redis real) e do rate limit real de
+    InputGuardrail — vários testes parametrizados aqui reusam o mesmo
+    session_id ("sess-1"), e um Redis real compartilhado entre execuções
+    na mesma sessão de CI acumularia contagem de rate limit entre eles."""
     async def _sem_sessao(*a, **k):
         return None
 
     monkeypatch.setattr(
         "src.capabilities.persistence.redis_state.get_hitl_session", _sem_sessao,
+    )
+    monkeypatch.setattr(
+        "src.application.chain.guardrails.InputGuardrail._check_rate_limit",
+        lambda self, user_id, r: (False, ""),
     )
 
 
