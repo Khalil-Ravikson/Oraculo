@@ -83,8 +83,13 @@ COPY --chown=oraculo:oraculo dados/      ./dados/
 COPY --chown=oraculo:oraculo templates/  ./templates/
 COPY --chown=oraculo:oraculo static/     ./static/
 COPY --chown=oraculo:oraculo src/        ./src/
-# 🧪 EXPERIMENTO (branch langgraph) — só existe nesta worktree, ver .claude.md do main
 COPY --chown=oraculo:oraculo langgraph_experiment/ ./langgraph_experiment/
+# Decisão 06 do plano de integração LangGraph/REST/MCP (Fase 6, 2026-08-25):
+# até aqui só existiam via bind-mount em docker-compose.yml — uma imagem
+# construída/publicada sem esse mount (deploy real fora do compose de dev)
+# quebrava com ImportError na primeira mensagem "rest ..."/"stack ...".
+COPY --chown=oraculo:oraculo rest_lab/    ./rest_lab/
+COPY --chown=oraculo:oraculo mcp_lab/     ./mcp_lab/
 
 EXPOSE 9000
 
