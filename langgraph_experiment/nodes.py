@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import re
 
 from langgraph.types import interrupt
+
+logger = logging.getLogger(__name__)
 
 from langgraph_experiment.state import OraculoState
 
@@ -63,9 +66,8 @@ async def responder_rag_direto(
     filtro de taxonomia), tratada como rota "GERAL" na síntese (afeta seleção
     de provider/modelo por rota), sem histórico de conversa nem fatos do
     usuário, e sem `session_id` na telemetria (`metricas_llm.user_id` vazio)."""
-    from src.agents.academic_knowledge.service import RAGSearchService
-    from src.agents.academic_knowledge.synthesis import SynthesisService
     from src.infrastructure.semantic_cache import SemanticCache
+    from src.infrastructure.settings import settings
 
     fatos = fatos or []
     cacheavel = rota not in ROTAS_SEM_CACHE
@@ -74,6 +76,14 @@ async def responder_rag_direto(
         cached = await SemanticCache().get(query=mensagem, rota=rota)
         if cached:
             return cached.get("answer", "")
+
+    if settings.FEATURE_LANGGRAPH_CELERY_DISPATCH:
+        return await _responder_rag_via_celery(
+            mensagem, rota=rota, history=history, fatos=fatos, session_id=session_id,
+        )
+
+    from src.agents.academic_knowledge.service import RAGSearchService
+    from src.agents.academic_knowledge.synthesis import SynthesisService
 
     rag = RAGSearchService()
     result = await rag.buscar(
@@ -101,6 +111,81 @@ async def responder_rag_direto(
         await SemanticCache().set(query=mensagem, rota=rota, response={"answer": synth_result.answer})
 
     return synth_result.answer
+
+
+async def _responder_rag_via_celery(
+    mensagem: str, rota: str, history: str, fatos: list[str], session_id: str,
+) -> str:
+    """Despacha RAG+síntese pros workers Celery especializados (filas
+    rag_search/synthesis, ver task_routes em celery_app.py) em vez de chamar
+    RAGSearchService/SynthesisService in-process — Decisão 02/Fase 2b do
+    plano de integração: mesma distribuição de carga entre filas que o
+    Planner legado (dispatcher.py::_despachar_workers) já usa, só que
+    aguardada de dentro do node do grafo em vez de entregue como efeito
+    colateral (o Planner dispara um chord que termina em
+    enviar_resposta_whatsapp_task e nunca aguarda o resultado; aqui
+    precisamos do texto de volta pra continuar o grafo, então é o mesmo
+    chord rag_search→synthesis, mas sem a etapa de entrega, com
+    `.get()` aguardado fora da event loop via asyncio.to_thread — o
+    worker do LangGraph já roda um loop persistente por processo (ver
+    celery_app.py::run_in_worker_loop), então isso não bloqueia outras
+    mensagens sendo processadas nele.
+
+    Gated por settings.FEATURE_LANGGRAPH_CELERY_DISPATCH (desligado por
+    padrão) — o SemanticCache().set() do resultado é feito pelo próprio
+    worker_synthesis_task (mesmo comportamento do Planner legado), por isso
+    não é repetido aqui como no caminho in-process acima.
+    """
+    import asyncio
+    import uuid
+
+    from celery import chord
+
+    from src.application.workers.worker_rag_search import worker_rag_search_task
+    from src.application.workers.worker_synthesis import worker_synthesis_task
+    from src.infrastructure.settings import settings
+
+    plan_id = f"lg-{uuid.uuid4().hex[:12]}"
+    plan_context = {
+        "query": mensagem, "route": rota, "history": history,
+        "fatos": fatos, "session_id": session_id,
+    }
+    rag_event = {
+        "plan_id": plan_id,
+        "session_id": session_id,
+        "step_id": "s1",
+        "doc_type": _doc_type_para_rota(rota, mensagem),
+        "query": mensagem,
+        "rota": rota,
+        "fatos": fatos,
+        "historico": history,
+        "plan_context": plan_context,
+    }
+    synthesis_event = {
+        "plan_id": plan_id,
+        "session_id": session_id,
+        "step_id": "s2",
+        "depends_on": ["s1"],
+        "plan_context": plan_context,
+        "query": mensagem,
+    }
+
+    workflow = chord([worker_rag_search_task.s(rag_event)], worker_synthesis_task.s(synthesis_event))
+    async_result = workflow.apply_async()
+
+    timeout_s = settings.RAG_SEARCH_TIMEOUT_S + settings.SYNTHESIS_TIMEOUT_S
+    try:
+        resultado = await asyncio.to_thread(async_result.get, timeout=timeout_s)
+    except Exception as exc:
+        logger.exception(
+            "❌ [LANGGRAPH] Celery dispatch de RAG/síntese falhou | plan=%s | %s",
+            plan_id, exc,
+        )
+        return "Estou enfrentando lentidão, mas anotei sua dúvida. Tente novamente em alguns instantes. 🙏"
+
+    if resultado.get("status") != "ok":
+        return resultado.get("answer") or "Não encontrei informações sobre isso nos documentos da UEMA."
+    return resultado.get("answer", "")
 
 
 async def rag_node(state: OraculoState) -> dict:
