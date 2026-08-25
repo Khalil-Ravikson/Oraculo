@@ -2140,8 +2140,10 @@ dois labs muda de propósito — continuam laboratórios de estudo.
 ### 16.7 Fase 6 — Dockerfile (Decisão 06)
 
 `COPY rest_lab/`/`COPY mcp_lab/` adicionados — antes só chegavam ao
-container via bind-mount do compose. **Não validado com `docker build`
-real** — sem Docker neste ambiente.
+container via bind-mount do compose. Validado com `docker build` real
+pelo usuário após o fechamento desta sessão (2026-08-25): build completo
+sem erro, `docker run --rm oraculo-test python -c "import rest_lab,
+mcp_lab"` devolveu `ok`. Decisão 06 fechada de verdade.
 
 ### 16.8 CI real via PR #1 — achado que o sandbox local não pegava
 
@@ -2164,8 +2166,8 @@ usuário de não mexer — fora do escopo das 7 decisões aprovadas).
 ### 16.9 Pendências explícitas que dependem de infra real (não deste sandbox)
 
 1. Teste de carga do despacho Celery de RAG/síntese (Decisão 02, Fase 2b).
-2. `docker build` real validando o `COPY rest_lab/`/`mcp_lab/` (Decisão 06,
-   Fase 6).
+2. ~~`docker build` real validando o `COPY rest_lab/`/`mcp_lab/`~~ — **fechado
+   2026-08-25**, ver §16.7.
 3. Teste manual via WhatsApp real das rotas nativas do LangGraph antes de
    ligar `FEATURE_LANGGRAPH_NATIVE_ROUTES`/`FEATURE_LANGGRAPH_CELERY_DISPATCH`
    em produção (Fase 2d/2b).
