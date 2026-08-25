@@ -88,11 +88,18 @@ async def _get_graph():
         from langgraph_experiment.graph import build_graph
         from src.infrastructure.settings import settings
 
-        _saver_cm = AsyncRedisSaver.from_conn_string(settings.REDIS_URL)
+        # Decisão 04 do plano de integração (Fase 2c): checkpointer isolado
+        # numa DB Redis dedicada, separada dos dados de negócio (DB/0) — antes
+        # disso usava settings.REDIS_URL direto, sem colisão de prefixo
+        # confirmada mas também sem isolamento consciente, só acidente de
+        # configuração padrão. Mesmo padrão de derivação de URL que
+        # celery_app.py já usa pro broker (/1) e result backend (/2).
+        checkpointer_url = settings.REDIS_URL.replace("/0", "/3")
+        _saver_cm = AsyncRedisSaver.from_conn_string(checkpointer_url)
         saver = await _saver_cm.__aenter__()  # fechado explicitamente em on_worker_process_shutdown
         await saver.asetup()
         _graph = build_graph(saver)
-        logger.info("🧪 [LANGGRAPH] Grafo compilado com AsyncRedisSaver — checkpoint compartilhado entre API/workers.")
+        logger.info("🧪 [LANGGRAPH] Grafo compilado com AsyncRedisSaver (DB Redis dedicada) — checkpoint compartilhado entre API/workers.")
     return _graph
 
 
