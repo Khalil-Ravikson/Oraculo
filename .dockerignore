@@ -10,15 +10,11 @@ __pycache__/
 !.env.example
 
 # Não usados pelo Dockerfile (evita transferir bytes à toa a cada build)
-evolution-api/
 tests/
 tmp/
 .claude/
 .cursorignore
-.cursorrules
 *.md
 *.docx
 *.htm
 *.json
-!package.json
-a.out

@@ -1,5 +1,10 @@
 
 
+> **Fonte oficial de arquitetura técnica** (ver `docs/README.md`). Revisado
+> em 2026-08-25 (tabelas de filas Celery e model-routing corrigidas contra o
+> código real — ver marcações ⚠️ abaixo). Para regras de negócio (não
+> técnicas), a fonte oficial é `docs/business/regras_negocio_oraculo.md`.
+
 ---
 
 # arquitetura_oraculo.md
@@ -148,17 +153,29 @@ def create_app() -> FastAPI:
 
 ### 4.3 Gemini (papéis no pipeline)
 
+> ⚠️ **Correção (2026-08-25):** esta tabela descrevia um roteamento de modelo
+> por componente (Flash para uns, Pro para outros) que **não existe no
+> código**. O código real usa uma única `settings.GEMINI_MODEL` para todos os
+> componentes abaixo — não há diferenciação Flash/Pro automática. O erro já
+> tinha sido identificado em `docs/historico/analise_custo_real_llm.md` §2 e
+> é citado em `notas.md` §9.8/§13; a tabela nunca tinha sido corrigida aqui
+> até agora.
 
-| Componente         | Modelo (settings)                           | Papel                                                    |
-| ------------------ | ------------------------------------------- | -------------------------------------------------------- |
-| `GeminiProvider`   | `GEMINI_MODEL` (default `gemini-2.5-flash`) | Geração texto, structured output                         |
+| Componente         | Modelo (settings)                                                               | Papel                                                    |
+| ------------------ | -------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `GeminiProvider`   | `settings.GEMINI_MODEL` (uma única var, usada por todos os componentes abaixo) | Geração texto, structured output                         |
 | Embeddings         | `models/gemini-embedding-001`               | 3072d, ingestão + busca vetorial                         |
-| Semantic Router L5 | Flash                                       | Classificação de intent (~50 tokens)                     |
-| LLM Orchestrator   | Flash                                       | `call_rag`, `call_sigaa`, `reply_direct`, `check_status` |
-| Planner            | Pro (via planner.py)                        | Gera DAG JSON de workers                                 |
-| Synthesis Worker   | Pro                                         | Resposta final grounded no RAG                           |
-| LLMFactExtractor   | Flash                                       | Extração de fatos L4                                     |
+| Semantic Router L5 | `GEMINI_MODEL`                       | Classificação de intent (~50 tokens)                     |
+| LLM Orchestrator   | `GEMINI_MODEL`                       | `call_rag`, `call_sigaa`, `reply_direct`, `check_status` |
+| Planner            | `GEMINI_MODEL` (via `planning.py`)                        | Gera DAG JSON de workers                                 |
+| Synthesis Worker   | `GEMINI_MODEL`                         | Resposta final grounded no RAG                           |
+| LLMFactExtractor   | `GEMINI_MODEL`                       | Extração de fatos L4                                     |
 
+Além de Gemini, o sistema suporta **DeepSeek e Groq** como providers
+alternativos (troca em runtime via `/hub/llm-custo`, sem restart) — ver
+`src/infrastructure/adapters/llm_factory.py::get_llm_provider()` e
+`src/infrastructure/adapters/openai_compatible_provider.py`. Isso não estava
+documentado nesta seção antes; ver `notas.md` §13 para o histórico completo.
 
 Adapter: `src/infrastructure/adapters/gemini_provider.py` — SDK `google.genai`, retry exponencial (tenacity), implementa `ILLMProvider`.
 
@@ -271,15 +288,22 @@ celery_app = Celery(
 
 ### 7.2 Containers (docker-compose)
 
+> ⚠️ **Correção (2026-08-25):** a fila `notificacoes` nunca existiu no
+> `celery_app.py` real — era um erro de transcrição (mesmo erro repetido em
+> `README.md`, já corrigido lá também). `worker_graph` foi removido do
+> `docker-compose.yml` em 2026-07-31 (fila `graph`/`worker_graph_extractor`
+> confirmada sem chamador real em produção); o código do worker continua no
+> repo, só o serviço/container foi desligado — reativar é trocar `profiles`
+> de volta se algum dia houver uso real.
 
-| Serviço            | Filas                        |
-| ------------------ | ---------------------------- |
-| `worker`           | default, admin, notificacoes |
-| `worker_rag`       | rag_search                   |
-| `worker_synthesis` | synthesis                    |
-| `worker_media`     | media                        |
-| `worker_graph`     | graph                        |
-| `beat`             | agendador                    |
+| Serviço            | Filas          | Status                                        |
+| ------------------ | -------------- | ---------------------------------------------- |
+| `worker`           | default, admin | ativo                                          |
+| `worker_rag`       | rag_search     | ativo                                          |
+| `worker_synthesis` | synthesis      | ativo                                          |
+| `worker_media`     | media          | ativo                                          |
+| `worker_graph`     | graph          | **desligado** desde 2026-07-31 (sem uso real)  |
+| `beat`             | agendador      | ativo                                          |
 
 
 ### 7.3 Beat Schedule
@@ -296,7 +320,11 @@ celery_app = Celery(
 
 - `worker_process_init` — pré-carrega reranker ML (CPU).
 - `worker_ready` — `recover_pending_messages()` no boot.
-- `worker_shutdown` — flush Langfuse spans.
+- `worker_shutdown` — cleanup do worker (⚠️ correção 2026-08-25: esta linha
+  dizia "flush Langfuse spans", mas não há nenhuma referência a Langfuse em
+  `src/` — Langfuse foi avaliado e descartado, ver `README.md` §16 e
+  `docs/historico/pesquisa_arquitetura_producao.md` §4.5; as chaves
+  `LANGFUSE_*` em `.env` são resíduo dessa avaliação, sem consumidor).
 
 ### 7.5 Fluxo de Mensagem (durabilidade)
 
@@ -342,7 +370,7 @@ migration          → alembic upgrade head (one-shot)
 4. **Identidade obrigatória:** usuário não cadastrado/inativo é bloqueado antes de qualquer chamada LLM (economia de tokens).
 5. **Roadmap MCP & Multimodal (2026-08-12, em andamento):** STT (`AudioService.transcribe()`, Gemini áudio nativo) e TTS (`AudioService.synthesize()`, gTTS) já existiam mas eram órfãos — nenhum worker/rota real os acionava. Vision não existia. Plano completo em `C:\Users\User\.claude\plans\claude-md-arquitetura-oraculo-md-soft-moonbeam.md` (auditoria + pesquisa + fases/sprints); geração de imagem foi adiada por decisão do usuário (CPU-only inviabiliza FLUX/SDXL). Fundação de providers implementada (Sprints 1.1 + 1.2): `src/domain/ports/speech_to_text_provider.py`/`text_to_speech_provider.py` (Protocols `ISpeechToTextProvider`/`ITextToSpeechProvider`, espelhando `ILLMProvider`) + `src/infrastructure/adapters/gemini_stt_provider.py`/`gtts_provider.py` (implementações) + `stt_factory.py`/`tts_factory.py` (resolvem `settings.STT_PROVIDER`/`TTS_PROVIDER` → instância singleton). `AudioService` (`src/infrastructure/services/audio_service.py`) agora delega para a factory em vez de falar com Gemini/gTTS direto — `AudioResult`/contrato externo (consumido por `worker_audio_to_text.py`/`worker_text_to_audio.py`) ficou idêntico. Sprint 1.3 (métricas Multimodal em `infrastructure/observability/metrics.py`, alertas ajustáveis em `observability/alert_rules.yml`) e STT ligado de ponta a ponta no fluxo real (Fast-Path `-1` em `dispatcher.py::processar()`, antes de guardrails/HITL — detecta `media_type=="audioMessage"`, baixa via `EvolutionAdapter.baixar_midia_base64()`, despacha `worker_audio_to_text` no worker `media` e faz polling do resultado) já implementados. De quebra, corrigido um bug pré-existente de ordem de import: `router/supervisor.py` registrava métricas Prometheus com os mesmos nomes de `PrometheusMetrics`, sem a proteção `_get_or_create` — colidia dependendo de qual módulo carregasse primeiro em cada processo Celery. Também corrigido: regex de "baixar/baixe vídeo" (só aceitava "buscar") e um guard genérico pra mídia sem legenda (imagem/sticker/vídeo sem texto não vaza mais `message=""` até o RAG).
 
-**Fase 3 (TTS no fluxo real) implementada** — `KokoroTTSProvider` (`src/infrastructure/adapters/kokoro_tts_provider.py`, Apache-2.0; Piper foi descartado por ter virado GPL-3.0-or-later desde a pesquisa da Fase 0), `settings.TTS_PROVIDER` default `kokoro`, modelo baked no `Dockerfile` (não testado em build real ainda). Gatilho opt-in via frase no texto digitado (`_quer_resposta_em_audio()` em `dispatcher.py`); saída via `process_message_task.py::_enviar_resposta_em_audio()`, reaproveitando `enviar_midia_base64` (mesmo padrão do vídeo YouTube). TTS roda inline no worker `default` (não despachado pro `worker_media` como o STT — decisão deliberada de simplicidade, revisitar se o cold-load ~15s virar problema real).
+**Fase 3 (TTS no fluxo real) implementada** — `KokoroTTSProvider` (`src/infrastructure/adapters/kokoro_tts_provider.py`, Apache-2.0; Piper foi descartado por ter virado GPL-3.0-or-later desde a pesquisa da Fase 0), `settings.TTS_PROVIDER` default `kokoro`, modelo baked no `Dockerfile` (não testado em build real ainda). Gatilho opt-in via frase no texto digitado (`_quer_resposta_em_audio()` em `dispatcher.py`); saída via `process_message_task.py::_enviar_resposta_em_audio()`, reaproveitando `enviar_midia_base64` (mesmo padrão do vídeo YouTube). ⚠️ **Correção (2026-08-25):** este parágrafo dizia que o TTS rodava inline no worker `default` por "decisão deliberada de simplicidade" — isso mudou na mesma sessão em que foi escrito: o carregamento do Kokoro chegou a causar OOM real no worker `default` (`mem_limit: 768m`, compartilhado com Playwright/SIGAA), e `_enviar_resposta_em_audio()` foi reescrita para despachar via Celery para o worker `media` (mesmo padrão do STT), com polling e timeout de 45s. Ver `notas.md` §12 e `docs/technical-debt.md` TD-009 (risco de OOM no `worker_media` continua sem confirmação de folga suficiente).
 
 Faltam: Vision (Fases 4-5) e dashboard Grafana (não versionado no repo — painéis vivem no volume `grafana_data`, criados manualmente).
 

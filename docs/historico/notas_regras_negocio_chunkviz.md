@@ -1,7 +1,17 @@
 # Notas — Regras de Negócio do ChunkViz (scraping Wiki CTIC)
 
-> Rascunho de discussão. Nada aqui foi implementado — é só registro do assunto
-> para retomarmos depois. Sem decisão de arquitetura ainda.
+> **Status: 🗄️ histórico — parcialmente resolvido.** Movido para
+> `docs/historico/` em 2026-08-25. Reverificado contra o código atual:
+> **item 2 resolvido** (`hub.py::extract-url` já roteia por domínio —
+> `DokuWikiScraper()` para `ctic.uema.br`, `GenericHTTPScraper()` para o
+> resto); **item 1 parcialmente resolvido** (a duplicação de scraper foi
+> substituída pelo subpacote `dokuwiki/`, mas `tests/test_wiki_scraper.py`
+> continua órfão — ainda importa `src.domain.tools.tool_wiki_ctic`, que não
+> existe mais desde a migração para `capabilities/`; não removido nesta
+> sessão porque é um arquivo de teste, requer decisão explícita). **Item 3
+> (allowlist/taxonomia de ingestão via ChunkViz) e os 3 itens de "ainda
+> pendente" da segunda seção abaixo continuam genuinamente em aberto** — ver
+> `notas.md` §15.6.
 
 ## Contexto
 

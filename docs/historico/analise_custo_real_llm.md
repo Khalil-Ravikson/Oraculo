@@ -1,5 +1,11 @@
 # analise_custo_real_llm.md
 
+> **Status: 🗄️ histórico — gap fechado.** Movido para `docs/historico/` em
+> 2026-08-25. A lacuna que este documento identifica (nenhuma telemetria real
+> de custo/tokens) foi resolvida na sessão seguinte — ver `notas.md` §13.3
+> (`MonitoredLLMProvider` grava em `metricas_llm`/Postgres + Prometheus desde
+> então). Mantido como registro do raciocínio que motivou essa mudança.
+
 > Rascunho de discussão, mesmo espírito de `notas_regras_negocio_chunkviz.md`
 > e `pesquisa_arquitetura_producao.md`: nada aqui é medição real, é análise
 > de engenharia pra sabermos por onde começar a medir de verdade.

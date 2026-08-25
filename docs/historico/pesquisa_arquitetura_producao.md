@@ -1,5 +1,13 @@
 # pesquisa_arquitetura_producao.md
 
+> **Status: 🗄️ histórico — parcialmente superado.** Movido para
+> `docs/historico/` em 2026-08-25. A tabela da §3 ("zero CI/CD hoje", "nenhuma
+> telemetria de custo instalada") ficou desatualizada uma sessão depois de
+> escrita — `.github/workflows/tests.yml` existe e a telemetria de custo foi
+> conectada (ver `notas.md` §13). O item ainda genuinamente em aberto: RBAC
+> completo testado em `main` continua bloqueando a promoção do LangGraph (ver
+> `notas.md`, última entrada). Mantido como registro do raciocínio original.
+
 > Rascunho de discussão, no mesmo espírito de `notas_regras_negocio_chunkviz.md`:
 > nada aqui é decisão arquitetural fechada. É a base pra discutirmos os
 > próximos passos de maturidade de produção do Oráculo.

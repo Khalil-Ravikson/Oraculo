@@ -2,7 +2,15 @@
 
 ## Projeto Oráculo — `router/` + `agents/` + `capabilities/`
 
-> **Status:** documento de planejamento, revisão 2 (incorpora revisão crítica de nomenclatura e camadas). Nenhuma alteração de código foi feita nesta fase — apenas varredura read-only de `src/`, `docker-compose.yml` e `arquitetura_oraculo.md`.
+> **Status: 🗄️ histórico — migração concluída.** Movido para `docs/historico/`
+> em 2026-08-25. A estrutura `router/` + `agents/` + `capabilities/` proposta
+> aqui já existe no código atual (confirmado em `src/`); este documento é
+> mantido como registro da decisão, não como plano ativo. A única pendência
+> ainda em aberto identificada na auditoria de 2026-08-24 é a §0.1b abaixo
+> (limpeza de `src/services/` — não migrado). Para a arquitetura atual, ver
+> `docs/architecture/arquitetura_oraculo.md`.
+>
+> **Status original:** documento de planejamento, revisão 2 (incorpora revisão crítica de nomenclatura e camadas). Nenhuma alteração de código foi feita nesta fase — apenas varredura read-only de `src/`, `docker-compose.yml` e `arquitetura_oraculo.md`.
 
 ---
 

@@ -1934,3 +1934,109 @@ extra.
   chgrp 1001 .env && chmod 664 .env` de novo (§14.9) antes de eu poder
   confirmar que `POST /api/admin/system/env` grava de ponta a ponta sem
   corromper o arquivo.
+
+## 15. Sessão 2026-08-25 — Mega auditoria + organização/limpeza documental
+
+### 15.1 O que motivou esta sessão
+
+Auditoria completa do repositório em 2026-08-24 (relatório publicado como
+artifact, não versionado no repo) identificou que `.claude.md` tinha crescido
+para um diário de sessão de 46KB/80 linhas densas em vez de um arquivo de
+regras — causa raiz: a própria regra 4 do arquivo ("se corrigir um padrão,
+atualize `.claude.md` automaticamente") nunca tinha um mecanismo de resumo.
+Nesta sessão, `.claude.md` foi reescrito para ficar enxuto (contexto +
+arquitetura resumida + regras + comandos + convenções + restrições +
+ponteiros pra documentação detalhada) e o conteúdo cronológico que estava
+misturado nele foi consolidado aqui. A maior parte já estava coberta em
+detalhe nas seções 7-13 acima (LangGraph, rest_lab/mcp_lab, multimodal,
+multi-provider LLM) — o que segue abaixo é só o que era **exclusivo** de
+`.claude.md` e não tinha sido registrado em nenhuma seção anterior.
+
+### 15.2 Achados técnicos do SDK `mcp` (versão `mcp==2.0.0`, testado 2026-08-01)
+
+A API pública do client HTTP diverge da documentação genérica do protocolo:
+- É `mcp.client.streamable_http.streamable_http_client` (não
+  `streamablehttp_client`, como a doc costuma grafar).
+- O context manager devolve só `(read, write)` — 2 valores, não 3 como em
+  versões anteriores do SDK.
+- `CallToolResult` usa `is_error` (snake_case), não `isError`.
+
+Se a versão pinada em `requirements.txt` for atualizada, testar esses três
+pontos de novo antes de assumir que continuam iguais.
+
+### 15.3 Gateway MCP da pipeworx.io — doc erra parâmetros, testado ao vivo (2026-08-02)
+
+`gateway.pipeworx.io/<pack>/mcp` (StackExchange, `brave-search`, `github`)
+expõe um catálogo grande de tools "de plataforma" junto com as do pack
+anunciado — `list_tools()` retorna tudo junto. Achados por tentativa/erro
+(o SDK `mcp==2.0.0` valida a resposta contra `output_schema` e estoura
+`RuntimeError`/`ExceptionGroup` sem expor o payload cru — só dá pra ver via
+`exception.__cause__.instance`):
+
+- **Autenticação BYO key**: não é `?_apiKey=` na URL do gateway (como a doc
+  diz) — é o argumento `_apiKey` (camelCase, maiúscula no K) dentro do
+  próprio `call_tool(nome, args)`. `_apikey` (minúsculo) falha silenciosamente.
+- `web_search`: parâmetro é `query` (doc dizia `q`). Resposta:
+  `{"query","altered","total","returned","results":[{"title","url","description","age",...}]}`.
+- `search_repos` (GitHub): parâmetro `query` bateu com a doc, mas a resposta
+  não — chave raiz é `repos` (não `items`/`repositories`), campos `stars`/`url`
+  (não `stargazers_count`/`html_url`).
+- `get_user` (GitHub): resposta tem `url` (não `html_url`); `bio`/`email`/
+  `twitter` podem vir `null`.
+- `brave_image_search`/`brave_video_search` **não existem** no proxy da
+  pipeworx (só `web_search`/`news_search`) — busca de imagem implementada
+  como REST direto (`api.search.brave.com/res/v1/images/search`, header
+  `X-Subscription-Token`, mesma `BRAVE_API_KEY`), fora do protocolo MCP.
+  `results[0].properties.url` é a URL de verdade da imagem (usável direto em
+  `enviar_midia_url`); `results[0].thumbnail.src` é só a miniatura.
+
+### 15.4 Bug de regex de pluralização em português (2026-08-02)
+
+Achado real, não é typo: `imagens?` em regex significa "imagen" + "s"
+opcional (casa "imagen"/"imagens"), **nunca** "imagem" (com M) — português
+pluraliza "imagem"→"imagens" trocando M por N antes do S (irregular),
+diferente do inglês onde só se acrescenta "s". `brave imagem <termo>`
+(singular, a forma que qualquer usuário real digita) sempre caía no
+fallback de "não reconheci". Fix: `(?:imagem|imagens)` explícito em vez de
+`imagens?`. **Lição para qualquer regex nova em português**: nunca assumir
+que `palavra + "s?"` cobre o plural — conferir pluralização irregular
+(`-agem`→`-agens`, `-ão`→`-ões`/`-ães`, etc.) antes de usar o atalho `?`.
+
+### 15.5 Instalar pacote Python num container já rodando, sem rebuild (achado operacional)
+
+O container tem dois Pythons — um "de sistema" (`/usr/local`, com `pip`
+normal) e o venv da app (`/opt/venv`, sem `pip` embutido, sem permissão de
+escrita pro usuário não-root). `docker compose exec worker pip install X`
+instala no Python errado (só falha depois, quando o import quebra em
+produção). Forma que funciona: `docker compose exec -u root worker pip
+--python /opt/venv/bin/python3 install X`, depois `docker compose restart
+worker`. Atalho de teste rápido — não substitui rebuild de imagem.
+
+### 15.6 Reorganização documental executada nesta sessão
+
+Ver relatório completo entregue ao usuário ao final desta sessão para a
+lista línea-a-linha do que foi movido/removido/criado. Resumo:
+- Criada `docs/` (`architecture/`, `business/`, `decisions/`, `historico/`,
+  `assets/`); 6 documentos `.md` da raiz + 6 artefatos binários movidos para
+  lá com `git mv` (histórico preservado).
+- `docs/architecture/arquitetura_oraculo.md` corrigido (tabela de filas
+  Celery e de model-routing, ambas desatualizadas — ver §9.8/§13 acima) e
+  promovido a fonte oficial de arquitetura técnica.
+- `.claude.md` reescrito enxuto; este §15 é o destino do conteúdo
+  cronológico que estava misturado nele.
+- 16 arquivos confirmadamente mortos removidos (8 `.bak`, mais módulos com
+  zero importadores reais verificados por grep + suíte de testes antes/depois
+  — 258 passed/13 falhas pré-existentes, inalterado). Lista completa no
+  relatório final.
+- `test_timeout.py` (raiz) removido — importava
+  `src.application.routing.semantic_router`, módulo que não existe mais
+  (só sobrou `command_builder.py` em `application/routing/`); órfão
+  confirmado, zero referências no repo.
+- **Não tocado, decisão explícita**: `src/services/` (migração incompleta
+  services/→capabilities/, já sinalizada como fora de escopo em
+  `docs/historico/PLANO_REFATORACAO_SUPERVISOR.md` §0.1b), os 4 `Protocol`
+  de `domain/ports/` sem implementador, `run_eval_docker.py` duplicado
+  (raiz vs. `src/`), e `tests/test_wiki_scraper.py` (órfão, importa
+  `src.domain.tools.tool_wiki_ctic`, que não existe mais) — todos exigem
+  decisão de produto antes de qualquer remoção, não são "óbvios" o
+  suficiente pra essa sessão de organização decidir sozinha.

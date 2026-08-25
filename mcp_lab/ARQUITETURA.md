@@ -1,5 +1,8 @@
 # Como o `mcp_lab/` se conecta a um servidor MCP
 
+> 🧪 **PESQUISA / EXPERIMENTO — não é parte da arquitetura de produção do
+> Oráculo.** Ver [`README.md`](README.md) para o resumo de escopo.
+
 Documento de estudo — explica a montagem feita para o piloto StackExchange (`mcp_lab/`), pensado pra servir de referência quando você for plugar o próximo servidor MCP (GitHub, Brave, yt-dlp).
 
 ## 1. O que é MCP, sem rodeio

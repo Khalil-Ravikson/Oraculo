@@ -42,6 +42,7 @@ UEMA pelo WhatsApp — sem precisar ligar para a secretaria, sem esperar atendim
 - 📞 Contatos de departamentos (PROG, CTIC, CECEN, reitoria)
 - 💻 Suporte técnico e sistemas (SIGAA, senha, Wi-Fi)
 - 📂 Qualquer documento que o administrador ingira no sistema
+- 🎙️ Nota de voz (transcrita via Gemini STT) e resposta em áudio sob pedido (Kokoro TTS)
 
 **O que ele NÃO faz (por segurança)?**
 
@@ -52,6 +53,11 @@ UEMA pelo WhatsApp — sem precisar ligar para a secretaria, sem esperar atendim
 ---
 
 ## 2. Visão Geral da Arquitetura
+
+> 📖 Diagrama completo, com todas as camadas e decisões técnicas:
+> [`docs/architecture/arquitetura_oraculo.md`](docs/architecture/arquitetura_oraculo.md)
+> (fonte oficial). Esta seção é um resumo de onboarding.
+
 WhatsApp (usuário)
 │
 ▼
@@ -68,18 +74,27 @@ Anti-spam, anti-duplicação
 ▼
 Celery Worker (background)
 │
-├─── OracleChain ──→ LangChain Runnables
+├─── gatekeeper.py ──→ pré-filtro (ignorar/registro/comando/LLM)
+│         │
+│         ▼
+│    router/supervisor.py ──→ classificação (regex → heurística → Flash)
+│         │
+│         ▼
+│    dispatcher_langgraph.py ──→ orquestrador de produção
 │         │
 │         ├── load_memory  (Redis)
-│         ├── route_intent (KNN Redis + regex)
-│         ├── transform_query
-│         ├── retrieve     (busca híbrida Redis)
+│         ├── Planner      (DAG de workers especializados)
+│         ├── retrieve     (busca híbrida Redis, RAG)
 │         ├── grade_docs   (CRAG score)
-│         ├── generate     (Gemini LLM)
+│         ├── generate     (Gemini/DeepSeek/Groq via llm_factory)
 │         └── save_memory  (Redis)
 │
 └─── resposta → Evolution API → WhatsApp
 
+> ⚠️ O pipeline `OracleChain`/LangChain Runnables descrito em versões
+> anteriores deste README foi removido do código (confirmado ausente do
+> repositório). LangChain hoje é usado só para embeddings/chunking do RAG —
+> não é o framework de orquestração. Corrigido em 2026-08-25.
 
 **Clean Architecture** — o código segue 4 camadas:
 domain/       → regras de negócio puras (sem frameworks)
@@ -93,10 +108,10 @@ api/          → endpoints FastAPI (apresentação)
 
 | Componente | Tecnologia | Para que serve |
 |---|---|---|
-| Linguagem | Python 3.11 | Toda a aplicação |
+| Linguagem | Python 3.12 (imagem Docker usa 3.11-slim — ver nota) | Toda a aplicação |
 | API Web | FastAPI | Webhook WhatsApp + portal admin |
-| LLM | Google Gemini | Geração de respostas |
-| Framework LLM | LangChain Runnables | Pipeline de RAG |
+| LLM | Google Gemini (padrão) + DeepSeek/Groq (alternativos, trocáveis em runtime via `/hub/llm-custo`) | Geração de respostas |
+| Framework LLM | Nenhum framework de orquestração — camadas próprias (`router/`+`agents/`+`capabilities/`); LangChain só para embeddings/chunking | Pipeline de RAG |
 | Banco relacional | PostgreSQL | Usuários, identidade, auditoria |
 | Banco vetorial | Redis Stack + RedisVL | Documentos, embeddings, buscas semânticas |
 | Fila de tarefas | Celery + Redis | Processar mensagens em background |
@@ -110,38 +125,49 @@ api/          → endpoints FastAPI (apresentação)
 ---
 
 ## 4. Estrutura de Pastas
+
+> ⚠️ Corrigido em 2026-08-25 — a versão anterior desta árvore descrevia uma
+> estrutura pré-refatoração (`oracle_chain.py`, `domain/tools/`,
+> `domain/services/` com roteador/permissões) que não existe mais no
+> código. A árvore abaixo reflete `src/` real.
+
 oraculo-uema/
 ├── src/
 │   ├── api/                    # Endpoints FastAPI (camada de apresentação)
-│   │   ├── hub.py              # Portal web admin (rotas HTML)
-│   │   ├── admin_api.py        # REST API do admin (JSON)
-│   │   ├── rag_admin.py        # Gerenciamento de documentos RAG
-│   │   ├── eval_dashboard.py   # Dashboard de avaliação RAG (SSE)
-│   │   ├── admin_portal.py     # Portal admin completo
-│   │   ├── monitor.py          # Monitor live (SSE)
-│   │   ├── metrics.py          # Endpoint Prometheus
+│   │   ├── routers/web/hub.py          # Portal web admin (rotas HTML, /hub)
+│   │   ├── routers/admin/admin_api.py  # REST API do admin (JSON)
+│   │   ├── routers/admin/eval_api.py   # Avaliação RAG (SSE)
+│   │   ├── routers/tools/chunkviz_tools.py  # Upload/visualização de chunks
+│   │   ├── monitor.py           # Monitor live (SSE)
 │   │   └── middleware/
 │   │       └── auth_middleware.py  # JWT admin
 │   │
+│   ├── router/                  # Classificação de intenção (Supervisor)
+│   │   ├── supervisor.py        # regex → heurística → Flash
+│   │   ├── gatekeeper.py        # pré-filtro (ignorar/registro/comando/LLM)
+│   │   └── llm_fallback.py      # classificação/orquestração via LLM
+│   │
+│   ├── agents/                  # Agentes de domínio (RAG, SIGAA, tickets, conversação)
+│   ├── capabilities/            # Tools/integrações autodescobertas
+│   │
 │   ├── application/            # Casos de uso (orquestra domínio)
-│   │   ├── chain/
-│   │   │   └── oracle_chain.py # Pipeline RAG principal (LangChain)
+│   │   ├── runtime/dispatcher_langgraph.py  # orquestrador de produção
+│   │   ├── runtime/dispatcher.py            # orquestrador legado (ainda usado por SSE/eval)
 │   │   ├── tasks/
-│   │   │   ├── process_message_task.py  # Task Celery: processa mensagem
-│   │   │   ├── tasks_admin.py           # Tasks admin (ingestão, comandos)
-│   │   │   └── ingestion_tasks.py       # Task Celery: ingere documentos
+│   │   │   └── process_message_task.py  # Task Celery: processa mensagem
 │   │   └── use_cases/          # Casos de uso específicos
 │   │
 │   ├── domain/                 # Regras de negócio puras
 │   │   ├── entities/           # Modelos do domínio
-│   │   ├── ports/              # Interfaces (contratos)
-│   │   ├── tools/              # Tools do agente (GLPI, email, etc.)
-│   │   └── services/           # Serviços de domínio (roteador, permissões)
+│   │   ├── ports/              # Interfaces (contratos, Clean Architecture)
+│   │   └── permissions.py      # RBAC
 │   │
 │   ├── infrastructure/         # Detalhes técnicos (banco, redis, LLM)
 │   │   ├── adapters/           # Implementações dos ports
-│   │   │   ├── gemini_provider.py      # Adapter Gemini
-│   │   │   ├── evolution_adapter.py    # Adapter WhatsApp
+│   │   │   ├── gemini_provider.py            # Adapter Gemini
+│   │   │   ├── openai_compatible_provider.py # Adapter DeepSeek/Groq
+│   │   │   ├── llm_factory.py                # Ponto único de resolução de provider
+│   │   │   ├── evolution_adapter.py          # Adapter WhatsApp
 │   │   │   └── parsers/        # Parsers de documentos (PDF, DOCX, etc.)
 │   │   ├── redis_client.py     # Cliente Redis + schemas RedisVL
 │   │   ├── settings.py         # Configurações (.env)
@@ -154,15 +180,21 @@ oraculo-uema/
 │   │   ├── adapters/           # Implementações Redis
 │   │   └── services/           # MemoryService (orquestra)
 │   │
-│   ├── rag/                    # Sistema RAG (busca em documentos)
+│   ├── rag/                    # Transformação/roteamento de queries (caminho legado, não hot-path)
 │   │   ├── embeddings.py       # Modelo de embeddings (Gemini/local)
-│   │   ├── ingestion/          # Pipeline de ingestão de documentos
-│   │   │   ├── pipeline.py     # Pipeline principal
-│   │   │   ├── parser_factory.py    # Fábrica de parsers
-│   │   │   └── chunker_factory.py   # Fábrica de chunkers
-│   │   └── query/              # Transformação e roteamento de queries
+│   │   └── ingestion/          # Pipeline de ingestão de documentos
+│   │       ├── pipeline.py     # Pipeline principal
+│   │       ├── parser_factory.py    # Fábrica de parsers
+│   │       └── chunker_factory.py   # Fábrica de chunkers
 │   │
 │   └── main.py                 # Entry point da aplicação
+│
+├── docs/                       # Documentação (ver docs/README.md — índice)
+│   ├── architecture/            # Arquitetura técnica (fonte oficial)
+│   ├── business/                 # Regras de negócio (fonte oficial)
+│   ├── decisions/                 # ADRs
+│   ├── historico/                  # Docs concluídos/superados
+│   └── assets/                    # Apresentações, relatórios, exports
 │
 ├── templates/                  # HTML do portal web (Jinja2)
 │   └── hub/                    # Templates do hub admin
@@ -173,6 +205,8 @@ oraculo-uema/
 │       ├── chunkviz.html       # Visualizador de chunks
 │       └── config.html         # Configuração do sistema
 │
+├── rest_lab/ · mcp_lab/ · langgraph_experiment/  # Laboratórios de pesquisa
+│                                                    # (branch research/rest-mcp-estudos, não produto)
 ├── dados/                      # PDFs e documentos para ingestão
 ├── static/                     # CSS, JS, imagens
 ├── migrations/                 # Migrações Alembic (PostgreSQL)
@@ -607,11 +641,18 @@ docker compose logs -f worker
 
 ### Filas disponíveis
 
-| Fila | Para que serve |
-|---|---|
-| `default` | Processar mensagens WhatsApp |
-| `admin` | Ingestão de documentos, comandos admin |
-| `notificacoes` | Lembretes de prazos acadêmicos |
+> ⚠️ Corrigido em 2026-08-25 — a fila `notificacoes` nunca existiu de fato;
+> lembretes de prazos rodam na fila `default` via `beat`. Tabela abaixo
+> reflete `celery_app.py` real.
+
+| Fila | Container | Para que serve |
+|---|---|---|
+| `default` | `worker` | Processar mensagens WhatsApp, comandos admin, notificações agendadas |
+| `admin` | `worker` | Ingestão de documentos, comandos admin |
+| `rag_search` | `worker_rag` | Busca híbrida Redis + rerank |
+| `synthesis` | `worker_synthesis` | Geração da resposta final (LLM) |
+| `media` | `worker_media` | Download/transcrição/síntese de áudio e vídeo (STT/TTS, YouTube, Instagram) |
+| `graph` | — | Extração de grafo institucional — código existe, **worker desligado** desde 2026-07-31 (sem uso real em produção) |
 
 ### Beat (tarefas agendadas)
 
@@ -796,4 +837,6 @@ Projeto institucional UEMA — uso interno. Entre em contato com o CTIC para mai
 
 ---
 
-*Documentação mantida pelo CTIC/UEMA. Última atualização: Abril 2026.*
+*Documentação mantida pelo CTIC/UEMA. Última atualização: 25 de agosto de 2026
+(reorganização documental — ver `docs/README.md` para o mapa completo da
+documentação e `notas.md` §15 para o histórico da mudança).*

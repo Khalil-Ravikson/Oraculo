@@ -43,3 +43,8 @@ tmp/
 # Testes e Cache
 .env.test
 .pytest_cache/
+
+# Config local do Claude Code (permissões de shell específicas da máquina/dev
+# — por convenção .local.json não deveria ser versionado; estava sendo
+# rastreado por engano, corrigido em 2026-08-25)
+.claude/settings.local.json
