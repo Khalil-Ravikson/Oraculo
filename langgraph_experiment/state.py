@@ -20,6 +20,12 @@ class OraculoState(BaseModel):
     rota: str = ""
     history: str = ""
     fatos: list[str] = Field(default_factory=list)
+    # Fase 2d (Decisão 01): rotas nativas portadas de dispatcher.py que
+    # precisam de dados do WhatsApp além de session_id/message — hoje só
+    # `chat_id` (MEDIA_DOWNLOAD/SIGAA, destino de entrega via Celery, ver
+    # `enviar_resposta_whatsapp_task`). Dict simples pelo mesmo motivo de
+    # ticket_data/crud_data acima (serialização msgpack do checkpointer).
+    user_context: dict = Field(default_factory=dict)
 
     # ── Funil de ticket ──────────────────────────────────────────────────────
     # dict simples (não um BaseModel aninhado): LangGraph serializa o estado

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 
 from langgraph.types import interrupt
 
@@ -196,6 +197,152 @@ async def rag_node(state: OraculoState) -> dict:
         fatos=state.fatos, session_id=state.session_id,
     )
     return {"answer": answer}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fase 2d do plano de integração (Decisão 01) — CHECK_STATUS/GREETING/
+# MEDIA_DOWNLOAD/SIGAA portados de fast-paths inline em
+# application/runtime/dispatcher.py::processar() pra nodes nativos do
+# grafo. Nenhum tem HITL via interrupt()/checkpoint (nem precisava: SIGAA
+# já gerencia o próprio HITL fora do LangGraph, via hitl:session:* no Redis
+# — ver handle_hitl_continuation, chamado direto por
+# dispatcher_langgraph.py::processar() ANTES de rotear), então cada um roda
+# do início ao fim numa invocação só, igual ao rag_node acima. SIGAA
+# reaproveita start_or_continue_sigaa() (já fatorado, zero duplicação);
+# CHECK_STATUS/GREETING/MEDIA_DOWNLOAD reimplementam a mesma lógica do
+# fast-path original — dispatcher.py fica só como caminho de debug/eval
+# (Decisão 01), então a duplicação é aceita aqui em vez de forçar uma
+# extração maior no meio da migração.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def check_status_node(state: OraculoState) -> dict:
+    """Reimplementa o Fast-Path CHECK_STATUS de dispatcher.py::processar()
+    — histórico da última task Celery da sessão, sem acionar RAG."""
+    from src.memory.services.redis_memory_service import get_cognitive_memory
+
+    mem = get_cognitive_memory()
+    th = await mem.get_task_history(state.session_id)
+    answer = (
+        f"Última tarefa: *{th.get('last_worker', '?')}*\n"
+        f"Resultado: {th.get('last_result', 'Nenhuma tarefa anterior encontrada.')}"
+    ) if th else "Nenhuma tarefa anterior registrada nesta sessão."
+    return {"answer": answer}
+
+
+async def greeting_node(state: OraculoState) -> dict:
+    """Reimplementa o Fast-Path GREETING de dispatcher.py::processar() —
+    saudação aleatória + registro do turno na memória cognitiva."""
+    import random
+
+    from src.memory.services.redis_memory_service import get_cognitive_memory
+
+    saudacoes = [
+        "Olá! 😊 Sou o Oráculo UEMA. Como posso ajudar?",
+        "Oi! Em que posso ajudá-lo(a) hoje?",
+        "Olá! Pode perguntar sobre calendário, editais, contatos ou suporte. 🎓",
+    ]
+    resposta = random.choice(saudacoes) + (
+        "\n\n🔧 *Ferramentas do usuário* (demonstração):\n"
+        "• !ytb — baixar vídeo do YouTube\n"
+        "• !sticker — criar figurinha"
+    )
+
+    mem = get_cognitive_memory()
+    await mem.add_turn(state.session_id, "user", state.message)
+    await mem.add_turn(state.session_id, "assistant", resposta)
+
+    return {"answer": resposta}
+
+
+async def media_download_node(state: OraculoState) -> dict:
+    """Reimplementa o Fast-Path MEDIA_DOWNLOAD de dispatcher.py::processar()
+    — dispara download (YouTube/Instagram) via chain Celery
+    (download → enviar_resposta_whatsapp_task) e devolve resposta imediata
+    de "download iniciado"; a entrega real acontece depois, assíncrona."""
+    from celery import chain
+
+    from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
+    from src.application.workers.registry import _autodiscover_workers, _REGISTRY
+
+    message = state.message
+    urls = re.findall(r"(https?://\S+)", message)
+    if urls:
+        url = urls[0]
+    else:
+        # Sem URL na mensagem — pode ser busca por termo ("buscar vídeo
+        # sobre X"), mesma checagem do fast-path original: sem ela, a
+        # mensagem inteira vira "url" e o yt-dlp falha.
+        from src.router.supervisor import _RE_YTB_BUSCA
+
+        match_busca = _RE_YTB_BUSCA.search(message)
+        url = f"ytsearch1:{match_busca.group(1).strip()}" if match_busca else message
+
+    _autodiscover_workers()
+    worker_name = "insta_download" if "instagram" in url.lower() else "ytb_download"
+    fn = _REGISTRY.get(worker_name)
+
+    chat_id = state.user_context.get("chat_id") or state.session_id
+    plan_id = f"fast_media_{int(time.time())}"
+    if fn:
+        event = {
+            "plan_id": plan_id,
+            "session_id": state.session_id,
+            "chat_id": chat_id,
+            "step_id": "s1",
+            "url": url,
+            "query": message,
+            "hitl_confirmed": True,
+        }
+        delivery_ctx = {
+            "plan_id": plan_id,
+            "chat_id": chat_id,
+            "sender_jid": state.session_id,
+            "route": "MEDIA_DOWNLOAD",
+            "query": message,
+        }
+        workflow = chain(fn.s(event), enviar_resposta_whatsapp_task.s(delivery_ctx))
+        workflow.apply_async()
+    else:
+        logger.error("❌ [LANGGRAPH] worker '%s' não encontrado no Registry.", worker_name)
+
+    return {"answer": "📥 **Download iniciado!**\nO arquivo será enviado aqui em instantes. Aguarde..."}
+
+
+async def sigaa_node(state: OraculoState) -> dict:
+    """Reimplementa o Fast-Path SIGAA de dispatcher.py::processar() —
+    reaproveita start_or_continue_sigaa() (já fatorado em
+    agents/sigaa/auth_flow.py, zero duplicação da lógica de autenticação/
+    HITL). A continuação do HITL (CPF/senha) não passa por aqui — é
+    interceptada antes de rotear, por handle_hitl_continuation em
+    dispatcher_langgraph.py::processar(); este node só cobre o INÍCIO do
+    fluxo (1ª mensagem classificada como SIGAA)."""
+    from src.agents.sigaa.auth_flow import start_or_continue_sigaa
+    from src.infrastructure.redis_client import get_redis_text
+    from src.router.contracts import RouterDecision
+
+    r = get_redis_text()
+    decision = RouterDecision(
+        rota="SIGAA", confianca=1.0, motivo="langgraph_native",
+        cache_hit=False, cache_layer="miss", latencia_ms=0, dag_hint={},
+    )
+    resultado = await start_or_continue_sigaa(
+        decision, state.message, state.session_id, state.user_context, r, time.monotonic(),
+    )
+    if resultado is None:
+        # start_or_continue_sigaa só devolve None quando args["hitl_confirmed"]
+        # chega True — isso nunca acontece no caminho real: SIGAAUseCase.
+        # detectar_fluxo() nunca preenche essa chave (só existe hoje pra um
+        # fluxo de retomada via Planner sem nenhum outro caller no código
+        # atual, ver docstring de start_or_continue_sigaa). Se acontecer
+        # mesmo assim, avisa em vez de perder a mensagem silenciosamente.
+        logger.warning(
+            "⚠️ [LANGGRAPH] start_or_continue_sigaa devolveu None (sem "
+            "equivalente de fallback pro Planner neste node) | session=%s",
+            state.session_id,
+        )
+        return {"answer": "Não consegui processar sua solicitação do SIGAA agora. Tente novamente. 🙏"}
+    return {"answer": resultado.answer, "status": resultado.status}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

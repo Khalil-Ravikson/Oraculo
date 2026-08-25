@@ -6,12 +6,16 @@ import inspect
 from langgraph.graph import END, START, StateGraph
 
 from langgraph_experiment.nodes import (
+    check_status_node,
     classify_node,
     crud_ask_campo,
     crud_ask_valor,
     crud_confirm,
     crud_save,
+    greeting_node,
+    media_download_node,
     rag_node,
+    sigaa_node,
     ticket_ask_categoria,
     ticket_ask_queixa,
     ticket_ask_tipo,
@@ -86,6 +90,10 @@ def build_graph(checkpointer=None):
     graph = StateGraph(OraculoState)
     graph.add_node("classify", _instrumented("classify", classify_node))
     graph.add_node("rag", _instrumented("rag", rag_node))
+    graph.add_node("check_status", _instrumented("check_status", check_status_node))
+    graph.add_node("greeting", _instrumented("greeting", greeting_node))
+    graph.add_node("media_download", _instrumented("media_download", media_download_node))
+    graph.add_node("sigaa", _instrumented("sigaa", sigaa_node))
     graph.add_node("ticket_ask_tipo", _instrumented("ticket_ask_tipo", ticket_ask_tipo))
     graph.add_node("ticket_ask_categoria", _instrumented("ticket_ask_categoria", ticket_ask_categoria))
     graph.add_node("ticket_ask_queixa", _instrumented("ticket_ask_queixa", ticket_ask_queixa))
@@ -100,9 +108,20 @@ def build_graph(checkpointer=None):
     graph.add_conditional_edges(
         "classify",
         lambda state: state.route,
-        {"rag": "rag", "ticket": "ticket_ask_tipo", "crud": "crud_ask_campo"},
+        {
+            "rag": "rag", "ticket": "ticket_ask_tipo", "crud": "crud_ask_campo",
+            # Fase 2d (Decisão 01) — só alcançáveis com
+            # settings.FEATURE_LANGGRAPH_NATIVE_ROUTES ligada (ver
+            # dispatcher_langgraph.py::_ROTAS_LANGGRAPH_NATIVAS_CONDICIONAIS).
+            "check_status": "check_status", "greeting": "greeting",
+            "media_download": "media_download", "sigaa": "sigaa",
+        },
     )
     graph.add_edge("rag", END)
+    graph.add_edge("check_status", END)
+    graph.add_edge("greeting", END)
+    graph.add_edge("media_download", END)
+    graph.add_edge("sigaa", END)
 
     graph.add_conditional_edges(
         "ticket_ask_tipo", _tipo_valido,

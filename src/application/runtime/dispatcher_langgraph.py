@@ -70,7 +70,23 @@ logger = logging.getLogger(__name__)
 _ROTAS_DETOUR_RAG = {"GERAL", "CALENDARIO", "EDITAL", "CONTATOS", "WIKI"}
 _ROTAS_LANGGRAPH = _ROTAS_DETOUR_RAG | {"TICKET_ABERTURA", "CRUD"}
 
-_ROUTE_TO_ROTA = {"ticket": "TICKET_ABERTURA", "crud": "CRUD"}
+# Fase 2d (Decisão 01): rotas nativas condicionais — só entram em
+# _ROTAS_LANGGRAPH quando settings.FEATURE_LANGGRAPH_NATIVE_ROUTES está
+# ligada (default: desligada, ver settings.py Fase 1). Com a flag
+# desligada, o comportamento é idêntico a antes desta fase: as 4 rotas
+# continuam delegadas pra dispatcher.py::processar().
+_ROTAS_LANGGRAPH_NATIVAS_CONDICIONAIS = {"CHECK_STATUS", "GREETING", "MEDIA_DOWNLOAD", "SIGAA"}
+
+_ROUTE_TO_ROTA = {
+    "ticket": "TICKET_ABERTURA", "crud": "CRUD",
+    "check_status": "CHECK_STATUS", "greeting": "GREETING",
+    "media_download": "MEDIA_DOWNLOAD", "sigaa": "SIGAA",
+}
+_ROTA_TO_ROUTE = {
+    "TICKET_ABERTURA": "ticket", "CRUD": "crud",
+    "CHECK_STATUS": "check_status", "GREETING": "greeting",
+    "MEDIA_DOWNLOAD": "media_download", "SIGAA": "sigaa",
+}
 
 # Singleton de processo: correto desde que o processo Celery mantenha um único event loop
 # vivo pela vida inteira (ver src/infrastructure/celery_app.py::run_in_worker_loop() +
@@ -136,6 +152,7 @@ def _rota_from_route(route: str) -> str:
 def _reset_payload_para_rota(
     session_id: str, message: str, route: str,
     rota: str = "", history: str = "", fatos: list[str] | None = None,
+    user_context: dict | None = None,
 ) -> dict:
     """Payload inicial pro ainvoke() de um funil NOVO — reseta explicitamente
     os campos daquele funil (não os do outro), pra não herdar dado de uma
@@ -152,10 +169,15 @@ def _reset_payload_para_rota(
     `rota`/`history`/`fatos` (Fase 3.5): contexto que antes se perdia ao
     entrar no grafo — só faz sentido pra `route == "rag"` (ticket/crud não
     usam RAG), mas incluir sempre é inofensivo (nodes.py só lê quando
-    relevante)."""
+    relevante).
+
+    `user_context` (Fase 2d): idem, só usado pelos nodes nativos
+    check_status/greeting/media_download/sigaa (ex.: chat_id de entrega),
+    inofensivo pros demais."""
     payload = {
         "session_id": session_id, "message": message, "route": route, "cancelado": False,
         "rota": rota, "history": history, "fatos": fatos or [],
+        "user_context": user_context or {},
     }
     if route == "ticket":
         payload.update(ticket_data={}, ticket_error="", ticket_confirmed=None)
@@ -173,9 +195,15 @@ def _to_os_result(result: dict, rota: str, t0: float) -> OSResult:
             answer=pergunta, plan_id="langgraph_hitl", rota=rota,
             cache_hit=False, total_ms=ms, status="hitl_pending",
         )
+    # Fase 2d: nodes nativos portados de fast-paths que tinham seu próprio
+    # HITL fora do interrupt()/checkpoint do LangGraph (ex.: sigaa_node,
+    # HITL via hitl:session:* no Redis) podem devolver status="hitl_pending"
+    # explícito no dict do node — sem __interrupt__ nenhum, porque o grafo
+    # roda o node do início ao fim numa invocação só. rag/ticket/crud nunca
+    # setam essa chave, então continuam caindo no default "ok" de sempre.
     return OSResult(
         answer=result.get("answer", ""), plan_id="langgraph_final", rota=rota,
-        cache_hit=False, total_ms=ms, status="ok",
+        cache_hit=False, total_ms=ms, status=result.get("status", "ok"),
     )
 
 
@@ -377,7 +405,16 @@ async def processar(
 
     decision = await rotear(message, session_id, user_context)
 
-    if decision.rota not in _ROTAS_LANGGRAPH:
+    # Fase 2d (Decisão 01): rotas nativas condicionais entram no escopo do
+    # grafo só com a flag ligada — desligada, comportamento idêntico a
+    # antes (delega as 4 pro dispatcher.py original).
+    from src.infrastructure.settings import settings
+
+    rotas_langgraph = _ROTAS_LANGGRAPH
+    if settings.FEATURE_LANGGRAPH_NATIVE_ROUTES:
+        rotas_langgraph = rotas_langgraph | _ROTAS_LANGGRAPH_NATIVAS_CONDICIONAIS
+
+    if decision.rota not in rotas_langgraph:
         # Não é escopo deste experimento (SIGAA, comandos, greeting...)
         # → delega inteiro pro pipeline original, sem retrabalho nosso.
         # `decision_pronta=decision`: bug real corrigido (achado analisando
@@ -387,12 +424,12 @@ async def processar(
         return await _processar_original(message, session_id, user_context, history, fatos,
                                           decision_pronta=decision)
 
-    route = {"TICKET_ABERTURA": "ticket", "CRUD": "crud"}.get(decision.rota, "rag")
+    route = _ROTA_TO_ROUTE.get(decision.rota, "rag")
     logger.info("🧪 [LANGGRAPH] rota=%s → node=%s (session=%s)", decision.rota, route, session_id)
 
     payload = _reset_payload_para_rota(
         session_id, message, route,
-        rota=decision.rota, history=history, fatos=fatos,
+        rota=decision.rota, history=history, fatos=fatos, user_context=user_context,
     )
     result = await app.ainvoke(payload, config=config)
     return _to_os_result(result, decision.rota, t0)
