@@ -99,6 +99,17 @@ Oraculo/
 
 **Fluxo de decisão:** `application/tasks/process_message_task.py` → `router.supervisor.rotear()` (retorna nome do agente) → `agents.registry.resolve(nome)` → `agent.execute(context)` → `application/runtime/dispatcher.dispatch(...)` (monta chain Celery). Ver `PLANO_REFATORACAO_SUPERVISOR.md` para o histórico completo da migração (Fases 0-7).
 
+⚠️ **Correção (2026-08-25, plano de integração LangGraph/REST/MCP, Decisão
+01):** o orquestrador real de produção hoje é `application/runtime/dispatcher_langgraph.py`
+(`langgraph_experiment/graph.py` — StateGraph), não `dispatcher.py`
+diretamente — este último fica como motor interno (chamado por dentro do
+outro pras rotas que o grafo ainda não cobre) e caminho de debug/eval
+(SSE/`hub.py`/`eval_api.py`). Migração em andamento pra portar
+SIGAA/MEDIA_DOWNLOAD/GREETING/CHECK_STATUS pro grafo (branch
+`integration/langgraph-rest-mcp`), atrás de `settings.FEATURE_LANGGRAPH_NATIVE_ROUTES`.
+Uma reescrita completa desta seção fica pra quando a migração fechar (não
+antes) — ver `docs/decisions/0001-langgraph-nao-aprovado-para-main.md`.
+
 ---
 
 ## 4. Integração FastAPI ↔ Redis Stack ↔ Gemini

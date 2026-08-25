@@ -2040,3 +2040,136 @@ lista línea-a-linha do que foi movido/removido/criado. Resumo:
   `src.domain.tools.tool_wiki_ctic`, que não existe mais) — todos exigem
   decisão de produto antes de qualquer remoção, não são "óbvios" o
   suficiente pra essa sessão de organização decidir sozinha.
+
+## 16. Sessão 2026-08-25 (continuação) — Execução do plano de integração LangGraph/REST/MCP, Fases 0-6
+
+Sessão seguinte à mega auditoria (§15): o usuário aprovou as 7 decisões do
+plano de integração (merge da branch inteira atrás de flags; LangGraph
+assume 100% da produção; RAG/síntese do LangGraph via Celery; REST/MCP com
+camada de Application; checkpointer em DB Redis dedicada; testes HITL
+corrigidos antes; Dockerfile com `COPY rest_lab/`/`mcp_lab/`) e pediu
+execução completa até a Fase 10, com check-in obrigatório só antes da Fase
+2d (maior risco técnico) e em falha de checkpoint. Branch de integração:
+`integration/langgraph-rest-mcp` (a partir de `research/rest-mcp-estudos`),
+worktree própria em `/mnt/storage/projects/Oraculo-integration`.
+
+### 16.1 Fase 0-1 — baseline e flags
+
+Reorganização documental pendente da sessão anterior (§15) commitada
+separada do trabalho de integração. 4 feature flags novas em
+`settings.py`, todas desligadas por padrão: `FEATURE_LANGGRAPH_CELERY_DISPATCH`,
+`FEATURE_LANGGRAPH_NATIVE_ROUTES`, `FEATURE_REST_PRODUCT`,
+`FEATURE_MCP_PRODUCT`.
+
+### 16.2 Fase 2a — isolamento de Postgres nos 10 testes HITL + 2 bugs reais achados
+
+`rbac.py::checar_permissao_chamado()` chama `buscar_pessoa_por_telefone()`,
+que abre conexão real ao Postgres — sem banco no teste, os 10 cenários
+HITL (`test_langgraph_crud_hitl.py`/`test_langgraph_ticket_hitl.py`)
+falhavam desde sempre com erro de conexão, nunca chegando a exercitar
+lógica real. Fixture mockando o lookup + `DEV_TEST_SKIP_REGISTRATION`
+resolveu o isolamento — e revelou 2 bugs nunca antes exercitados:
+1. Mock de `responder_rag_direto()` desatualizado num teste (ganhou
+   `rota=`/`session_id=` na Fase 3.5, commit `0a6e7e9`, mas o teste nunca
+   tinha rodado até esse ponto).
+2. `ticket_confirm()`/`crud_confirm()`: "cancelar" na pergunta de
+   confirmação caía no comando global de saída (`_eh_saida`, mais
+   genérico) em vez do "não" específico que `validar_confirmacao`/
+   `_RE_NEGA` já reconhecia pra essa pergunta — resultado era o texto
+   errado ("🚪 Você saiu...") em vez de "❌ Ticket cancelado."/"❌
+   Atualização cancelada.". Corrigido invertendo a ordem de checagem nos
+   dois nodes de confirmação (só neles — os nodes de pergunta continuam
+   checando saída primeiro).
+
+### 16.3 Fase 2b — RAG/síntese via Celery (Decisão 02)
+
+`responder_rag_direto()` ganha `_responder_rag_via_celery()` — mesmo
+chord `rag_search`→`synthesis` que o Planner legado já usa, mas aguardado
+(`asyncio.to_thread(async_result.get, timeout=...)`) em vez de
+fire-and-forget, porque o node do grafo precisa do texto de volta pra
+continuar. Atrás de `FEATURE_LANGGRAPH_CELERY_DISPATCH`. **Só testado com
+mocks** — o teste de carga real contra workers `rag_search`/`synthesis`
+vivos que a Decisão 02 pede não foi feito (sem Docker/Redis/Celery no
+ambiente onde isso foi implementado); fica pendente pro usuário rodar num
+ambiente real antes de considerar a Decisão 02 fechada de verdade.
+
+### 16.4 Fase 2c — checkpointer isolado (Decisão 04)
+
+`AsyncRedisSaver` passa a usar `REDIS_URL` com DB `/3` em vez de `/0`
+(mesmo padrão de derivação que `celery_app.py` já usa pro broker `/1` e
+result backend `/2`).
+
+### 16.5 Fase 2d — nodes nativos + achado de segurança não previsto no plano
+
+Antes de portar as rotas, achado real ao investigar: `dispatcher_langgraph.py`
+nunca rodava `InputGuardrail` (prompt injection/rate limit) nem
+`handle_hitl_continuation` (HITL legado do SIGAA, `hitl:session:*`) —
+dependia 100% de delegar pro `dispatcher.py` original, que roda os dois no
+topo. Isso já deixava GERAL/CALENDARIO/EDITAL/CONTATOS/WIKI/TICKET_ABERTURA/
+CRUD (nunca delegadas) sem guardrail nenhum, hoje, antes de qualquer coisa
+desta sessão — e migrar SIGAA sem corrigir isso tornaria o gap permanente
+(Decisão 01: `dispatcher.py` vira só debug/eval) e quebraria o login do
+SIGAA de verdade (CPF/senha digitados no meio do funil sendo
+reclassificados como pergunta RAG). Corrigido como pré-requisito: os dois
+checks agora rodam direto em `dispatcher_langgraph.py::processar()`.
+
+Só depois disso, as 4 rotas (CHECK_STATUS/GREETING/MEDIA_DOWNLOAD/SIGAA)
+viraram nodes nativos do grafo, atrás de `FEATURE_LANGGRAPH_NATIVE_ROUTES`.
+SIGAA reaproveita `start_or_continue_sigaa()` (zero duplicação); os outros
+3 reimplementam a lógica do fast-path equivalente em `dispatcher.py`
+(aceito por ora — `dispatcher.py` vira debug/eval-only ao fim da Decisão
+01).
+
+Fase 2 fechada com cobertura de teste pro RBAC (bloqueio nomeado no ADR
+0001, zero testes existiam antes: `domain/permissions.py`,
+`agents/tickets/rbac.py`) e TD-013 registrado (Gatekeeper reescreve toda
+decisão `IGNORE` pra `LLM` incondicionalmente — pré-existente em `main`,
+não corrigido, fora do escopo das 7 decisões).
+
+### 16.6 Fases 3-4 — REST/MCP ganham camada de Application (Decisão 03)
+
+`RestLabUseCase`/`McpLabUseCase` novos em `src/application/use_cases/` —
+`rest_lab/tools.py`/`mcp_lab/tools.py` viram facades finos, `router.py`/
+`run_test.py` de nenhum dos dois mudou uma linha. `mcp_lab/tools.py::buscar_imagem()`
+parou de instanciar `EvolutionAdapter` direto (único ponto de todo
+`rest_lab`/`mcp_lab` que tocava infraestrutura de produção sem camada
+intermediária) — passa pela nova capability
+`evolution_tool.py::enviar_midia_por_url()`. ADRs 0005/0006. Nenhum dos
+dois labs muda de propósito — continuam laboratórios de estudo.
+
+### 16.7 Fase 6 — Dockerfile (Decisão 06)
+
+`COPY rest_lab/`/`COPY mcp_lab/` adicionados — antes só chegavam ao
+container via bind-mount do compose. **Não validado com `docker build`
+real** — sem Docker neste ambiente.
+
+### 16.8 CI real via PR #1 — achado que o sandbox local não pegava
+
+Nenhum commit tinha sido enviado ao remoto; branch empurrada e PR #1
+aberto (sem merge) só pra disparar o workflow real (Redis+Postgres de
+verdade, diferente deste sandbox). 1ª rodada: `test_dispatcher_nao_vaza_estado_entre_tickets_na_mesma_sessao`
+falhou — com Redis real, o rate limit de verdade do `InputGuardrail`
+(recém-adicionado na Fase 2d) barrava a 9ª mensagem de uma sequência de
+~12 chamadas ao `dlg.processar()` na mesma sessão sem pausa (o teste
+simula 2 tickets seguidos rápido). Localmente o rate limit sempre
+degradava silencioso (sem Redis), então nunca apareceu. Não é bug de
+produto — o mesmo rate limit já existe em `dispatcher.py::processar()`
+pra ticket/CRUD desde sempre; só restaura paridade. Corrigido
+neutralizando o sub-check de rate limit nos testes que chamam
+`dlg.processar()` diretamente. 2ª rodada: verde, exceto o único teste
+pré-existente já classificado UNRELATED na auditoria original
+(`test_cognitive_os_sigaa_route_requires_auth_flow`, decisão explícita do
+usuário de não mexer — fora do escopo das 7 decisões aprovadas).
+
+### 16.9 Pendências explícitas que dependem de infra real (não deste sandbox)
+
+1. Teste de carga do despacho Celery de RAG/síntese (Decisão 02, Fase 2b).
+2. `docker build` real validando o `COPY rest_lab/`/`mcp_lab/` (Decisão 06,
+   Fase 6).
+3. Teste manual via WhatsApp real das rotas nativas do LangGraph antes de
+   ligar `FEATURE_LANGGRAPH_NATIVE_ROUTES`/`FEATURE_LANGGRAPH_CELERY_DISPATCH`
+   em produção (Fase 2d/2b).
+4. `tests/integration/`/`tests/e2e/` não rodados (precisam de uvicorn/LLM
+   real) — 4 arquivos em `tests/e2e/` descobertos órfãos nesta sessão
+   (import quebrado, pré-existente, ver TD-014), não relacionados a esta
+   integração.

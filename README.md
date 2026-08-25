@@ -205,8 +205,11 @@ oraculo-uema/
 │       ├── chunkviz.html       # Visualizador de chunks
 │       └── config.html         # Configuração do sistema
 │
-├── rest_lab/ · mcp_lab/ · langgraph_experiment/  # Laboratórios de pesquisa
-│                                                    # (branch research/rest-mcp-estudos, não produto)
+├── langgraph_experiment/       # Grafo (nodes/state) usado por dispatcher_langgraph.py
+│                                  # em produção — "experiment" no nome é histórico, ver
+│                                  # docs/decisions/0001-langgraph-nao-aprovado-para-main.md
+├── rest_lab/ · mcp_lab/        # Laboratórios de pesquisa (não produto), com
+│                                  # camada de Application própria (ADR 0005/0006)
 ├── dados/                      # PDFs e documentos para ingestão
 ├── static/                     # CSS, JS, imagens
 ├── migrations/                 # Migrações Alembic (PostgreSQL)

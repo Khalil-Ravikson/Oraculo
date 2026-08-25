@@ -10,10 +10,11 @@ documentos parecerem cobrir o mesmo tema, este índice decide qual vale.
 | Mapa rápido — "onde fica X?" | [`architecture/system-map.md`](architecture/system-map.md) | Navegação, não duplica a arquitetura |
 | Regras de negócio (RBAC, HITL, escopo de agentes) — para liderança não-técnica | [`business/regras_negocio_oraculo.md`](business/regras_negocio_oraculo.md) | Citações `arquivo:linha` do código real |
 | Por que uma decisão foi tomada (não só o quê) | [`decisions/`](decisions/) | ADRs — ver índice abaixo |
-| Problemas conhecidos, não resolvidos de propósito | [`technical-debt.md`](technical-debt.md) | TD-001 a TD-012, cada um com evidência |
+| Problemas conhecidos, não resolvidos de propósito | [`technical-debt.md`](technical-debt.md) | TD-001 a TD-014, cada um com evidência |
 | Contexto/regras operacionais para agentes de IA (Claude) | [`.claude.md`](../.claude.md) (raiz) | Curto de propósito — aponta pra cá quando precisa de detalhe |
 | Log cronológico de sessões de engenharia (bugs reais, testes, descobertas) | [`../notas.md`](../notas.md) (raiz) | Cresce por sessão — não é para ficar pequeno |
-| Laboratórios de pesquisa (REST, MCP, LangGraph) — não são produção | [`../rest_lab/README.md`](../rest_lab/README.md), [`../mcp_lab/README.md`](../mcp_lab/README.md), [`../langgraph_experiment/README.md`](../langgraph_experiment/README.md) | Cada um remete ao ADR/seção de `notas.md` relevante |
+| `langgraph_experiment/` — grafo usado pelo dispatcher de produção (não é mais lab isolado, ver ADR 0001) | [`../langgraph_experiment/README.md`](../langgraph_experiment/README.md) | Nome do diretório é histórico |
+| Laboratórios de pesquisa (REST, MCP) — não são produção | [`../rest_lab/README.md`](../rest_lab/README.md), [`../mcp_lab/README.md`](../mcp_lab/README.md) | Cada um remete ao ADR/seção de `notas.md` relevante |
 | Como funciona o cliente MCP (protocolo, sessão, tool-call) | [`../mcp_lab/ARQUITETURA.md`](../mcp_lab/ARQUITETURA.md) | Onboarding do próximo servidor MCP |
 | Planos/pesquisas já concluídos ou superados | [`historico/`](historico/) | Mantidos como registro, não como estado atual |
 | Apresentações, relatórios, exports (pptx/docx/json/htm) | [`assets/`](assets/) | Sem valor de código — organização apenas |
@@ -22,10 +23,12 @@ documentos parecerem cobrir o mesmo tema, este índice decide qual vale.
 
 | ADR | Decisão |
 |---|---|
-| [0001](decisions/0001-langgraph-nao-aprovado-para-main.md) | LangGraph isolado em branch própria, não aprovado para `main` |
+| [0001](decisions/0001-langgraph-nao-aprovado-para-main.md) | **Substituído** — LangGraph aprovado como dispatcher definitivo (Decisão 01 do plano de integração, 2026-08-25); mantido como registro histórico da rejeição anterior |
 | [0002](decisions/0002-tts-kokoro-sobre-piper.md) | TTS local: Kokoro-82M no lugar de Piper (licença) |
 | [0003](decisions/0003-sem-s3-cdn-para-midia.md) | Sem S3/CDN para mídia — envio via base64 direto |
 | [0004](decisions/0004-multi-provider-llm-e-roteamento-nos-labs.md) | Multi-provider LLM via `ILLMProvider`; roteamento por regex nos laboratórios de pesquisa |
+| [0005](decisions/0005-rest-lab-camada-application.md) | `rest_lab` ganha camada de Application (`RestLabUseCase`), continua laboratório de estudo |
+| [0006](decisions/0006-mcp-lab-camada-application-e-evolution-adapter.md) | `mcp_lab` ganha camada de Application (`McpLabUseCase`) e para de acessar `EvolutionAdapter` direto |
 | [Repositórios homologados](decisions/repositorios-homologados.md) | Referências de benchmarking validadas (não é ADR, é material de consulta) |
 
 ## Documentos históricos (`historico/`)

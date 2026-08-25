@@ -20,6 +20,7 @@
 | [TD-011](#td-011--migration-004_recria_tabela_pessoas-sem-explicação-no-histórico) | Migração `004_recria_tabela_pessoas` sem explicação no histórico Alembic | Média |
 | [TD-012](#td-012--testwiki_scraperpy-órfão) | `tests/test_wiki_scraper.py` órfão (import quebrado) | Baixa |
 | [TD-013](#td-013--gatekeeper-ignore-reescrito-incondicionalmente-para-llm) | Gatekeeper: toda decisão `IGNORE` é reescrita pra `LLM` — filtros de segurança inertes | Média |
+| [TD-014](#td-014--4-arquivos-de-teste-e2e-órfãos-import-quebrado) | 4 arquivos em `tests/e2e/` órfãos (import quebrado) | Baixa |
 
 ---
 
@@ -287,3 +288,31 @@ LangGraph/REST/MCP, achado de arquitetura de 2026-08-25.
 comportamento do Gatekeeper é decisão de segurança/produto que precisa de
 avaliação própria (por que o override foi introduzido, o que quebraria se
 removido), fora do escopo aprovado do plano de integração (Decisões 00-06).
+
+---
+
+## TD-014 — 4 arquivos de teste e2e órfãos (import quebrado)
+
+**Problema:** `tests/e2e/test_llm.py`, `tests/e2e/test_llm_rag.py`
+importam `src.application.graph.nodes` — módulo que não existe (não
+confundir com `langgraph_experiment/`, que é outra coisa).
+`tests/e2e/test_redis_rag_fluxo.py` e `tests/e2e/test_novo_oraculo.py`
+importam `RedisVectorAdapter` de `src.infrastructure.adapters.redis_vector_adapter`
+— a classe real hoje se chama `RedisVLVectorAdapter`. `pytest tests/e2e
+--collect-only` falha nos 4 com `ModuleNotFoundError`/`ImportError`.
+
+**Estado atual:** pré-existente, confirmado via `git log` (último commit
+que tocou esses arquivos é `3e1bb5c`, bem anterior a qualquer trabalho do
+plano de integração LangGraph/REST/MCP). Não é executado pelo CI (que só
+roda `tests/unit` + o eval do wiki CTIC) nem por nenhum passo desta
+integração — só apareceu ao tentar coletar `tests/e2e/` inteiro como parte
+da checagem da Fase 7 do plano.
+
+**Impacto:** baixo — arquivos órfãos que quebrariam se alguém rodasse
+`pytest tests/e2e` sem saber disso; mesma classe de achado do TD-012.
+
+**Evidência:** `pytest tests/e2e --collect-only -q`, 2026-08-25.
+
+**Escopo desta execução:** documentado, **não corrigido** (atualizar/
+remover é decisão sobre arquivos de teste fora do escopo das Decisões
+00-06, mesmo raciocínio do TD-012).
