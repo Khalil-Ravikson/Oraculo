@@ -2165,7 +2165,8 @@ usuário de não mexer — fora do escopo das 7 decisões aprovadas).
 
 ### 16.9 Pendências explícitas que dependem de infra real (não deste sandbox)
 
-1. Teste de carga do despacho Celery de RAG/síntese (Decisão 02, Fase 2b).
+1. ~~Teste de carga do despacho Celery de RAG/síntese~~ — **fechado
+   2026-08-25**, ver §16.10.
 2. ~~`docker build` real validando o `COPY rest_lab/`/`mcp_lab/`~~ — **fechado
    2026-08-25**, ver §16.7.
 3. Teste manual via WhatsApp real das rotas nativas do LangGraph antes de
@@ -2175,3 +2176,30 @@ usuário de não mexer — fora do escopo das 7 decisões aprovadas).
    real) — 4 arquivos em `tests/e2e/` descobertos órfãos nesta sessão
    (import quebrado, pré-existente, ver TD-014), não relacionados a esta
    integração.
+
+### 16.10 Teste de carga do despacho Celery (Decisão 02) — fechado 2026-08-25
+
+Usuário rodou o stack real (`docker compose --profile core --profile app up -d
+redis worker_rag worker_synthesis`, mais `api`) com
+`FEATURE_LANGGRAPH_CELERY_DISPATCH=true` e um script ad-hoc
+(`responder_rag_direto()` chamado 10x em paralelo, sessões diferentes).
+10/10 concluíram sem timeout/exceção, latência 4.9-18.6s (dentro do
+orçamento `RAG_SEARCH_TIMEOUT_S+SYNTHESIS_TIMEOUT_S=22s`). Decisão 02
+fechada de verdade.
+
+No meio do caminho, achado real e **não relacionado a esta integração**:
+`worker_rag`/`worker_synthesis` (e por extensão qualquer worker Celery)
+crashavam no boot com `PermissionError: [Errno 13] Permission denied:
+'/tmp/sigaa_downloads'`. Causa: `celery_app.py::include=[...]` importa
+TODOS os módulos de worker no boot de qualquer processo, independente de
+`--queues` — então `worker_rag` importa `worker_sigaa.py` →
+`agents/sigaa/service.py` → `capabilities/sigaa/browser.py`, que cria
+`DOWNLOAD_DIR` (`/tmp/sigaa_downloads`) **como efeito colateral do
+import**, não sob demanda. Como `/tmp` do container é bind-mount de
+`dados/tmp` no host, um `dados/tmp` sem permissão de escrita pro usuário
+não-root do container (`oraculo`, uid 1001) derruba QUALQUER worker no
+boot, mesmo um que nunca usa SIGAA. Corrigido no ambiente do usuário
+(`chown`/`chmod` em `dados/tmp`), não no código — é fragilidade real
+(import com side effect + registro de tasks compartilhado entre todos os
+workers), mas fora do escopo das Decisões 00-06. Candidato a TD futuro se
+o usuário confirmar que quer registrar.
