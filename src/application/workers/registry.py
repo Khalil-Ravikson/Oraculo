@@ -27,7 +27,6 @@ _QUEUES: dict[str, str] = {
     "ytb_download":     "media",
     "insta_download":   "media",
     "greeting":         "celery",
-    "crud_confirm":     "default",
     "sigaa_biblioteca": "default",
     "sigaa_extensao":   "default",
     "sigaa_processos":  "default",

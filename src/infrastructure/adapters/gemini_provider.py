@@ -33,8 +33,20 @@ class GeminiProvider:
         import google.genai as genai
         from src.infrastructure.settings import settings
 
+        self.provider_name = "gemini"
         self._model  = model   or settings.GEMINI_MODEL
         self._client = genai.Client(api_key=api_key or settings.GEMINI_API_KEY)
+        # Side-channel de telemetria: `gerar_resposta_estruturada_async` devolve
+        # só o objeto Pydantic (contrato do ILLMProvider, não muda), mas o
+        # `MonitoredLLMProvider` (llm_factory.py) precisa do usage_metadata da
+        # ÚLTIMA chamada pra registrar custo real — sem isso, era descartado
+        # (achado em analise_custo_real_llm.md: nenhuma chamada estruturada
+        # tinha telemetria de tokens).
+        self.ultimo_uso_tokens: tuple[int, int] = (0, 0)
+
+    @property
+    def model(self) -> str:
+        return self._model
 
     async def _with_backoff(self, func, *args, **kwargs):
         from tenacity import retry, stop_after_attempt, wait_exponential
@@ -80,8 +92,14 @@ class GeminiProvider:
             return LLMResponse(
                 conteudo      = text,
                 model         = self._model,
-                input_tokens  = getattr(usage, "prompt_token_count",     0),
-                output_tokens = getattr(usage, "candidates_token_count", 0),
+                # `or 0`: a API Gemini pode devolver o atributo presente mas
+                # com valor None (resposta truncada/sem candidatos — comum
+                # com max_tokens baixo + thinking habilitado), e getattr só
+                # cobre o atributo AUSENTE, não o valor None. Sem isso,
+                # `pricing.calcular_custo_usd` explodia com
+                # "unsupported operand type(s) for /: 'NoneType' and 'int'".
+                input_tokens  = getattr(usage, "prompt_token_count",     0) or 0,
+                output_tokens = getattr(usage, "candidates_token_count", 0) or 0,
                 sucesso       = bool(text),
             )
         except Exception as exc:
@@ -123,8 +141,13 @@ class GeminiProvider:
                 contents = prompt,
                 config   = config,
             )
-            raw  = response.text or "{}"
-            data = json.loads(raw)
+            raw   = response.text or "{}"
+            data  = json.loads(raw)
+            usage = response.usage_metadata
+            self.ultimo_uso_tokens = (
+                getattr(usage, "prompt_token_count", 0) or 0,
+                getattr(usage, "candidates_token_count", 0) or 0,
+            )
             return response_schema(**data)
 
         except Exception as exc:
@@ -166,8 +189,14 @@ class GeminiProvider:
             return LLMResponse(
                 conteudo      = text,
                 model         = self._model,
-                input_tokens  = getattr(usage, "prompt_token_count",     0),
-                output_tokens = getattr(usage, "candidates_token_count", 0),
+                # `or 0`: a API Gemini pode devolver o atributo presente mas
+                # com valor None (resposta truncada/sem candidatos — comum
+                # com max_tokens baixo + thinking habilitado), e getattr só
+                # cobre o atributo AUSENTE, não o valor None. Sem isso,
+                # `pricing.calcular_custo_usd` explodia com
+                # "unsupported operand type(s) for /: 'NoneType' and 'int'".
+                input_tokens  = getattr(usage, "prompt_token_count",     0) or 0,
+                output_tokens = getattr(usage, "candidates_token_count", 0) or 0,
                 sucesso       = bool(text),
             )
         except Exception as exc:

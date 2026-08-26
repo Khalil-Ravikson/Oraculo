@@ -101,9 +101,7 @@ class QueryTransformService:
             return query
 
         try:
-            from src.infrastructure.settings import settings
-            import google.genai as genai
-            from google.genai import types
+            from src.infrastructure.adapters.llm_factory import get_llm_provider
 
             # Pega uma fatia generosa do histórico (até 1500 chars) para garantir contexto real
             historico_trecho = historico[-1500:]
@@ -119,16 +117,9 @@ class QueryTransformService:
                 f"Query Reescrita:"
             )
 
-            client = genai.Client(api_key=settings.GEMINI_API_KEY)
-            response = await client.aio.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    max_output_tokens=60,
-                ),
-            )
-            reescrita = (response.text or "").strip()
+            provider = get_llm_provider(rota="query_transform")
+            resp = await provider.gerar_resposta_async(prompt=prompt, temperatura=0.0, max_tokens=60)
+            reescrita = (resp.conteudo or "").strip()
             # Remove aspas se o modelo adicionar
             reescrita = reescrita.replace('"', '').replace("'", "")
             if len(reescrita) >= 3:

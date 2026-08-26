@@ -1,0 +1,81 @@
+{
+  "title": "Oráculo — Comportamento & Arquitetura",
+  "uid": "oraculo-comportamento",
+  "tags": ["oraculo", "roteamento", "memoria"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Supervisor — qual camada decidiu a rota (regex barato → LLM caro)",
+      "type": "piechart",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "datasource": "Prometheus",
+      "description": "oraculo_router_cache_hit_total{layer} — regex_l1/regex_l2/regex_seeded/knn_seeded/check_status_heuristic são baratos (sem LLM); flash_fallback é a única camada que gasta um token Gemini pra rotear. Fatia grande de flash_fallback = oportunidade de economia (ex: seed de mais regex/KNN).",
+      "targets": [
+        { "expr": "sum by (layer) (increase(oraculo_router_cache_hit_total[6h]))", "legendFormat": "{{layer}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "% das mensagens roteadas via LLM (flash_fallback) — proxy de custo de roteamento",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "100 * sum(rate(oraculo_router_cache_hit_total{layer=\"flash_fallback\"}[15m])) / sum(rate(oraculo_router_cache_hit_total[15m]))",
+          "legendFormat": "% flash_fallback"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "title": "Latência do roteamento (p50/p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(oraculo_router_latency_ms_bucket[5m])))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(oraculo_router_latency_ms_bucket[5m])))", "legendFormat": "p95" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "title": "Acesso à memória cognitiva por camada (L1-L4)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "datasource": "Prometheus",
+      "description": "oraculo_memory_layer_access_total{layer,operation} — src/memory/services/redis_memory_service.py. L1=Conversation, L2=Operational, L3=Task History, L4=User Memory. Se uma camada nunca aparece aqui, ela não está sendo usada de verdade no fluxo real.",
+      "targets": [
+        { "expr": "sum by (layer, operation) (rate(oraculo_memory_layer_access_total[5m])) * 60", "legendFormat": "{{layer}}/{{operation}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Acesso à memória — total por camada (6h)",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum by (layer) (increase(oraculo_memory_layer_access_total[6h]))", "legendFormat": "{{layer}}" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "LangGraph (experimento) — volume por node",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "datasource": "Prometheus",
+      "description": "oraculo_langgraph_node_total{node} — langgraph_experiment/nodes.py (branch/worktree isolada, não é produção). Vazio se o experimento nunca rodou nesta instância.",
+      "targets": [
+        { "expr": "sum by (node) (rate(oraculo_langgraph_node_total[5m])) * 60", "legendFormat": "{{node}}" }
+      ]
+    }
+  ]
+}

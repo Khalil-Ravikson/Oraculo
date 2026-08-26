@@ -19,7 +19,7 @@ import asyncio
 import logging
 import time
 
-from src.infrastructure.celery_app import celery_app
+from src.infrastructure.celery_app import celery_app, run_in_worker_loop
 from src.infrastructure.redis_client import get_redis_text
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ _WARNING_MSG   = "⏳ Processando, aguarde um instante..."
 )
 def processar_mensagem_task(self, identity: dict, stream_id: str = "") -> None:
     """Entry point Celery. Usa Cognitive OS para gerar resposta."""
-    asyncio.run(_processar_async(self, identity, stream_id))
+    run_in_worker_loop(_processar_async(self, identity, stream_id))
 
 
 async def _processar_async(task, identity: dict, stream_id: str) -> None:
@@ -124,8 +124,10 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
         mem_ctx = mem_svc.carregar_contexto(user_id=phone, session_id=phone, query=message)
         
         # ── Executa a chain (COGNITIVE OS) ─────────────────────────────────────
-        from src.application.runtime.dispatcher import processar as cognitive_processar
-        
+        # 🧪 EXPERIMENTO (branch langgraph): TICKET_ABERTURA/RAG desviados pro
+        # StateGraph do LangGraph — ver src/application/runtime/dispatcher_langgraph.py
+        from src.application.runtime.dispatcher_langgraph import processar as cognitive_processar
+
         t0 = time.monotonic()
         
         result_os = await cognitive_processar(
@@ -201,11 +203,6 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
         raise task.retry(exc=exc, countdown=5 ** (task.request.retries + 1))
 
     finally:
-        try:
-            from src.infrastructure.observability.langfuse_client import flush_langfuse
-            flush_langfuse()
-        except Exception:
-            pass
         try:
             lock.release()
         except Exception:
@@ -285,7 +282,7 @@ def processar_mensagem_whatsapp(
     push_name: str, is_group: bool, mentioned_bot: bool,
     msg_key_id: str = "", has_media: bool = False, media_type: str = "",
 ) -> None:
-    asyncio.run(_handle_message(
+    run_in_worker_loop(_handle_message(
         remote_jid=remote_jid, sender_jid=sender_jid, text=text,
         push_name=push_name, is_group=is_group, mentioned_bot=mentioned_bot,
         msg_key_id=msg_key_id, has_media=has_media, media_type=media_type,
@@ -293,6 +290,23 @@ def processar_mensagem_whatsapp(
 
 
 async def _handle_message(**kwargs) -> None:
+    """Span raiz por mensagem (OpenTelemetry) — wrapper fino em vez de
+    reindentar `_handle_message_impl` inteiro (função grande, muitos
+    `return` cedo). NO-OP se ENABLE_TRACING=False. Correlaciona plan_id/
+    session_id entre este span e os spans filhos (LLM/STT/TTS) criados nos
+    pontos únicos de telemetria em llm_factory.py/audio_service.py."""
+    from src.infrastructure.observability.tracing import get_tracer
+
+    with get_tracer().start_as_current_span("processar_mensagem_whatsapp") as span:
+        try:
+            span.set_attribute("oraculo.session_id", kwargs.get("sender_jid", ""))
+            span.set_attribute("oraculo.remote_jid", kwargs.get("remote_jid", ""))
+        except Exception:
+            pass
+        await _handle_message_impl(**kwargs)
+
+
+async def _handle_message_impl(**kwargs) -> None:
     from src.infrastructure.redis_client import get_redis_text
     from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
     from src.router.gatekeeper import MessageRouter, DispatchTarget
@@ -371,6 +385,7 @@ async def _handle_message(**kwargs) -> None:
             "chat_id": chat_id,
             "has_media": kwargs.get("has_media", False),
             "media_type": kwargs.get("media_type", ""),
+            "msg_key_id": kwargs.get("msg_key_id", ""),
         }
 
         # ── Humanização: simula "digitando..." no grupo ───────────────────────
@@ -382,19 +397,30 @@ async def _handle_message(**kwargs) -> None:
         except Exception as e:
             logger.warning("⚠️  enviar_digitando falhou: %s", e)
 
+        # ── Fase 3 do roadmap multimodal: pedido de resposta em áudio, opt-in ──
+        # Detectado ANTES de montar `message` — a frase-gatilho ("em áudio",
+        # "manda um áudio"...) é removida do texto que vai pro RAG/síntese,
+        # senão o LLM vê a frase completa e responde SOBRE o pedido de áudio
+        # em vez de responder a pergunta de verdade (bug real de produção
+        # encontrado testando ao vivo — ver notas.md seção 12).
+        from src.application.runtime.dispatcher import _quer_resposta_em_audio, _remover_pedido_audio
+        quer_audio = _quer_resposta_em_audio(text)
+        mensagem = _remover_pedido_audio(text) if quer_audio else text
+
         # ── Carrega contexto da memória ────────────────────────────────────────
         from src.memory.container import create_memory_service
         mem_svc = create_memory_service()
-        mem_ctx = mem_svc.carregar_contexto(user_id=sender, session_id=sender, query=text)
+        mem_ctx = mem_svc.carregar_contexto(user_id=sender, session_id=sender, query=mensagem)
 
         # ── CognitiveOS: ───────────────────────────────────────────────────────
-        from src.application.runtime.dispatcher import processar as cognitive_processar
+        # 🧪 EXPERIMENTO (branch langgraph): ver dispatcher_langgraph.py
+        from src.application.runtime.dispatcher_langgraph import processar as cognitive_processar
         result_os = await cognitive_processar(
-            message=text,
+            message=mensagem,
             session_id=sender,
             user_context=user_context,
             history=mem_ctx.historico.texto_formatado if mem_ctx.historico else "",
-            fatos=[f.texto for f in mem_ctx.fatos] if mem_ctx.fatos else []   
+            fatos=[f.texto for f in mem_ctx.fatos] if mem_ctx.fatos else []
         )
         
         # ── Guardrails (Saída) ────────────────────────────────────────────────────
@@ -427,7 +453,7 @@ async def _handle_message(**kwargs) -> None:
                 mem_svc.persistir_turno(
                     session_id=sender,
                     user_id=sender,
-                    pergunta=text,
+                    pergunta=mensagem,
                     resposta=result.answer,
                     rota=result.route
                 )
@@ -435,11 +461,80 @@ async def _handle_message(**kwargs) -> None:
             except Exception as e:
                 logger.warning("⚠️  Falha ao salvar turno síncrono (grupo) na memória: %s", e)
 
+            # `quer_audio` já detectado no texto original, antes da limpeza —
+            # ver bloco acima. `result.answer` (não `answer`, que já tem o
+            # sufixo de avaliação "!1 a !5") é o que vai ser sintetizado.
+            if quer_audio:
+                try:
+                    await _enviar_resposta_em_audio(gateway, chat_id, result.answer)
+                except Exception as e:
+                    logger.warning("⚠️  Falha ao gerar/enviar resposta em áudio: %s", e)
+
         try:
             _salvar_metrica(sender, result)
         except Exception:
             pass
         return
+
+
+_TTS_TIMEOUT_S = 1000.0  # Celery pickup (queue=media) + cold-load do Kokoro (>15s em container
+                       # com CPU mais fraca que dev local, confirmado real: 1º pedido de áudio
+                       # após subir o worker estourou 25s — ver notas.md seção 12) + polling
+
+
+async def _enviar_resposta_em_audio(gateway, chat_id: str, texto: str) -> None:
+    """
+    Sintetiza `texto` via TTS e envia como mídia de áudio.
+
+    Despacha pro worker `media` via Celery (`worker_text_to_audio`) em vez de
+    chamar AudioService.synthesize() inline neste processo — bug real de
+    produção corrigido nesta sessão: rodar Kokoro (torch + spacy +
+    curated-transformers) INLINE no worker `default` (mem_limit 768m,
+    já compartilhado com Playwright/Chromium do fluxo SIGAA) OOM-matava o
+    container inteiro (SIGKILL durante o carregamento do modelo — derrubava
+    TODO o processamento de mensagens, não só a resposta em áudio). O worker
+    `media` é o lugar certo (mesmo padrão do STT — ver
+    `_transcrever_audio_recebido` em dispatcher.py). Ver notas.md seção 12.
+    """
+    import uuid
+    from src.application.workers.registry import dispatch as worker_dispatch
+    from src.capabilities.persistence.redis_state import get_result_cache
+
+    plan_id = f"fast_tts_{chat_id[-6:] if chat_id else 'x'}_{uuid.uuid4().hex[:8]}"
+    step_id = "s_tts"
+    task_id = worker_dispatch("text_to_audio", {
+        "plan_id": plan_id, "session_id": chat_id, "step_id": step_id,
+        "text": texto, "lang": "pt",
+    })
+    if task_id is None:
+        logger.warning("⚠️  [TTS] worker_text_to_audio não encontrado no registry.")
+        return
+
+    r = get_redis_text()
+    deadline = time.monotonic() + _TTS_TIMEOUT_S
+    payload  = None
+    while time.monotonic() < deadline:
+        payload = await get_result_cache(r, plan_id, step_id)
+        if payload is not None:
+            break
+        await asyncio.sleep(0.3)
+
+    ok = bool(payload and payload.get("status") == "ok" and payload.get("audio_b64"))
+    if not ok:
+        logger.warning("⚠️  [TTS] Síntese falhou ou deu timeout | plan=%s | payload=%s",
+                        plan_id, payload)
+        return
+
+    # mimetype/filename precisam bater com o que o provider de TTS realmente
+    # gera — Kokoro e gTTS produzem MP3 os dois (ver kokoro_tts_provider.py/
+    # gtts_provider.py). "audio/wav" foi testado ao vivo e a Evolution API
+    # aceita (HTTP 201) mas o áudio nunca chega no WhatsApp de verdade — bug
+    # real corrigido nesta sessão, ver notas.md seção 12.
+    await gateway.enviar_midia_base64(
+        chat_id, payload["audio_b64"], mediatype="audio", mimetype="audio/mpeg",
+        filename="resposta.mp3",
+    )
+    logger.info("🔊 [TTS] Resposta em áudio enviada | chat=%s", chat_id)
 
 async def _get_user_data(phone: str) -> dict | None:
     try:

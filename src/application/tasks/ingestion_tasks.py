@@ -91,7 +91,7 @@ def processar_documento(
 
     try:
         # ── 1. Parse ──────────────────────────────────────────────────────────
-        texto = _extrair_texto(file_path, ext)
+        texto = _extrair_texto(file_path, ext, strategy_params.get("parser", "auto"))
         if not texto.strip():
             return {"ok": False, "error": "Nenhum texto extraído. PDF é scan?"}
 
@@ -201,10 +201,16 @@ def processar_documento(
 # Helpers internos
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _extrair_texto(file_path: str, ext: str) -> str:
-    """Seleciona o parser automaticamente pela extensão."""
+def _extrair_texto(file_path: str, ext: str, parser_name: str = "auto") -> str:
+    """Usa o parser escolhido no ChunkViz; sem escolha explícita, seleciona automaticamente pela extensão."""
     from src.rag.ingestion.parser_factory import ParserFactory
-    parser = ParserFactory.auto(file_path)
+    if parser_name and parser_name != "auto":
+        try:
+            parser = ParserFactory.get(parser_name)
+        except ValueError:
+            parser = ParserFactory.auto(file_path)
+    else:
+        parser = ParserFactory.auto(file_path)
     return parser.parse(file_path)
 
 

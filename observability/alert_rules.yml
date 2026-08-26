@@ -17,3 +17,38 @@ groups:
           severity: warning
         annotations:
           summary: "Uso de tokens acima do esperado"
+
+      # ── Multimodal (STT/TTS/Vision) — limiares iniciais, ajustar após dado
+      # real de produção (ver roadmap: notas.md seção 11). Editar os números
+      # abaixo é o "ajustável" pedido — não exige mudar código Python.
+      - alert: HighSTTFailureRate
+        expr: increase(oraculo_stt_requests_total{resultado="falha"}[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taxa de falha alta em transcrição de áudio (STT)"
+
+      - alert: HighTTSFailureRate
+        expr: increase(oraculo_tts_requests_total{resultado="falha"}[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taxa de falha alta em síntese de voz (TTS)"
+
+      - alert: HighVisionFailureRate
+        expr: increase(oraculo_vision_requests_total{resultado="falha"}[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taxa de falha alta em extração de imagem (Vision)"
+
+      - alert: HighVisionLatency
+        expr: histogram_quantile(0.95, rate(oraculo_vision_latency_ms_bucket[5m])) > 5000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 de latência de Vision acima de 5s"

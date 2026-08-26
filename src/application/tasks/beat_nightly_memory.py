@@ -189,23 +189,16 @@ def _formatar_conversas(raw_msgs: list) -> str:
 
 
 async def _sintetizar_fatos_flash(session_id: str, conversas: str) -> list[str]:
-    """Chama Gemini Flash para extrair fatos das conversas do dia."""
-    from src.infrastructure.settings import settings
-    import google.genai as genai
-    from google.genai import types
+    """Chama o LLM ativo (Gemini/DeepSeek/Groq) para extrair fatos das conversas do dia."""
+    from src.infrastructure.adapters.llm_factory import get_llm_provider
 
     try:
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        response = await client.aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=_PROMPT_SINTETIZAR.format(conversas=conversas[:2000]),
-            config=types.GenerateContentConfig(
-                temperature=0.05,
-                max_output_tokens=200,
-                response_mime_type="application/json",
-            ),
+        provider = get_llm_provider(rota="memoria_noturna")
+        resp = await provider.gerar_resposta_async(
+            prompt=_PROMPT_SINTETIZAR.format(conversas=conversas[:2000]),
+            temperatura=0.05, max_tokens=200,
         )
-        data = json.loads(response.text or "{}")
+        data = json.loads(resp.conteudo or "{}")
         fatos = data.get("fatos", [])
         return [f for f in fatos if isinstance(f, str) and len(f) >= 15]
 

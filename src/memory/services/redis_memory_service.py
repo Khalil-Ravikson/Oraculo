@@ -13,6 +13,23 @@ from src.infrastructure.settings import settings
 
 _TTL = 1800  # 30 min
 
+
+def _get_or_create_metric(metric_cls, name, documentation, labelnames=()):
+    """Mesmo padrão de `router/supervisor.py::_get_or_create_metric` — evita
+    'Duplicated timeseries in CollectorRegistry' em hot-reload/import repetido."""
+    from prometheus_client import REGISTRY
+    if name in REGISTRY._names_to_collectors:
+        return REGISTRY._names_to_collectors[name]
+    return metric_cls(name, documentation, labelnames=labelnames)
+
+
+from prometheus_client import Counter as _Counter
+
+_MEMORY_ACCESS = _get_or_create_metric(
+    _Counter, "oraculo_memory_layer_access_total",
+    "Acesso à memória cognitiva por camada (L1-L4) e operação", ["layer", "operation"],
+)
+
 @dataclass
 class MemorySnapshot:
     conversation: list[dict]
@@ -37,6 +54,7 @@ class CognitiveMemoryService:
     # ── Layer 1: Conversation ──────────────────────────────────────────────────
 
     async def add_turn(self, session_id: str, role: str, content: str) -> None:
+        _MEMORY_ACCESS.labels(layer="L1", operation="write").inc()
         key = f"chat:{session_id}"
         entry = json.dumps({"role": role, "content": content, "ts": int(time.time())},
                            ensure_ascii=False)
@@ -45,6 +63,7 @@ class CognitiveMemoryService:
         await self._r.expire(key, _TTL)
 
     async def get_conversation(self, session_id: str) -> list[dict]:
+        _MEMORY_ACCESS.labels(layer="L1", operation="read").inc()
         raw = await self._r.lrange(f"chat:{session_id}", 0, -1) or []
         turns = []
         for item in raw:
@@ -65,10 +84,12 @@ class CognitiveMemoryService:
     # ── Layer 2: Operational ───────────────────────────────────────────────────
 
     async def set_operational(self, session_id: str, data: dict) -> None:
+        _MEMORY_ACCESS.labels(layer="L2", operation="write").inc()
         await self._r.setex(f"op:{session_id}", _TTL,
                             json.dumps(data, ensure_ascii=False))
 
     async def get_operational(self, session_id: str) -> dict:
+        _MEMORY_ACCESS.labels(layer="L2", operation="read").inc()
         raw = await self._r.get(f"op:{session_id}")
         if not raw:
             return {}
@@ -78,11 +99,13 @@ class CognitiveMemoryService:
             return {}
 
     async def clear_operational(self, session_id: str) -> None:
+        _MEMORY_ACCESS.labels(layer="L2", operation="clear").inc()
         await self._r.delete(f"op:{session_id}")
 
     # ── Layer 3: Task History ──────────────────────────────────────────────────
 
     async def save_task_result(self, session_id: str, worker: str, result: str) -> None:
+        _MEMORY_ACCESS.labels(layer="L3", operation="write").inc()
         key = f"task_hist:{session_id}"
         await self._r.hset(key, mapping={
             "last_worker": worker,
@@ -92,16 +115,19 @@ class CognitiveMemoryService:
         await self._r.expire(key, _TTL)
 
     async def get_task_history(self, session_id: str) -> dict:
+        _MEMORY_ACCESS.labels(layer="L3", operation="read").inc()
         return await self._r.hgetall(f"task_hist:{session_id}") or {}
 
     # ── Layer 4: User Memory ───────────────────────────────────────────────────
 
     async def set_user_memory(self, user_id: str, data: dict) -> None:
+        _MEMORY_ACCESS.labels(layer="L4", operation="write").inc()
         key = f"user_mem:{user_id}"
         await self._r.hset(key, mapping={k: str(v) for k, v in data.items()})
         await self._r.expire(key, 86400 * 7)
 
     async def get_user_memory(self, user_id: str) -> dict:
+        _MEMORY_ACCESS.labels(layer="L4", operation="read").inc()
         return await self._r.hgetall(f"user_mem:{user_id}") or {}
 
     # ── Snapshot completo (para injetar no Synthesis) ──────────────────────────

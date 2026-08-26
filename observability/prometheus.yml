@@ -35,17 +35,6 @@ scrape_configs:
           service: "redis"
     metrics_path: /metrics
 
-  # Langfuse (se expuser métricas — porta 3030 na imagem oficial)
-  - job_name: "langfuse"
-    static_configs:
-      - targets: ["langfuse:3030"]
-        labels:
-          env: "production"
-          service: "langfuse"
-    metrics_path: /metrics
-    # Ignora erro se Langfuse estiver offline
-    honor_timestamps: true
-
   # Prometheus self-monitoring
   - job_name: "prometheus"
     static_configs:

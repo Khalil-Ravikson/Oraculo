@@ -21,6 +21,16 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 
 
+def _log_seguro(body: dict) -> dict:
+    """Trunca campos que podem carregar payload gigante (base64 de mídia em
+    `enviar_midia_base64`) antes de logar — sem isso, um erro 4xx da
+    Evolution jogava megabytes de base64 no log, quase escondendo a mensagem
+    de erro de verdade (bug real encontrado nesta sessão)."""
+    if "media" in body and isinstance(body["media"], str) and len(body["media"]) > 100:
+        body = {**body, "media": f"<{len(body['media'])} chars omitidos>"}
+    return body
+
+
 def _headers() -> dict:
     return {
         "Content-Type": "application/json",
@@ -105,6 +115,33 @@ class EvolutionAdapter:
             body["fileName"] = filename
         return await self._post(_base("message/sendMedia"), body)
 
+    async def enviar_midia_base64(
+        self,
+        number: str,
+        base64_data: str,
+        mediatype: str,        # "image" | "video" | "document" | "audio"
+        mimetype: str,
+        caption: str = "",
+        filename: str = "",
+    ) -> bool:
+        """POST /message/sendMedia/{instance} — mesmo endpoint de
+        `enviar_midia_url`, mas com o arquivo em base64 direto no campo
+        `media` em vez de uma URL pública (a Evolution API aceita os dois —
+        ver docstring do módulo). Usado quando não há storage/URL pública
+        pro arquivo (ex.: vídeo baixado em `/tmp` pelo `MediaDownloadService`,
+        sem S3/CDN na frente — ver `worker_media_download.py`)."""
+        body: dict = {
+            "number":    _clean_number(number),
+            "mediatype": mediatype,
+            "mimetype":  mimetype,
+            "media":     base64_data,
+        }
+        if caption:
+            body["caption"] = caption
+        if filename:
+            body["fileName"] = filename
+        return await self._post(_base("message/sendMedia"), body)
+
     async def enviar_botoes(
         self,
         number: str,
@@ -180,7 +217,7 @@ class EvolutionAdapter:
                 if resp.status_code >= 400:
                     logger.error(
                         "❌ Evolution %s → HTTP %d | Body: %s | Resp: %s",
-                        url.split("/")[-2], resp.status_code, body, resp.text[:200],
+                        url.split("/")[-2], resp.status_code, _log_seguro(body), resp.text[:200],
                     )
                     return False
             return True

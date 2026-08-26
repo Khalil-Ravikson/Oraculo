@@ -38,21 +38,9 @@ import time
 from dataclasses import dataclass
 
 from src.agents.academic_knowledge.prompts import SYSTEM_SYNTHESIS
+from src.infrastructure.observability import pricing
 
 logger = logging.getLogger(__name__)
-
-# Custo Gemini 2.5 Flash (USD por 1M tokens)
-_CUSTO_INPUT = 0.075
-_CUSTO_OUTPUT = 0.30
-
-_client = None
-def _get_client():
-    global _client
-    if _client is None:
-        from src.infrastructure.settings import settings
-        import google.genai as genai
-        _client = genai.Client(api_key=settings.GEMINI_API_KEY)
-    return _client
 
 
 @dataclass
@@ -120,35 +108,35 @@ class SynthesisService:
             )
 
         try:
-            from src.infrastructure.settings import settings
-            from google.genai import types
+            from src.infrastructure.adapters.llm_factory import get_llm_provider
 
-            client = _get_client()
-            response = await client.aio.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system,
-                    temperature=0.2,
-                    max_output_tokens=max_tokens,
-                ),
+            rota_efetiva = plan_ctx.get("route", plan_ctx.get("route_hint", "GERAL"))
+            provider = get_llm_provider(agente="academic_knowledge", rota=rota_efetiva)
+            resposta = await provider.gerar_resposta_async(
+                prompt=prompt,
+                system_instruction=system,
+                temperatura=0.2,
+                max_tokens=max_tokens,
+                # plan_ctx não carrega um identificador de usuário próprio
+                # hoje (achado: nenhum caller popula "user_id") — session_id
+                # como fallback dá pelo menos atribuição por sessão em vez
+                # de deixar a coluna sempre vazia.
+                user_id=str(plan_ctx.get("user_id") or plan_ctx.get("session_id", "")),
+                rota=rota_efetiva,
             )
 
-            usage = response.usage_metadata
-            tokens_in = tokens_out = 0
-            if usage:
-                tokens_in = usage.prompt_token_count or 0
-                tokens_out = usage.candidates_token_count or 0
-                session_id = plan_ctx.get("session_id")
-                if session_id:
-                    from src.infrastructure.redis_client import registrar_tokens_redis
-                    registrar_tokens_redis(session_id, tokens_in, tokens_out)
+            tokens_in, tokens_out = resposta.input_tokens, resposta.output_tokens
+            session_id = plan_ctx.get("session_id")
+            if session_id:
+                # Mantido em paralelo à telemetria persistente acima — é o
+                # cache curto (TTL 1h) que o simulador de avaliação do /hub
+                # (`eval_api.py`) consome, propósito diferente (ver
+                # analise_custo_real_llm.md §4).
+                from src.infrastructure.redis_client import registrar_tokens_redis
+                registrar_tokens_redis(session_id, tokens_in, tokens_out)
 
-            custo = (
-                tokens_in  / 1_000_000 * _CUSTO_INPUT +
-                tokens_out / 1_000_000 * _CUSTO_OUTPUT
-            )
-            answer = (response.text or "").strip()
+            custo = pricing.calcular_custo_usd(provider.provider_name, provider.model, tokens_in, tokens_out)
+            answer = (resposta.conteudo or "").strip()
             ms = int((time.monotonic() - t0) * 1000)
 
             logger.info(

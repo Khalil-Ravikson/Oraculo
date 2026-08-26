@@ -79,6 +79,22 @@ async def webhook_evolution(request: Request) -> Response:
     # Log visível no terminal do Docker indicando que o seu grupo passou
     logger.info("🎯 [OraculoUEMA] Mensagem aceita no grupo homologado: %s", msg.text)
 
+    # 🔁 Dedup por msg_key_id: Evolution pode reentregar o mesmo webhook (retry
+    # por ack lento, evento duplicado) — sem isso, a mesma mensagem vira duas
+    # tasks Celery independentes que avançam o funil HITL cada uma por conta
+    # própria (reproduzido em teste real: "Quero fazer uma requisição" chegou
+    # 2x em 7s, o lock por telefone em process_message_task.py não pega esse
+    # caso pois já tinha liberado entre as duas). Só dedupe quando o Evolution
+    # manda um id de verdade — sem id, deixa passar (não dá pra deduplicar o
+    # que não tem chave).
+    if msg.msg_key_id:
+        from src.infrastructure.redis_client import acquire_lock
+
+        novo = await acquire_lock(f"webhook_msg:{msg.msg_key_id}", ttl_seconds=120)
+        if not novo:
+            logger.info("🔁 [OraculoUEMA] Mensagem duplicada ignorada (msg_key_id já processado): %s", msg.msg_key_id[:20])
+            return Response(status_code=200)
+
     # Executa a chamada em background no Celery
     processar_mensagem_whatsapp.delay(
         remote_jid    = msg.remote_jid,

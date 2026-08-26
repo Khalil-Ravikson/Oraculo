@@ -32,6 +32,11 @@ def create_app() -> FastAPI:
         redoc_url   = None,
     )
 
+    # 1b. Tracing (OpenTelemetry → Jaeger) — NO-OP se ENABLE_TRACING=False
+    from src.infrastructure.observability.tracing import setup_tracing, instrument_fastapi
+    setup_tracing(service_name="oraculo-api")
+    instrument_fastapi(app)
+
     # 2. Prometheus Instrumentator (Métricas de RPM e Latência)
     from prometheus_fastapi_instrumentator import Instrumentator
     instrumentator = Instrumentator().instrument(app)
@@ -133,6 +138,17 @@ async def _startup(settings) -> None:
         logger.info("✅ Gateway WhatsApp (Evolution) ativo")
     except Exception as exc:
         logger.warning("⚠️  Evolution API offline (Modo Web apenas): %s", exc)
+
+    # 4. Taxa USD→BRL ao vivo — dispara 1x no boot (fire-and-forget via
+    # Celery) pra não esperar até 6h pela primeira execução do beat
+    # `atualizar_taxa_brl` (ver celery_app.py). Falha aqui nunca é crítica —
+    # `pricing.py::taxa_brl_ativa()` já cai pro fallback fixo sozinho.
+    try:
+        from src.infrastructure.celery_app import atualizar_taxa_brl_task
+        atualizar_taxa_brl_task.delay()
+        logger.info("💱 [FX] Atualização inicial de taxa USD→BRL disparada.")
+    except Exception as exc:
+        logger.warning("⚠️  Falha ao disparar atualização inicial de taxa BRL: %s", exc)
 
     logger.info("✅ Oráculo pronto para receber mensagens!")
 

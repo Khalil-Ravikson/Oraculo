@@ -5,7 +5,6 @@ infrastructure/celery_app.py — Sprint 1 (Recovery Signal + Stream Health)
 MUDANÇAS vs versão anterior:
   ADICIONADO:
     - Signal worker_ready → chama recover_pending_messages() no startup
-    - Signal worker_shutdown → flush Langfuse antes de encerrar
     - Fila "streams" para o recovery task periódico (opcional)
 
   MANTIDO:
@@ -13,11 +12,12 @@ MUDANÇAS vs versão anterior:
     - Task routing (default / notificacoes / admin)
     - Timezone America/Sao_Paulo
 """
+import asyncio
 import os
 import logging
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_ready, worker_shutdown
+from celery.signals import worker_ready
 from src.infrastructure.settings import settings as _settings
 celery_broker_url = _settings.REDIS_URL.replace("/0", "/1")
 celery_backend_url = _settings.REDIS_URL.replace("/0", "/2")
@@ -86,6 +86,15 @@ celery_app.conf.update(
             "args":     [{"plan_id": "beat", "session_id": "beat", "nivel": "L"}],
             "options":  {"queue": "default"},
         },
+        # Taxa USD→BRL ao vivo (custo real em dinheiro no /hub/llm-custo) —
+        # a cada 6h é sobra de margem pra câmbio (não é day-trading), evita
+        # martelar a API gratuita. Só ATUALIZA o valor auto; override manual
+        # via /hub/llm-custo continua tendo precedência (ver pricing.py::taxa_brl_ativa).
+        "atualizar_taxa_brl": {
+            "task":     "atualizar_taxa_brl",
+            "schedule": crontab(minute=0, hour="*/6"),
+            "options":  {"queue": "default"},
+        },
     },
 
     # ── Routing ───────────────────────────────────────────────────────────────
@@ -99,6 +108,7 @@ celery_app.conf.update(
         "worker_rag_search":          {"queue": "rag_search"},
         "worker_synthesis":           {"queue": "synthesis"},
         "beat_nightly_memory_sync":   {"queue": "default"},
+        "atualizar_taxa_brl":         {"queue": "default"},
         "worker_audio_to_text":   {"queue": "media"},
         "worker_text_to_audio":   {"queue": "media"},
         "worker_ytb_download":    {"queue": "media"},
@@ -125,14 +135,60 @@ celery_app.autodiscover_tasks([
 logger = logging.getLogger(__name__)
 
 
-from celery.signals import worker_ready, worker_shutdown, worker_process_init
+from celery.signals import worker_ready, worker_process_init, worker_process_shutdown
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Event loop persistente por processo worker (prefork, single-thread, tasks
+# sequenciais dentro de cada processo — ver docker-compose.yml, sem --pool
+# explícito nos comandos = default prefork).
+#
+# Motivo: o experimento LangGraph (dispatcher_langgraph.py) usa um
+# AsyncRedisSaver que precisa sobreviver entre mensagens da mesma sessão
+# (HITL via interrupt()/Command(resume=...)). Um recurso async assim NÃO pode
+# atravessar a fronteira de um asyncio.run() por task (cria "Event loop is
+# closed"/"Future attached to a different loop" — ver notas.md/relatório da
+# investigação desta branch). A correção é nunca destruir o loop entre tasks:
+# criado uma vez aqui, reusado via run_in_worker_loop() em vez de
+# asyncio.run(), fechado em on_worker_process_shutdown.
+# ─────────────────────────────────────────────────────────────────────────────
+_worker_loop: asyncio.AbstractEventLoop | None = None
+
+
+def run_in_worker_loop(coro):
+    """Substitui asyncio.run() nas tasks que precisam de recursos async de
+    vida longa (checkpointer do experimento LangGraph). Reusa o mesmo loop
+    durante toda a vida do processo worker — nunca cria um loop novo por task."""
+    global _worker_loop
+    if _worker_loop is None or _worker_loop.is_closed():
+        _worker_loop = asyncio.new_event_loop()
+    return _worker_loop.run_until_complete(coro)
+
 
 @worker_process_init.connect
 def on_worker_process_init(**kwargs):
     """
     Executado quando um novo worker child process é iniciado (prefork).
     Carrega modelos de ML em memória no boot para eliminar latência nas tasks.
+
+    Gated por CELERY_PRELOAD_RERANKER: este signal é global do celery_app —
+    dispara em TODO container que sobe um worker deste app, independente de
+    --queues. Sem o gate, worker/worker_synthesis/worker_media/worker_graph
+    carregavam o CrossEncoder (~90-300MB com torch) mesmo nunca executando a
+    task "reranker" (fila rag_search, só consumida por worker_rag). Setar
+    CELERY_PRELOAD_RERANKER=true só no worker_rag (docker-compose.yml).
     """
+    # Tracing (OpenTelemetry) — sem gate, roda em todo worker (leve, sem
+    # lib C pesada) — cada processo Celery precisa do seu próprio
+    # TracerProvider (processo separado do FastAPI). NO-OP se
+    # settings.ENABLE_TRACING=False.
+    try:
+        from src.infrastructure.observability.tracing import setup_tracing
+        setup_tracing(service_name="oraculo-worker")
+    except Exception as e:
+        logger.warning("⚠️ [CELERY] Falha ao configurar tracing: %s", e)
+
+    if os.environ.get("CELERY_PRELOAD_RERANKER", "false").lower() != "true":
+        return
     try:
         from src.application.chain.reranker import get_reranker
         logger.info("⏳ [CELERY] Pre-loading ML models on process init...")
@@ -140,6 +196,28 @@ def on_worker_process_init(**kwargs):
         logger.info("✅ [CELERY] ML models pre-loaded successfully.")
     except Exception as e:
         logger.error("❌ [CELERY] Failed to pre-load models: %s", e)
+
+
+@worker_process_shutdown.connect
+def on_worker_process_shutdown(**kwargs):
+    """
+    Executado quando um worker child process (prefork) é encerrado —
+    diferente de worker_shutdown, que só dispara no processo principal.
+    Fecha os recursos async de vida longa (AsyncRedisSaver do experimento
+    LangGraph) e o event loop persistente deste processo, nessa ordem.
+    """
+    global _worker_loop
+    if _worker_loop is None or _worker_loop.is_closed():
+        return
+    try:
+        from src.application.runtime.dispatcher_langgraph import aclose_graph
+        _worker_loop.run_until_complete(aclose_graph())
+        _worker_loop.run_until_complete(_worker_loop.shutdown_asyncgens())
+    except Exception as e:
+        logger.error("❌ [CELERY] Falha ao fechar recursos async no shutdown: %s", e)
+    finally:
+        _worker_loop.close()
+        _worker_loop = None
 
 @worker_ready.connect
 def on_worker_ready(sender=None, **kwargs):
@@ -170,24 +248,6 @@ def on_worker_ready(sender=None, **kwargs):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Signal: worker_shutdown — Flush Langfuse antes de encerrar
-# ─────────────────────────────────────────────────────────────────────────────
-
-@worker_shutdown.connect
-def on_worker_shutdown(sender=None, **kwargs):
-    """
-    Garante que todos os spans Langfuse pendentes sejam enviados antes
-    do worker encerrar (SIGTERM / docker stop).
-    """
-    try:
-        from src.infrastructure.observability.langfuse_client import flush_langfuse
-        flush_langfuse()
-        logger.info("✅ [CELERY] Langfuse spans flushed no shutdown.")
-    except Exception as e:
-        logger.debug("ℹ️  [CELERY] Langfuse flush ignorado: %s", e)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Task: stream_recovery (periódica, defensiva)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -205,6 +265,39 @@ def stream_recovery_task(self) -> dict:
     except Exception as e:
         logger.error("❌ stream_recovery_task: %s", e)
         return {"recovered": 0, "status": "error", "error": str(e)}
+# ─────────────────────────────────────────────────────────────────────────────
+# Task: atualizar_taxa_brl (periódica — câmbio USD→BRL ao vivo pro /hub/llm-custo)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@celery_app.task(name="atualizar_taxa_brl", bind=True, max_retries=2)
+def atualizar_taxa_brl_task(self) -> dict:
+    """
+    Busca a cotação USD→BRL ao vivo (open.er-api.com, gratuito, sem chave) e
+    grava em `admin:usd_brl_rate:auto` (Redis, sem TTL — o valor fica até a
+    próxima execução do beat, nunca "expira" pra um fallback ruim no meio do
+    dia). NUNCA sobrescreve com dado ruim: se a chamada falhar, mantém o
+    último valor bom. Override manual via /hub/llm-custo continua tendo
+    precedência — ver `pricing.py::taxa_brl_ativa()`.
+    """
+    import httpx
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        resp = httpx.get("https://open.er-api.com/v6/latest/USD", timeout=10.0)
+        resp.raise_for_status()
+        data = resp.json()
+        taxa = data.get("rates", {}).get("BRL")
+        if not taxa or taxa <= 0:
+            raise ValueError(f"Resposta sem taxa BRL válida: {data}")
+
+        get_redis_text().set("admin:usd_brl_rate:auto", str(taxa))
+        logger.info("💱 [FX] Taxa USD→BRL atualizada: %.4f", taxa)
+        return {"status": "ok", "taxa": taxa}
+    except Exception as e:
+        logger.warning("⚠️ [FX] Falha ao atualizar taxa USD→BRL (mantendo valor anterior): %s", e)
+        return {"status": "error", "error": str(e)}
+
+
 @celery_app.task(name="health_check", bind=True)
 def health_check_task(self) -> dict:
     """Ping para verificar se o worker está vivo."""

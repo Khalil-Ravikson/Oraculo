@@ -38,14 +38,32 @@ from src.router.llm_fallback import _classificar_com_flash
 
 logger = logging.getLogger(__name__)
 
+
+def _get_or_create_metric(metric_cls, name, documentation, labelnames=(), **kwargs):
+    """
+    Evita 'Duplicated timeseries in CollectorRegistry': `PrometheusMetrics`
+    (infrastructure/observability/metrics.py) registra `oraculo_router_latency_ms`/
+    `oraculo_router_cache_hit_total` sob os MESMOS nomes, de forma segura
+    (`_get_or_create`). Este módulo registrava direto via `Histogram(...)`/
+    `Counter(...)`, sem essa proteção — colidia sempre que `get_metrics()`
+    rodasse antes deste módulo ser importado pela primeira vez (bug real
+    encontrado na Sprint 1.3 do roadmap multimodal, ver notas.md seção 11:
+    STT agora chama `get_metrics()` bem cedo no pipeline, antes do primeiro
+    `rotear()`, expondo uma dependência de ordem de import que já existia).
+    """
+    from prometheus_client import REGISTRY
+    if name in REGISTRY._names_to_collectors:
+        return REGISTRY._names_to_collectors[name]
+    return metric_cls(name, documentation, labelnames=labelnames, **kwargs)
+
+
 # ── Métricas ──────────────────────────────────────────────────────────────────
-_CACHE_HIT = Counter(
-    "oraculo_router_cache_hit_total",
-    "Cache hits no router por camada",
-    ["layer"],
+_CACHE_HIT = _get_or_create_metric(
+    Counter, "oraculo_router_cache_hit_total",
+    "Cache hits no router por camada", ["layer"],
 )
-_LATENCY = Histogram(
-    "oraculo_router_latency_ms",
+_LATENCY = _get_or_create_metric(
+    Histogram, "oraculo_router_latency_ms",
     "Latência do router em ms",
     buckets=[5, 10, 25, 50, 100, 250, 500],
 )
@@ -76,6 +94,18 @@ _RE_GREETING = re.compile(
 
 _RE_YTB = re.compile(r'(https?://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)[\w\-]+)', re.I)
 _RE_INSTA = re.compile(r'(https?://(?:www\.)?instagram\.com/(?:p|reel)/[\w\-]+)', re.I)
+# Busca por termo (sem URL) — verbo explícito "buscar/procurar/baixar/baixe" +
+# "vídeo" pra não colidir com pergunta acadêmica real tipo "tem vídeo sobre
+# isso?" (só vira comando de download com essa combinação específica de
+# palavras). "baixar/baixe" adicionados nesta sessão — o orquestrador LLM já
+# classificava "baixe vídeo de X" como call_media (intent correto), mas essa
+# regex de extração de termo (usada tanto aqui quanto no Fast-Path de
+# dispatcher.py) só reconhecia "buscar", então a mensagem inteira virava "url"
+# e o yt-dlp falhava com "not a valid URL" — achado real testando ao vivo.
+_RE_YTB_BUSCA = re.compile(
+    r'\b(?:buscar|procurar|baixar|baixe)\s+(?:um\s+)?v[ií]deo\b(?:\s+(?:sobre|de|do|da))?\s+(.+)',
+    re.I,
+)
 _RE_SIGAA = re.compile(
     r'(sigaa|biblioteca|acervo|livro|obra|marc|inscrever|inscrição|processo seletivo|edital sigaa|concurso uema|nota|média|cr\b|ira\b|histórico|turmas|grade|matéria|integraliza|grade curricular|estrutura curricular|sala|professor|complementar)',
     re.I
@@ -89,6 +119,25 @@ _RE_TICKET_ABERTURA = re.compile(
     r'suporte\s+t[ée]cnico|problema\s+(no|com)\s+.*sistema)',
     re.I
 )
+# Layer 0 (fusão Router+Orquestrador, ver notas.md §5.1): heurística barata pra
+# "e aí, já saiu?" tipo de pergunta — sem LLM, mas só dispara quando existe uma
+# tarefa recente (`task_history.last_worker`) pra não colidir com pergunta nova.
+# Preserva a precedência que o antigo orchestrate() tinha (contexto de memória
+# vencendo ANTES do regex de conteúdo L1) sem pagar chamada LLM pra isso.
+_RE_CHECK_STATUS = re.compile(
+    r'\b(j[áa]\s+(saiu|saíram|ficou|ficaram|terminou|terminaram|deu)|status|'
+    r'andamento|resultado\s+d[ao]|como\s+ficou|deu\s+certo|conseguiu|'
+    r'aquilo\s+que\s+(eu\s+)?pedi)\b',
+    re.I,
+)
+# Nomes de sistemas institucionais cobertos pelo wiki CTIC (mesmos hubs
+# curados em `KNOWN_SYSTEM_HUBS`, infrastructure/scraping/implementations/
+# dokuwiki/hierarchy.py) mas SEM cobertura em nenhuma camada L1-L4 —
+# achado real: "Sipac" sozinho caía sempre no Flash (L5), com resultado
+# não-determinístico de mensagem pra mensagem (WIKI/GREETING/GERAL
+# alternando pra texto idêntico, achado analisando log de produção).
+# Rota WIKI (não SIGAA — esses sistemas não são o portal do aluno).
+_RE_SISTEMA_WIKI = re.compile(r'\b(sipac|siguema)\b', re.I)
 
 
 def _regex_rapido(query: str) -> str | None:
@@ -97,12 +146,16 @@ def _regex_rapido(query: str) -> str | None:
         return "MEDIA_DOWNLOAD"
     if _RE_INSTA.search(query):
         return "MEDIA_DOWNLOAD"
+    if _RE_YTB_BUSCA.search(query):
+        return "MEDIA_DOWNLOAD"
     if _RE_GREETING.match(query.strip()):
         return "GREETING"
     if _RE_TICKET_ABERTURA.search(query):
         return "TICKET_ABERTURA"
     if _RE_SIGAA.search(query):
         return "SIGAA"
+    if _RE_SISTEMA_WIKI.search(query):
+        return "WIKI"
     return None
 
 
@@ -123,6 +176,27 @@ async def rotear(
 ) -> RouterDecision:
     t0 = time.monotonic()
     ctx = user_context or {}
+
+    # ── Layer 0: Heurística de CHECK_STATUS (barata, sem LLM) ─────────
+    # Roda ANTES do L1 pra não perder pra um regex de conteúdo (ex: "notas"
+    # bate em SIGAA) quando a pergunta é claramente um follow-up de tarefa
+    # recente — mesma precedência que o antigo orchestrate() tinha, achado
+    # numa revisão crítica desta fusão (ver notas.md §5.1).
+    if session_id:
+        try:
+            from src.memory.services.redis_memory_service import get_cognitive_memory
+            task_history = await get_cognitive_memory().get_task_history(session_id)
+        except Exception:
+            task_history = {}
+        if task_history.get("last_worker") and _RE_CHECK_STATUS.search(query):
+            ms = int((time.monotonic() - t0) * 1000)
+            _LATENCY.observe(ms)
+            _CACHE_HIT.labels(layer="check_status_heuristic").inc()
+            return RouterDecision(
+                rota="CHECK_STATUS", confianca=0.85, motivo="layer_0_status_heuristic",
+                cache_hit=True, cache_layer="regex", latencia_ms=ms,
+                dag_hint=_dag_hint_para_rota("CHECK_STATUS", query),
+            )
 
     # ── Layer 1: Fast-path (Hardcoded Regex) ─────────
     rota_rapida = _regex_rapido(query)
@@ -219,6 +293,7 @@ async def rotear(
         logger.debug("Falha no roteamento por KNN dinâmico: %s", e)
 
     # ── Layer 5: Flash (LLM) ──────────────────────
+    _CACHE_HIT.labels(layer="flash_fallback").inc()
     decision = await _classificar_com_flash(query, ctx, session_id)
     ms = int((time.monotonic() - t0) * 1000)
     _LATENCY.observe(ms)
@@ -238,11 +313,19 @@ def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) 
         match_insta = _RE_INSTA.search(query)
         if match_insta:
             return {"steps": ["insta_download"], "url": match_insta.group(1)}
+        match_busca = _RE_YTB_BUSCA.search(query)
+        if match_busca:
+            # "ytsearch1:" é o extractor de busca nativo do yt-dlp — devolve
+            # o 1º resultado, sem precisar de API/chave extra nem servidor
+            # MCP externo. `_plano_media` (planning.py) só lê a chave "url"
+            # do dag_hint, então isso reaproveita o mesmo caminho de sempre.
+            return {"steps": ["ytb_download"], "url": f"ytsearch1:{match_busca.group(1).strip()}"}
         return {"steps": ["ytb_download"], "url": query}
 
     if rota == "TICKET_ABERTURA":
         # Fast-path próprio em dispatcher.py (agents/tickets/ticket_flow.py) —
-        # nunca chega ao Planner/crud_confirm.
+        # nunca chega ao Planner (ver agents/tickets/service.py pro histórico
+        # de por que essa rota nunca despacha um worker via Planner).
         return {"steps": ["ticket_abertura"]}
 
     if rota == "SIGAA":
@@ -268,11 +351,14 @@ def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) 
         "CONTATOS":    {"steps": ["rag_search"], "doc_type": "contatos",   "k": 6},
         "WIKI":        {"steps": ["rag_search"], "doc_type": "wiki_ctic",  "k": 6},
         # dispatcher.py intercepta CRUD antes do Planner (agents/tickets/crud_tool.py)
-        # — "crud_confirm" nunca existiu de verdade, ver notas.md.
+        # — ver agents/tickets/service.py pro histórico do worker fantasma que isso evita.
         "CRUD":        {"steps": ["crud_tool"],                            "k": 0},
         "TICKET_ABERTURA": {"steps": ["ticket_abertura"],                  "k": 0},
         "GREETING":    {"steps": ["greeting"],                             "k": 0},
         "GERAL":       {"steps": ["rag_search"], "doc_type": "geral",      "k": 6},
         "SIGAA":       {"steps": ["sigaa_biblioteca"],                     "k": 0},
+        # dispatcher.py intercepta CHECK_STATUS antes do Planner (responde a
+        # partir de task_history direto) — nunca chega aqui de verdade.
+        "CHECK_STATUS": {"steps": [],                                      "k": 0},
     }
     return _HINTS.get(rota, _HINTS["GERAL"])

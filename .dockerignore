@@ -1,5 +1,20 @@
 dados/tmp/
 venv/
-.git/
+.git
 .pytest_cache/
 __pycache__/
+
+# Segredos — nunca devem ir para o build context/daemon
+.env
+.env.*
+!.env.example
+
+# Não usados pelo Dockerfile (evita transferir bytes à toa a cada build)
+tests/
+tmp/
+.claude/
+.cursorignore
+*.md
+*.docx
+*.htm
+*.json

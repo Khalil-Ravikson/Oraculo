@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -96,17 +97,63 @@ async def processar(
     user_context: dict,
     history: str = "",
     fatos: list[str] | None = None,
+    decision_pronta=None,
 ) -> OSResult:
     """
     Entry point do runtime. Substitui `cognitive_os.processar()`.
+
+    `decision_pronta`: RouterDecision já calculada por um chamador que
+    classificou a mensagem antes de decidir delegar pra cá (hoje só
+    `dispatcher_langgraph.py`, quando a rota cai fora do escopo do
+    experimento LangGraph) — evita reclassificar a mesma mensagem do zero
+    (bug real: 2 chamadas Gemini Flash pagas pra rotear 1 única mensagem,
+    achado analisando log de produção). `None` preserva o comportamento
+    original (classifica aqui).
     """
     t0 = time.monotonic()
     fatos = fatos or []
 
-    # ── Guardrails (Entrada) ──────────────────────────────────────────────────
-    from src.application.chain.guardrails import get_input_guardrail
     from src.infrastructure.redis_client import get_redis_text
     r = get_redis_text()
+
+    # ── -1. Fast-Path ÁUDIO (STT) ────────────────────────────────────────────
+    # Nota de voz chega com `message` vazio (só a legenda, se houver) — roda
+    # ANTES de guardrails/HITL/orchestrator pra que tudo downstream processe
+    # o texto transcrito como se o usuário tivesse digitado. Ver roadmap:
+    # notas.md seção 11 / arquitetura_oraculo.md seção 10.
+    if user_context.get("media_type") == "audioMessage" and user_context.get("msg_key_id"):
+        transcript = await _transcrever_audio_recebido(r, user_context, session_id)
+        if transcript is None:
+            ms = int((time.monotonic() - t0) * 1000)
+            _OS_REQUESTS.labels(status="stt_error").inc()
+            return OSResult(
+                answer="😕 Não consegui entender o áudio. Pode tentar de novo ou escrever a mensagem?",
+                plan_id="stt_error", rota="AUDIO_TRANSCRIBE", cache_hit=False,
+                total_ms=ms, status="error",
+            )
+        message = f"{message.strip()}\n{transcript}" if message.strip() else transcript
+        logger.info("🎤 [DISPATCHER] Áudio transcrito | session=%s | texto='%.60s'",
+                    session_id, message)
+
+    # ── -1b. Fast-Path MÍDIA SEM LEGENDA (imagem/sticker/vídeo/documento) ────
+    # Vision ainda não existe (roadmap Fase 4/5, não implementado) — sem essa
+    # checagem, mídia sem legenda seguia com `message` vazio até o RAG,
+    # gerando `EmbedContentRequest.content contains an empty Part` (mesma
+    # classe de bug do áudio acima, só que sem tratamento nenhum). O bloco de
+    # áudio acima já garante `message` não-vazio quando a transcrição dá
+    # certo (e retorna cedo quando falha) — chegar aqui com `message` vazio
+    # só é possível pra outros tipos de mídia. Ver notas.md seção 11.
+    if not message.strip() and user_context.get("has_media"):
+        ms = int((time.monotonic() - t0) * 1000)
+        return OSResult(
+            answer="📎 Recebi seu arquivo, mas ainda não consigo analisar imagens/vídeos/documentos. "
+                   "Me conta em texto o que você precisa que eu tento ajudar!",
+            plan_id="unsupported_media", rota="UNSUPPORTED_MEDIA", cache_hit=False,
+            total_ms=ms, status="ok",
+        )
+
+    # ── Guardrails (Entrada) ──────────────────────────────────────────────────
+    from src.application.chain.guardrails import get_input_guardrail
 
     def _validate_sync():
         return get_input_guardrail().validate(message, session_id, r)
@@ -138,82 +185,52 @@ async def processar(
         if crud_result is not None:
             return crud_result
 
-        # ── 0b. Fast Path: comandos explícitos ───────────────────────────────
-        # ! @ $ → vai direto pro router semântico existente (sem gastar tokens no LLM)
-        # linguagem natural → Orchestrator decide a ação
-        is_command = message.startswith(("!", "@", "$"))
+        # ── 1. Supervisor — ÚNICA chamada de roteamento ───────────────────────
+        # Fusão Router+Orquestrador (Fase 3, notas.md §5.1): antes disso havia
+        # um Orquestrador (LLM, sempre rodava) decidindo `action`/`route_hint`
+        # e SEMPRE sobrescrevendo a classificação do Supervisor por baixo —
+        # até 2 chamadas LLM pagas só pra decidir a rota, com o resultado do
+        # Supervisor descartado sempre que havia divergência (inclusive num
+        # bug documentado: fallback de exceção do Orquestrador, indistinguível
+        # de decisão real, apagando classificações corretas). `rotear()` agora
+        # absorve isso — CHECK_STATUS/MEDIA_DOWNLOAD entram no mesmo espaço de
+        # rotas que CALENDARIO/EDITAL/etc. (ver router/llm_fallback.py).
+        if decision_pronta is not None:
+            decision = decision_pronta
+        else:
+            from src.router.supervisor import rotear
+            decision = await rotear(message, session_id, user_context)
 
-        if not is_command:
-            from src.router.llm_fallback import orchestrate
-            from src.memory.services.redis_memory_service import get_cognitive_memory
+        logger.info(f"⏱️ Tempo Router: {time.monotonic() - t0}s")
 
-            mem = get_cognitive_memory()
-            op_mem = await mem.get_operational(session_id)
-
-            orch_decision = await orchestrate(
-                message=message,
-                history_summary=await mem.format_history(session_id),
-                task_history=await mem.get_task_history(session_id),
-                operational_memory=op_mem,
-                user_context=user_context,
-                session_id=session_id,
-            )
-
-            logger.info(f"⏱️ Tempo Orquestrador: {time.monotonic() - t0}s")
-
-            # Atualiza operational memory
+        # Atualiza operational memory (mesma frequência de antes: toda mensagem
+        # não-comando; agora também comandos, já que `is_command` não existe
+        # mais como distinção de roteamento — ver notas.md §5.1). Bookkeeping
+        # não-crítico: não deixa um soluço de Redis derrubar o pipeline inteiro
+        # (antes, um `!comando` nunca chegava a tocar memória; hoje toca, mas
+        # sem travar nada se falhar).
+        from src.memory.services.redis_memory_service import get_cognitive_memory
+        mem = get_cognitive_memory()
+        try:
             await mem.set_operational(session_id, {
-                "last_action": orch_decision.action,
-                "route_hint": orch_decision.route_hint,
+                "last_action": decision.rota,
+                "route_hint": decision.rota,
                 "status": "routing",
             })
+        except Exception as e:
+            logger.debug("Falha ao gravar memória operacional (ignorado): %s", e)
 
-            # check_status → responde com o histórico de task sem acionar RAG
-            if orch_decision.action == "check_status":
-                th = await mem.get_task_history(session_id)
-                answer = (
-                    f"Última tarefa: *{th.get('last_worker', '?')}*\n"
-                    f"Resultado: {th.get('last_result', 'Nenhuma tarefa anterior encontrada.')}"
-                ) if th else "Nenhuma tarefa anterior registrada nesta sessão."
-                ms = int((time.monotonic() - t0) * 1000)
-                return OSResult(answer=answer, plan_id="check_status",
-                                rota="GERAL", cache_hit=True, total_ms=ms, status="ok")
-
-            # reply_direct → greeting inline
-            if orch_decision.action == "reply_direct":
-                decision_rota = "GREETING"
-            # call_sigaa → força rota SIGAA
-            elif orch_decision.action == "call_sigaa":
-                decision_rota = "SIGAA"
-            elif orch_decision.action == "call_media":
-                decision_rota = "MEDIA_DOWNLOAD"
-            elif orch_decision.action == "call_ticket":
-                decision_rota = "TICKET_ABERTURA"
-            elif orch_decision.action == "call_crud_update":
-                decision_rota = "CRUD"
-            else:
-                # call_rag → usa route_hint do orquestrador
-                decision_rota = orch_decision.route_hint or "GERAL"
-        else:
-            decision_rota = None  # deixa o Supervisor decidir
-
-        # ── 1. Supervisor (só para comandos ou quando o Orchestrator pediu RAG) ──
-        from src.router.supervisor import rotear
-        decision = await rotear(message, session_id, user_context)
-
-        # Orchestrator tem prioridade sobre o Supervisor para linguagem natural
-        if not is_command and decision_rota:
-            # BUG corrigido: antes só `decision.rota` era trocado, e o
-            # `dag_hint` ficava com o valor calculado para a rota ORIGINAL do
-            # Supervisor (ex: rota virava "GERAL" mas o hint ainda dizia
-            # {"steps": ["ticket_abertura"]}). O Planner (Gemini Pro) recebia
-            # rota e hint contraditórios e "resolvia" sozinho escolhendo um
-            # worker da sua whitelist que nem existe de verdade — daí o erro
-            # "Falha ao localizar worker crud_confirm no registry". Rota e
-            # hint têm que mudar juntos.
-            from src.router.supervisor import _dag_hint_para_rota
-            decision.rota = decision_rota
-            decision.dag_hint = _dag_hint_para_rota(decision_rota, message)
+        # CHECK_STATUS → responde com o histórico de task sem acionar RAG
+        # (mesma posição relativa de antes: antes de circuit-breaker/cache)
+        if decision.rota == "CHECK_STATUS":
+            th = await mem.get_task_history(session_id)
+            answer = (
+                f"Última tarefa: *{th.get('last_worker', '?')}*\n"
+                f"Resultado: {th.get('last_result', 'Nenhuma tarefa anterior encontrada.')}"
+            ) if th else "Nenhuma tarefa anterior registrada nesta sessão."
+            ms = int((time.monotonic() - t0) * 1000)
+            return OSResult(answer=answer, plan_id="check_status",
+                            rota="CHECK_STATUS", cache_hit=True, total_ms=ms, status="ok")
 
         # ── Circuit-breaker por agente (liga/desliga em /hub/agents) ──────────
         from src.capabilities.persistence.agent_config import is_agent_enabled
@@ -247,27 +264,26 @@ async def processar(
                     status="ok",
                 )
 
-        # 1b. Semantic Cache de Respostas (Cosine Similarity > 0.92)
-        if decision_rota or decision.rota:
-            rota_efetiva = decision_rota or decision.rota
-            if rota_efetiva not in ("SIGAA", "MEDIA_DOWNLOAD", "GREETING"):
-                from src.infrastructure.semantic_cache import SemanticCache
-                sem_cache = SemanticCache(threshold=0.92)
+        # 1b. Semantic Cache de Respostas (threshold por rota, ver semantic_cache.py)
+        from src.router.contracts import ROTAS_SEM_CACHE
+        if decision.rota not in ROTAS_SEM_CACHE:
+            from src.infrastructure.semantic_cache import SemanticCache
+            sem_cache = SemanticCache()
 
-                cached_response = await sem_cache.get(query=message, rota=rota_efetiva)
-                if cached_response:
-                    _OS_REQUESTS.labels(status="cache_hit").inc()
-                    ms = int((time.monotonic() - t0) * 1000)
-                    _OS_LATENCY.observe(ms)
-                    return OSResult(
-                        answer=cached_response.get("answer", ""),
-                        plan_id="sem_cache",
-                        rota=rota_efetiva,
-                        cache_hit=True,
-                        total_ms=ms,
-                        status="ok",
-                        action_buttons=cached_response.get("action_buttons", [])
-                    )
+            cached_response = await sem_cache.get(query=message, rota=decision.rota)
+            if cached_response:
+                _OS_REQUESTS.labels(status="cache_hit").inc()
+                ms = int((time.monotonic() - t0) * 1000)
+                _OS_LATENCY.observe(ms)
+                return OSResult(
+                    answer=cached_response.get("answer", ""),
+                    plan_id="sem_cache",
+                    rota=decision.rota,
+                    cache_hit=True,
+                    total_ms=ms,
+                    status="ok",
+                    action_buttons=cached_response.get("action_buttons", [])
+                )
 
         # ── Fast-Path GREETING ────────────────────────────────────────────────
         if decision.rota == "GREETING":
@@ -304,7 +320,18 @@ async def processar(
         if decision.rota == "MEDIA_DOWNLOAD":
             import re
             urls = re.findall(r'(https?://\S+)', message)
-            url = urls[0] if urls else message
+            if urls:
+                url = urls[0]
+            else:
+                # Sem URL na mensagem — pode ser busca por termo ("buscar
+                # vídeo sobre X", ver router/supervisor.py::_RE_YTB_BUSCA).
+                # Sem essa checagem, a mensagem INTEIRA vira "url" e o yt-dlp
+                # falha com "not a valid URL" (bug real encontrado nesta
+                # sessão — este Fast-Path é um caminho paralelo ao Planner/
+                # `_dag_hint_para_rota`, não reaproveita aquela lógica).
+                from src.router.supervisor import _RE_YTB_BUSCA
+                match_busca = _RE_YTB_BUSCA.search(message)
+                url = f"ytsearch1:{match_busca.group(1).strip()}" if match_busca else message
 
             from src.application.workers.registry import _autodiscover_workers, _REGISTRY
             from src.application.tasks.process_message_task import enviar_resposta_whatsapp_task
@@ -319,6 +346,12 @@ async def processar(
                 event = {
                     "plan_id": plan_id,
                     "session_id": session_id,
+                    # `chat_id` (JID de grupo `@g.us` ou contato `@s.whatsapp.net`)
+                    # é o destino de envio de verdade — `session_id`/`phone` é
+                    # só a chave de sessão/memória, a Evolution API rejeita
+                    # mídia mandada pro número "cru" (bug real encontrado
+                    # nesta sessão: 400 Bad Request, jid "não existe").
+                    "chat_id": user_context.get("chat_id") or session_id,
                     "step_id": "s1",
                     "url": url,
                     "query": message,
@@ -523,9 +556,113 @@ async def _despachar_workers(plan) -> None:
             logger.info("📤 [DISPATCHER] Canvas Chain disparado para worker=%s plan=%s",
                         other_step["worker"], plan.plan_id[:8])
         else:
+            from src.infrastructure.observability.metrics import PrometheusMetrics
+            PrometheusMetrics().increment_planner_worker_not_found(other_step["worker"])
             logger.error("❌ [DISPATCHER] Falha ao localizar worker %s no registry", other_step["worker"])
     else:
         logger.error("❌ [DISPATCHER] Plano inválido ou vazio para plan=%s", plan.plan_id)
+
+
+_STT_TIMEOUT_S = 20.0   # Celery pickup (queue=media) + chamada Gemini + polling
+_MAX_AUDIO_MB  = 16     # mesmo cap de _MAX_ENVIO_MB em worker_media_download.py
+
+# Gatilho opt-in pra resposta sair também em áudio (Fase 3 do roadmap
+# multimodal) — verbo "mandar/em/por (forma de) áudio". Deliberadamente não é
+# o padrão automático: TTS ainda é caro (~15s de cold-load na 1ª chamada por
+# processo worker) e nem toda resposta faz sentido em voz. Limitação
+# conhecida: só detecta o pedido no TEXTO digitado (legenda/mensagem) — se o
+# pedido for falado DENTRO de uma nota de voz, não é capturado aqui (checagem
+# roda sobre o texto bruto recebido, antes/independente da transcrição STT).
+_RE_AUDIO_REPLY = re.compile(
+    r'\b(em|por|de)\s+(forma\s+de\s+)?áudio\b|\bmand(a|ar|e|em)\s+(um\s+|uma\s+mensagem\s+de\s+)?áudio\b',
+    re.I,
+)
+
+
+def _quer_resposta_em_audio(text: str) -> bool:
+    """True se o usuário pediu explicitamente a resposta em áudio."""
+    return bool(_RE_AUDIO_REPLY.search(text or ""))
+
+
+def _remover_pedido_audio(text: str) -> str:
+    """
+    Remove a frase-gatilho ("em áudio", "manda um áudio"...) do texto antes
+    de virar `message` pro RAG/orchestrator/synthesis.
+
+    Bug real de produção encontrado testando ao vivo: sem isso, o LLM de
+    síntese via a frase completa ("Me explique em áudio sobre o Office 365")
+    e respondia SOBRE o pedido de áudio ("não consigo te explicar em áudio,
+    sou um assistente de texto") em vez de responder a pergunta de verdade —
+    a frase-gatilho é sinal só pro roteamento de ENTREGA (`_quer_resposta_em_audio`,
+    checado à parte sobre o texto original), não faz parte da pergunta em si.
+    """
+    limpo = _RE_AUDIO_REPLY.sub("", text or "")
+    limpo = re.sub(r"\s{2,}", " ", limpo).strip(" ,.")
+    return limpo or text
+
+
+async def _transcrever_audio_recebido(r, user_context: dict, session_id: str) -> str | None:
+    """
+    Baixa o áudio recebido via Evolution API e despacha `worker_audio_to_text`
+    (queue=media) — mantém o worker `default` (CELERY_CONCURRENCY=1) livre
+    enquanto a transcrição roda, em vez de chamar o STT inline aqui. Faz
+    polling em `plan:results:{plan_id}:{step_id}`, o mesmo Redis que o worker
+    já escreve. Retorna None em qualquer falha (download vazio, áudio grande
+    demais, timeout, erro de STT) — quem chama decide a mensagem de erro.
+    """
+    from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
+    from src.application.workers.registry import dispatch as worker_dispatch
+    from src.capabilities.persistence.redis_state import get_result_cache
+    from src.infrastructure.observability.metrics import get_metrics
+    from src.infrastructure.settings import settings
+
+    msg_key_id = user_context.get("msg_key_id", "")
+    t_stt      = time.monotonic()
+    metrics    = get_metrics()
+
+    def _falhar() -> None:
+        metrics.observe_stt(settings.STT_PROVIDER, int((time.monotonic() - t_stt) * 1000), False)
+
+    gateway = EvolutionAdapter()
+    audio_b64, mimetype, _filename = await gateway.baixar_midia_base64(msg_key_id)
+    if not audio_b64:
+        logger.warning("⚠️  [STT] Download de áudio vazio | msg_key_id=%s", msg_key_id[:20])
+        _falhar()
+        return None
+
+    tamanho_mb = len(audio_b64) * 3 / 4 / (1024 * 1024)
+    if tamanho_mb > _MAX_AUDIO_MB:
+        logger.warning("⚠️  [STT] Áudio grande demais (%.1fMB > %dMB) | msg_key_id=%s",
+                       tamanho_mb, _MAX_AUDIO_MB, msg_key_id[:20])
+        _falhar()
+        return None
+
+    plan_id = f"fast_stt_{session_id[-6:]}_{int(time.time() * 1000)}"
+    step_id = "s_stt"
+    task_id = worker_dispatch("audio_to_text", {
+        "plan_id": plan_id, "session_id": session_id, "step_id": step_id,
+        "audio_b64": audio_b64, "mime_type": mimetype or "audio/ogg",
+    })
+    if task_id is None:
+        _falhar()
+        return None
+
+    deadline = time.monotonic() + _STT_TIMEOUT_S
+    payload  = None
+    while time.monotonic() < deadline:
+        payload = await get_result_cache(r, plan_id, step_id)
+        if payload is not None:
+            break
+        await asyncio.sleep(POLL_INTERVAL_S)
+
+    ms = int((time.monotonic() - t_stt) * 1000)
+    ok = bool(payload and payload.get("status") == "ok" and payload.get("transcription"))
+    metrics.observe_stt(settings.STT_PROVIDER, ms, ok)
+
+    if not ok:
+        logger.warning("⚠️  [STT] Falha ou timeout | plan=%s | payload=%s", plan_id, payload)
+        return None
+    return payload["transcription"]
 
 
 async def _aguardar_resposta_final(plan_id: str, timeout: float) -> dict | None:

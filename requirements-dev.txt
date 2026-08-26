@@ -1,0 +1,10 @@
+# requirements-dev.txt — dependências só de desenvolvimento/teste
+# =================================================================
+# Separado de requirements.txt de propósito: pytest não precisa ir pra
+# imagem de produção (Dockerfile só instala requirements.txt). Achado real
+# desta sessão: a suíte de testes (tests/) já existia e já era usada
+# localmente, mas pytest/pytest-asyncio nunca estiveram declarados em
+# arquivo nenhum do repo — por isso nunca existiu CI/CD (não dava pra
+# reproduzir o ambiente de teste em uma máquina limpa).
+pytest>=8.0
+pytest-asyncio>=0.23

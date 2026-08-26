@@ -190,21 +190,21 @@ async def _run_async(results: list, event: dict) -> dict:
     if status == "ok" and plan_ctx.get("query"):
         try:
             from src.infrastructure.semantic_cache import SemanticCache
+            from src.router.contracts import ROTAS_SEM_CACHE
             import asyncio
-            sc = SemanticCache(threshold=0.92)
+            sc = SemanticCache()
             # Como a síntese é chamada pelo planner, podemos não ter a rota no plan_ctx diretamente
             # Vamos salvar na rota indicada, ou GERAL
             rota_efetiva = plan_ctx.get("route", plan_ctx.get("route_hint", "GERAL"))
-            
-            # Não fazemos cache semântico de rotas de integração (SIGAA, MEDIA)
-            if rota_efetiva not in ("SIGAA", "MEDIA_DOWNLOAD", "GREETING"):
+
+            if rota_efetiva not in ROTAS_SEM_CACHE:
                 # Não podemos dar await diretamente se não quisermos bloquear
+                # TTL omitido: SemanticCache.set resolve por rota (TTL_POR_ROTA)
                 asyncio.create_task(
                     sc.set(
                         query=plan_ctx["query"],
                         rota=rota_efetiva,
                         response={"answer": resposta, "status": "ok"},
-                        ttl=3600
                     )
                 )
         except Exception as e:

@@ -118,3 +118,38 @@ async def test_cognitive_os_sigaa_route_with_active_session():
         event_sent = args[0]
         assert event_sent["session_id"] == session_id
         assert not mock_redis.exists(f"hitl:session:{session_id}")
+
+
+@pytest.mark.asyncio
+async def test_processar_check_status_responde_sem_planner():
+    """Fusão Router+Orquestrador (notas.md §5.1): quando `rotear()` decide
+    CHECK_STATUS, `processar()` deve responder direto a partir de
+    task_history, sem chamar Planner/Celery — mesmo comportamento que o
+    antigo `orchestrate(action="check_status")` tinha, agora vindo de uma
+    única chamada de roteamento."""
+    mock_redis = MockRedis()
+
+    mock_decision = MagicMock()
+    mock_decision.rota = "CHECK_STATUS"
+    mock_decision.cache_hit = True
+    mock_decision.dag_hint = {}
+
+    fake_mem = MagicMock()
+    fake_mem.set_operational  = AsyncMock(return_value=None)
+    fake_mem.get_task_history = AsyncMock(
+        return_value={"last_worker": "rag_search", "last_result": "encontrei o edital do PAES"}
+    )
+
+    with patch("src.infrastructure.redis_client.get_redis_text", return_value=mock_redis), \
+         patch("src.memory.services.redis_memory_service.get_cognitive_memory", return_value=fake_mem), \
+         patch("src.router.supervisor.rotear", return_value=mock_decision), \
+         patch("src.application.chain.planner.criar_plano") as mock_planner:
+
+        res = await processar("e aí, já saiu?", "session-1", {"role": "student"})
+
+        assert res.status == "ok"
+        assert res.plan_id == "check_status"
+        assert res.rota == "CHECK_STATUS"
+        assert "rag_search" in res.answer
+        assert "encontrei o edital do PAES" in res.answer
+        mock_planner.assert_not_called()

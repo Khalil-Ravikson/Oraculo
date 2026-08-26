@@ -15,7 +15,10 @@ def worker_text_to_audio_task(self, event: dict) -> dict:
 async def _run(event: dict) -> dict:
     """
     event: {plan_id, session_id, step_id, text: str, lang: str = "pt"}
-    Retorna audio_b64 + file_path temporário.
+    Retorna audio_b64 (também persistido em Redis — quem despachou pode
+    estar num container/processo diferente deste worker, então o arquivo em
+    /tmp local NÃO é um jeito válido de repassar o áudio adiante; ver bug
+    real corrigido em notas.md seção 12).
     """
     from src.infrastructure.services.audio_service import get_audio_service
 
@@ -30,10 +33,17 @@ async def _run(event: dict) -> dict:
     payload: dict = {"status": "ok" if result.ok else "error", "error": result.error}
 
     if result.ok and os.path.exists(result.audio_path):
-        with open(result.audio_path, "rb") as f:
-            payload["audio_b64"] = base64.b64encode(f.read()).decode()
-        payload["audio_path"] = result.audio_path
-        # Arquivo em /tmp — quem consumir é responsável por deletar
+        try:
+            with open(result.audio_path, "rb") as f:
+                payload["audio_b64"] = base64.b64encode(f.read()).decode()
+        finally:
+            # Este worker criou o arquivo, é quem deve apagar — um consumidor
+            # rodando noutro container/processo (ex.: worker `default`
+            # despachando via Celery) não teria como enxergar esse caminho.
+            try:
+                os.remove(result.audio_path)
+            except Exception:
+                pass
 
     _salvar(plan_id, step_id, payload)
     logger.info("🔊 [TTS] plan=%s | text='%.40s'", plan_id[:8], text)
@@ -46,8 +56,7 @@ def _salvar(plan_id, step_id, data):
         from src.infrastructure.redis_client import get_redis_text
         get_redis_text().setex(
             f"plan:results:{plan_id}:{step_id}", 120,
-            json.dumps({k: v for k, v in data.items() if k != "audio_b64"},
-                       ensure_ascii=False)
+            json.dumps(data, ensure_ascii=False)
         )
     except Exception:
         pass

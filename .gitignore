@@ -1,8 +1,11 @@
 # Segurança (NUNCA REMOVA ISSO)
 .env
 .env.local
-!.env.example
 .env.*
+# Ordem importa: a negação precisa vir DEPOIS de ".env.*" pra valer — regra
+# anterior (!.env.example antes de .env.*) nunca funcionou de verdade,
+# achado real ao tentar rastrear o .env.example criado nesta sessão.
+!.env.example
 .venv
 
 # Sessões do WhatsApp e Dados do Banco
@@ -40,3 +43,8 @@ tmp/
 # Testes e Cache
 .env.test
 .pytest_cache/
+
+# Config local do Claude Code (permissões de shell específicas da máquina/dev
+# — por convenção .local.json não deveria ser versionado; estava sendo
+# rastreado por engano, corrigido em 2026-08-25)
+.claude/settings.local.json

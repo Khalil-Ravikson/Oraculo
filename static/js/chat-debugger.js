@@ -64,6 +64,25 @@ window.clearChat = function() {
   document.getElementById('cx-messages').innerHTML = '';
 };
 
+// Chamado pelo botão "Limpar cache semântico" (aba Comandos) — antes disso
+// a função não existia (o botão só dava erro de JS no console, silencioso
+// pro usuário). `credentials: 'include'` manda o cookie admin_token, que
+// `require_admin_jwt` aceita como fallback do header Authorization.
+window.apiAction = async function(url, method, successMsg) {
+  try {
+    const r = await fetch(url, { method, credentials: 'include' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      addMessage('assistant', `❌ ${d.detail || successMsg + ' falhou (' + r.status + ')'}`);
+      return;
+    }
+    const detalhe = typeof d.deleted === 'number' ? ` (${d.deleted} entradas removidas)` : '';
+    addMessage('assistant', `✅ ${successMsg}${detalhe}`);
+  } catch (e) {
+    addMessage('assistant', `❌ ${successMsg} falhou: ${e.message}`);
+  }
+};
+
 function upsertStep(id, status, name, detail, ms, extra) {
   const empty = document.getElementById('pipeline-empty');
   if (empty) empty.remove();

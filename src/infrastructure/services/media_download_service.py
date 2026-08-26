@@ -51,12 +51,26 @@ class MediaDownloadService:
         outfile = os.path.join(_TMP, "%(id)s.%(ext)s")
         fmt = "bestaudio/best" if audio_only else "best[filesize<50M]/best"
 
+        def _filtro(info_dict, *, incomplete=False):
+            # Roda DEPOIS da extração de metadata, ANTES do download de
+            # verdade começar — sem isso, uma live 24/7 (fácil de cair sem
+            # querer via `buscar vídeo <termo>`, ver src/router/supervisor.py)
+            # seria baixada indefinidamente antes da checagem de duração
+            # (que antes rodava só depois do download completo).
+            if info_dict.get("is_live") or info_dict.get("was_live"):
+                return "Transmissão ao vivo não suportada"
+            dur = info_dict.get("duration") or 0
+            if dur > self._MAX_DURATION_S:
+                return f"Vídeo muito longo ({dur}s > {self._MAX_DURATION_S}s)"
+            return None
+
         ydl_opts = {
             "format":        fmt,
             "outtmpl":       outfile,
             "quiet":         True,
             "no_warnings":   True,
             "max_filesize":  self._MAX_SIZE_MB * 1024 * 1024,
+            "match_filter":  _filtro,
         }
         if audio_only:
             ydl_opts["postprocessors"] = [{
@@ -67,15 +81,28 @@ class MediaDownloadService:
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=download)
+                # `ytsearch1:...` devolve um dict de playlist com 1 item em
+                # "entries" (não o vídeo direto) — normaliza pro entry real
+                # antes de ler title/duration/preparar o filename.
+                if info is not None and info.get("entries") is not None:
+                    entradas = list(info.get("entries") or [])
+                    if not entradas:
+                        return MediaResult(ok=False, error=f"Nenhum vídeo encontrado para '{url.split(':', 1)[-1]}'")
+                    info = entradas[0]
+
                 duration = info.get("duration", 0)
-                if duration > self._MAX_DURATION_S:
-                    return MediaResult(ok=False, error=f"Vídeo muito longo ({duration}s > {self._MAX_DURATION_S}s)")
 
                 size_mb = 0.0
                 if download:
                     filepath = ydl.prepare_filename(info)
                     if audio_only:
                         filepath = os.path.splitext(filepath)[0] + ".mp3"
+                    if not os.path.exists(filepath):
+                        # `match_filter` rejeitou (live ou vídeo longo demais)
+                        # — yt-dlp só loga aviso, não levanta exceção.
+                        motivo = "Transmissão ao vivo não suportada" if (info.get("is_live") or info.get("was_live")) \
+                            else f"Vídeo muito longo ({duration}s > {self._MAX_DURATION_S}s)"
+                        return MediaResult(ok=False, error=motivo)
                     size_mb = os.path.getsize(filepath) / 1024 / 1024
                 else:
                     filepath = ""

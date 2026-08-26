@@ -22,7 +22,7 @@
 13. [Configuração e Variáveis de Ambiente](#13-configuração-e-variáveis-de-ambiente)
 14. [Instalação e Execução (Docker)](#14-instalação-e-execução-docker)
 15. [Celery — Tarefas em Background](#15-celery--tarefas-em-background)
-16. [Observabilidade (Langfuse + Prometheus + Grafana)](#16-observabilidade-langfuse--prometheus--grafana)
+16. [Observabilidade (Prometheus + Grafana + /hub/llm-custo)](#16-observabilidade-prometheus--grafana--hubllm-custo)
 17. [Testes](#17-testes)
 18. [Comandos Úteis](#18-comandos-úteis)
 19. [Glossário para Leigos](#19-glossário-para-leigos)
@@ -42,6 +42,7 @@ UEMA pelo WhatsApp — sem precisar ligar para a secretaria, sem esperar atendim
 - 📞 Contatos de departamentos (PROG, CTIC, CECEN, reitoria)
 - 💻 Suporte técnico e sistemas (SIGAA, senha, Wi-Fi)
 - 📂 Qualquer documento que o administrador ingira no sistema
+- 🎙️ Nota de voz (transcrita via Gemini STT) e resposta em áudio sob pedido (Kokoro TTS)
 
 **O que ele NÃO faz (por segurança)?**
 
@@ -52,6 +53,11 @@ UEMA pelo WhatsApp — sem precisar ligar para a secretaria, sem esperar atendim
 ---
 
 ## 2. Visão Geral da Arquitetura
+
+> 📖 Diagrama completo, com todas as camadas e decisões técnicas:
+> [`docs/architecture/arquitetura_oraculo.md`](docs/architecture/arquitetura_oraculo.md)
+> (fonte oficial). Esta seção é um resumo de onboarding.
+
 WhatsApp (usuário)
 │
 ▼
@@ -68,18 +74,27 @@ Anti-spam, anti-duplicação
 ▼
 Celery Worker (background)
 │
-├─── OracleChain ──→ LangChain Runnables
+├─── gatekeeper.py ──→ pré-filtro (ignorar/registro/comando/LLM)
+│         │
+│         ▼
+│    router/supervisor.py ──→ classificação (regex → heurística → Flash)
+│         │
+│         ▼
+│    dispatcher_langgraph.py ──→ orquestrador de produção
 │         │
 │         ├── load_memory  (Redis)
-│         ├── route_intent (KNN Redis + regex)
-│         ├── transform_query
-│         ├── retrieve     (busca híbrida Redis)
+│         ├── Planner      (DAG de workers especializados)
+│         ├── retrieve     (busca híbrida Redis, RAG)
 │         ├── grade_docs   (CRAG score)
-│         ├── generate     (Gemini LLM)
+│         ├── generate     (Gemini/DeepSeek/Groq via llm_factory)
 │         └── save_memory  (Redis)
 │
 └─── resposta → Evolution API → WhatsApp
 
+> ⚠️ O pipeline `OracleChain`/LangChain Runnables descrito em versões
+> anteriores deste README foi removido do código (confirmado ausente do
+> repositório). LangChain hoje é usado só para embeddings/chunking do RAG —
+> não é o framework de orquestração. Corrigido em 2026-08-25.
 
 **Clean Architecture** — o código segue 4 camadas:
 domain/       → regras de negócio puras (sem frameworks)
@@ -93,17 +108,16 @@ api/          → endpoints FastAPI (apresentação)
 
 | Componente | Tecnologia | Para que serve |
 |---|---|---|
-| Linguagem | Python 3.11 | Toda a aplicação |
+| Linguagem | Python 3.12 (imagem Docker usa 3.11-slim — ver nota) | Toda a aplicação |
 | API Web | FastAPI | Webhook WhatsApp + portal admin |
-| LLM | Google Gemini | Geração de respostas |
-| Framework LLM | LangChain Runnables | Pipeline de RAG |
+| LLM | Google Gemini (padrão) + DeepSeek/Groq (alternativos, trocáveis em runtime via `/hub/llm-custo`) | Geração de respostas |
+| Framework LLM | Nenhum framework de orquestração — camadas próprias (`router/`+`agents/`+`capabilities/`); LangChain só para embeddings/chunking | Pipeline de RAG |
 | Banco relacional | PostgreSQL | Usuários, identidade, auditoria |
 | Banco vetorial | Redis Stack + RedisVL | Documentos, embeddings, buscas semânticas |
 | Fila de tarefas | Celery + Redis | Processar mensagens em background |
 | Canal WhatsApp | Evolution API | Recebe/envia mensagens |
 | ORM | SQLAlchemy Async | Interface com PostgreSQL |
 | Migrações | Alembic | Versionamento do banco |
-| Tracing LLM | Langfuse | Monitorar chamadas ao Gemini |
 | Métricas | Prometheus | Coleta de dados de performance |
 | Dashboards | Grafana | Visualização de métricas |
 | Containers | Docker + Compose | Deploy e orquestração |
@@ -111,59 +125,76 @@ api/          → endpoints FastAPI (apresentação)
 ---
 
 ## 4. Estrutura de Pastas
+
+> ⚠️ Corrigido em 2026-08-25 — a versão anterior desta árvore descrevia uma
+> estrutura pré-refatoração (`oracle_chain.py`, `domain/tools/`,
+> `domain/services/` com roteador/permissões) que não existe mais no
+> código. A árvore abaixo reflete `src/` real.
+
 oraculo-uema/
 ├── src/
 │   ├── api/                    # Endpoints FastAPI (camada de apresentação)
-│   │   ├── hub.py              # Portal web admin (rotas HTML)
-│   │   ├── admin_api.py        # REST API do admin (JSON)
-│   │   ├── rag_admin.py        # Gerenciamento de documentos RAG
-│   │   ├── eval_dashboard.py   # Dashboard de avaliação RAG (SSE)
-│   │   ├── admin_portal.py     # Portal admin completo
-│   │   ├── monitor.py          # Monitor live (SSE)
-│   │   ├── metrics.py          # Endpoint Prometheus
+│   │   ├── routers/web/hub.py          # Portal web admin (rotas HTML, /hub)
+│   │   ├── routers/admin/admin_api.py  # REST API do admin (JSON)
+│   │   ├── routers/admin/eval_api.py   # Avaliação RAG (SSE)
+│   │   ├── routers/tools/chunkviz_tools.py  # Upload/visualização de chunks
+│   │   ├── monitor.py           # Monitor live (SSE)
 │   │   └── middleware/
 │   │       └── auth_middleware.py  # JWT admin
 │   │
+│   ├── router/                  # Classificação de intenção (Supervisor)
+│   │   ├── supervisor.py        # regex → heurística → Flash
+│   │   ├── gatekeeper.py        # pré-filtro (ignorar/registro/comando/LLM)
+│   │   └── llm_fallback.py      # classificação/orquestração via LLM
+│   │
+│   ├── agents/                  # Agentes de domínio (RAG, SIGAA, tickets, conversação)
+│   ├── capabilities/            # Tools/integrações autodescobertas
+│   │
 │   ├── application/            # Casos de uso (orquestra domínio)
-│   │   ├── chain/
-│   │   │   └── oracle_chain.py # Pipeline RAG principal (LangChain)
+│   │   ├── runtime/dispatcher_langgraph.py  # orquestrador de produção
+│   │   ├── runtime/dispatcher.py            # orquestrador legado (ainda usado por SSE/eval)
 │   │   ├── tasks/
-│   │   │   ├── process_message_task.py  # Task Celery: processa mensagem
-│   │   │   ├── tasks_admin.py           # Tasks admin (ingestão, comandos)
-│   │   │   └── ingestion_tasks.py       # Task Celery: ingere documentos
+│   │   │   └── process_message_task.py  # Task Celery: processa mensagem
 │   │   └── use_cases/          # Casos de uso específicos
 │   │
 │   ├── domain/                 # Regras de negócio puras
 │   │   ├── entities/           # Modelos do domínio
-│   │   ├── ports/              # Interfaces (contratos)
-│   │   ├── tools/              # Tools do agente (GLPI, email, etc.)
-│   │   └── services/           # Serviços de domínio (roteador, permissões)
+│   │   ├── ports/              # Interfaces (contratos, Clean Architecture)
+│   │   └── permissions.py      # RBAC
 │   │
 │   ├── infrastructure/         # Detalhes técnicos (banco, redis, LLM)
 │   │   ├── adapters/           # Implementações dos ports
-│   │   │   ├── gemini_provider.py      # Adapter Gemini
-│   │   │   ├── evolution_adapter.py    # Adapter WhatsApp
+│   │   │   ├── gemini_provider.py            # Adapter Gemini
+│   │   │   ├── openai_compatible_provider.py # Adapter DeepSeek/Groq
+│   │   │   ├── llm_factory.py                # Ponto único de resolução de provider
+│   │   │   ├── evolution_adapter.py          # Adapter WhatsApp
 │   │   │   └── parsers/        # Parsers de documentos (PDF, DOCX, etc.)
 │   │   ├── redis_client.py     # Cliente Redis + schemas RedisVL
 │   │   ├── settings.py         # Configurações (.env)
 │   │   ├── celery_app.py       # Configuração Celery
 │   │   ├── logging_config.py   # Logging estruturado
-│   │   └── observability/      # Prometheus, Langfuse
+│   │   └── observability/      # Prometheus (métricas + custo LLM)
 │   │
 │   ├── memory/                 # Sistema de memória em múltiplas camadas
 │   │   ├── ports/              # Interfaces de memória
 │   │   ├── adapters/           # Implementações Redis
 │   │   └── services/           # MemoryService (orquestra)
 │   │
-│   ├── rag/                    # Sistema RAG (busca em documentos)
+│   ├── rag/                    # Transformação/roteamento de queries (caminho legado, não hot-path)
 │   │   ├── embeddings.py       # Modelo de embeddings (Gemini/local)
-│   │   ├── ingestion/          # Pipeline de ingestão de documentos
-│   │   │   ├── pipeline.py     # Pipeline principal
-│   │   │   ├── parser_factory.py    # Fábrica de parsers
-│   │   │   └── chunker_factory.py   # Fábrica de chunkers
-│   │   └── query/              # Transformação e roteamento de queries
+│   │   └── ingestion/          # Pipeline de ingestão de documentos
+│   │       ├── pipeline.py     # Pipeline principal
+│   │       ├── parser_factory.py    # Fábrica de parsers
+│   │       └── chunker_factory.py   # Fábrica de chunkers
 │   │
 │   └── main.py                 # Entry point da aplicação
+│
+├── docs/                       # Documentação (ver docs/README.md — índice)
+│   ├── architecture/            # Arquitetura técnica (fonte oficial)
+│   ├── business/                 # Regras de negócio (fonte oficial)
+│   ├── decisions/                 # ADRs
+│   ├── historico/                  # Docs concluídos/superados
+│   └── assets/                    # Apresentações, relatórios, exports
 │
 ├── templates/                  # HTML do portal web (Jinja2)
 │   └── hub/                    # Templates do hub admin
@@ -174,6 +205,11 @@ oraculo-uema/
 │       ├── chunkviz.html       # Visualizador de chunks
 │       └── config.html         # Configuração do sistema
 │
+├── langgraph_experiment/       # Grafo (nodes/state) usado por dispatcher_langgraph.py
+│                                  # em produção — "experiment" no nome é histórico, ver
+│                                  # docs/decisions/0001-langgraph-nao-aprovado-para-main.md
+├── rest_lab/ · mcp_lab/        # Laboratórios de pesquisa (não produto), com
+│                                  # camada de Application própria (ADR 0005/0006)
 ├── dados/                      # PDFs e documentos para ingestão
 ├── static/                     # CSS, JS, imagens
 ├── migrations/                 # Migrações Alembic (PostgreSQL)
@@ -463,7 +499,7 @@ Acessível em: `http://localhost:9000/hub/`
 |---|---|---|
 | Grafana | `localhost:3001` | Dashboards visuais de métricas |
 | Prometheus | `localhost:9090` | Raw metrics e alertas |
-| Langfuse | `localhost:3000` | Tracing de chamadas ao LLM |
+| `/hub/llm-custo` | portal admin | Custo por provider/rota, cache semântico (nativo, Postgres) |
 
 ---
 
@@ -506,11 +542,6 @@ ADMIN_CONFIRMATION_TOKEN=token_extra   # token extra para comandos críticos
 # ── Modo de desenvolvimento ────────────────────────────
 DEV_MODE=True                          # False em produção
 DEV_WHITELIST=5598999999999            # só esses números recebem resposta em dev
-
-# ── Observabilidade ────────────────────────────────────
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_HOST=http://langfuse:3000
 
 # ── Dados ──────────────────────────────────────────────
 DATA_DIR=/app/dados                    # pasta dos PDFs
@@ -613,11 +644,18 @@ docker compose logs -f worker
 
 ### Filas disponíveis
 
-| Fila | Para que serve |
-|---|---|
-| `default` | Processar mensagens WhatsApp |
-| `admin` | Ingestão de documentos, comandos admin |
-| `notificacoes` | Lembretes de prazos acadêmicos |
+> ⚠️ Corrigido em 2026-08-25 — a fila `notificacoes` nunca existiu de fato;
+> lembretes de prazos rodam na fila `default` via `beat`. Tabela abaixo
+> reflete `celery_app.py` real.
+
+| Fila | Container | Para que serve |
+|---|---|---|
+| `default` | `worker` | Processar mensagens WhatsApp, comandos admin, notificações agendadas |
+| `admin` | `worker` | Ingestão de documentos, comandos admin |
+| `rag_search` | `worker_rag` | Busca híbrida Redis + rerank |
+| `synthesis` | `worker_synthesis` | Geração da resposta final (LLM) |
+| `media` | `worker_media` | Download/transcrição/síntese de áudio e vídeo (STT/TTS, YouTube, Instagram) |
+| `graph` | — | Extração de grafo institucional — código existe, **worker desligado** desde 2026-07-31 (sem uso real em produção) |
 
 ### Beat (tarefas agendadas)
 
@@ -630,37 +668,55 @@ O `beat` (agendador) executa tarefas periodicamente:
 
 ---
 
-## 16. Observabilidade (Langfuse + Prometheus + Grafana)
+## 16. Observabilidade (Prometheus + Grafana + /hub/llm-custo)
 
-### Langfuse — Tracing LLM
+Não usamos Langfuse/LangSmith — avaliado e descartado (ver
+`pesquisa_arquitetura_producao.md` §4.5): a telemetria de custo/rota/cache
+já roda nativamente em Postgres + Prometheus, sem depender de ferramenta
+externa.
 
-Acesse: `http://localhost:3000`
+### `/hub/llm-custo` — custo por provider/rota (Postgres, nativo)
 
-O que monitorar:
-- Latência de cada chamada ao Gemini
-- Custo em tokens (entrada + saída)
-- Traces completos do pipeline RAG
-- CRAG scores ao longo do tempo
+Acesse pelo portal admin. Mostra custo USD/BRL, tokens e chamadas por
+provider (Gemini/DeepSeek/Groq) e por rota, além de hit rate do cache
+semântico — lê a tabela `metricas_llm`, alimentada por
+`MonitoredLLMProvider` (`src/infrastructure/adapters/llm_factory.py`) em
+toda chamada de geração de texto.
 
 ### Prometheus — Métricas
 
 Acesse: `http://localhost:9090`
 
-Métricas coletadas:
-oraculo_requests_total          → total de mensagens processadas
-oraculo_requests_blocked_total  → bloqueadas pelo Porteiro
-oraculo_cache_hits_total        → hits no cache semântico
-oraculo_request_latency_ms      → histograma de latência
-oraculo_db_latency_ms           → latência do PostgreSQL
+Métricas coletadas (não exaustivo):
+oraculo_requests_total                    → total de mensagens processadas
+oraculo_requests_blocked_total            → bloqueadas pelo Porteiro
+oraculo_semantic_cache_result_total       → hit/miss do cache semântico, por rota
+oraculo_router_cache_hit_total            → qual camada do Supervisor decidiu a rota
+oraculo_llm_cost_usd_total                → custo acumulado por provider
+oraculo_memory_layer_access_total         → acesso por camada de memória (L1-L4)
+oraculo_request_latency_ms                → histograma de latência
+oraculo_db_latency_ms                     → latência do PostgreSQL
 
 ### Grafana — Dashboards
 
-Acesse: `http://localhost:3001`  
-Login padrão: `admin` / `admin`
+Acesse: `http://localhost:3001`
+Login padrão: `admin` / `admin` (via `.env` `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD`)
 
-Dashboards recomendados:
-- Redis Overview (importar da comunidade: #763)
-- Custom: tokens/min, latência P95, hit rate de cache
+Dashboards versionados em `observability/grafana/provisioning/dashboards/`:
+
+- `llm_custo_providers.json` — custo/tokens/cache por provider
+- `comportamento_ia.json` — roteamento, memória, falhas do pipeline
+
+### Jaeger — Tracing distribuído (OpenTelemetry)
+
+Acesse: `http://localhost:16686`. Desativado por padrão — precisa de
+`ENABLE_TRACING=true` no `.env` (o container `jaeger` já sobe com o profile
+`monitoring`, mas sem a flag ligada o SDK do OpenTelemetry nem tenta
+exportar). Correlaciona uma mensagem completa (FastAPI → Celery → chamadas
+Gemini/STT/TTS) num trace só, com atributos `gen_ai.*` (convenção semântica
+oficial). Instrumentação manual nos mesmos pontos-único já usados pra custo
+(`llm_factory.py`, `audio_service.py`) — Celery não usa auto-instrumentação
+de propósito (signals customizados de event loop, ver `celery_app.py`).
 
 ---
 
@@ -763,7 +819,6 @@ print(f'{len(keys)} chunks no Redis')
 | **Docker** | "Contêiner" que empacota o sistema inteiro para rodar em qualquer máquina |
 | **Alembic** | Sistema de versionamento do banco de dados (controla mudanças na estrutura) |
 | **Evolution API** | Software que conecta o sistema ao WhatsApp Business |
-| **Langfuse** | Ferramenta para monitorar e debugar chamadas ao LLM |
 | **Prometheus** | Coleta métricas do sistema (quantas mensagens, latência, erros) |
 | **Grafana** | Cria gráficos bonitos com as métricas do Prometheus |
 
@@ -785,4 +840,6 @@ Projeto institucional UEMA — uso interno. Entre em contato com o CTIC para mai
 
 ---
 
-*Documentação mantida pelo CTIC/UEMA. Última atualização: Abril 2026.*
+*Documentação mantida pelo CTIC/UEMA. Última atualização: 25 de agosto de 2026
+(reorganização documental — ver `docs/README.md` para o mapa completo da
+documentação e `notas.md` §15 para o histórico da mudança).*

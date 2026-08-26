@@ -240,445 +240,94 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
     import time as _t
 
     async def _generator():
+        import json as _json
         t_total = _t.monotonic()
-        try:
-            # ── 0. HITL Interception ──────────────────────
+
+        # Lock por sessão — sem isso, um EventSource que reconecta sozinho
+        # (browser, em qualquer soluço de rede) reprocessa a mesma mensagem
+        # do zero, pagando Router+Orchestrator+Planner de novo. Mesmo padrão
+        # de `lock:msg:{phone}` do WhatsApp (process_message_task.py), que
+        # este endpoint nunca teve.
+        lock_key = f"lock:hub_chat:{thread_id}" if thread_id else None
+        r_lock = None
+        if lock_key:
             from src.infrastructure.redis_client import get_redis_text
-            import json as _json
-            r = get_redis_text()
-            hitl_state_raw = r.get(f"hitl:session:{thread_id}")
-            if hitl_state_raw:
-                try:
-                    hitl_state = _json.loads(hitl_state_raw if isinstance(hitl_state_raw, str) else hitl_state_raw.decode())
-                    action = hitl_state.get("action")
-                    msg_clean = msg.strip()
-                    msg_lower = msg_clean.lower()
-                    
-                    if action == "sigaa_collect_cpf":
-                        import re
-                        cpf = re.sub(r"\D", "", msg_clean)
-                        if len(cpf) != 11:
-                            resp = {
-                                'type': 'response',
-                                'text': "❌ **CPF Inválido!**\nO CPF deve conter exatamente 11 dígitos numéricos. Por favor, informe seu CPF novamente:",
-                                'rota': "SIGAA",
-                                'total_ms': 10,
-                                'action_buttons': [],
-                                'status': 'hitl_pending'
-                            }
-                            yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
-                            return
-                        # Avança para coletar senha
-                        hitl_state["action"] = "sigaa_collect_password"
-                        hitl_state["cpf"] = cpf
-                        r.setex(f"hitl:session:{thread_id}", 300, _json.dumps(hitl_state, ensure_ascii=False))
-                        resp = {
-                            'type': 'response',
-                            'text': "🔐 **CPF recebido!**\nAgora, por favor, envie sua **senha do SIGAA** para iniciarmos o acesso (sua senha é transmitida de forma segura e não será salva persistentemente):",
-                            'rota': "SIGAA",
-                            'total_ms': 10,
-                            'action_buttons': [],
-                            'status': 'hitl_pending'
-                        }
-                        yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
-                        return
-                    
-                    elif action == "sigaa_collect_password":
-                        senha = msg_clean
-                        cpf = hitl_state.get("cpf")
-                        target_action = hitl_state.get("target_action")
-                        event = hitl_state.get("event", {})
-                        
-                        event["login"] = cpf
-                        event["senha"] = senha
-                        event["hitl_confirmed"] = True
-                        
-                        r.delete(f"hitl:session:{thread_id}")
-                        
-                        yield _sse_step("router", "skip", "Autenticação em andamento")
-                        yield _sse_step("planner", "skip", "HITL Validado")
-                        yield _sse_step("dispatch", "running", f"Disparando worker {target_action}...")
-                        t0 = _t.monotonic()
-                        
-                        from src.application.workers.registry import _autodiscover_workers, _REGISTRY
-                        _autodiscover_workers()
-                        fn = _REGISTRY.get(target_action)
-                        if fn:
-                            fn.s(event).apply_async()
-                            yield _sse_step("dispatch", "ok", "Worker enfileirado", _t.monotonic() - t0)
-                            yield _sse_step("synthesis", "running", "Autenticando e extraindo dados do SIGAA...")
-                            t0 = _t.monotonic()
-                            
-                            from src.application.runtime.dispatcher import _aguardar_resposta_final
-                            final_data = await _aguardar_resposta_final(event["plan_id"], timeout=15.0)
-                            synth_ms = _t.monotonic() - t0
-                            
-                            if final_data is None:
-                                answer = "⏳ A sua requisição continua sendo processada em background. Você será notificado quando terminar."
-                                action_buttons = []
-                                status = "warning"
-                                yield _sse_step("synthesis", "warning", "Processamento em background", synth_ms)
-                            else:
-                                answer = final_data.get("answer", "")
-                                action_buttons = final_data.get("action_buttons", [])
-                                status = final_data.get("status", "ok")
-                                yield _sse_step("synthesis", "ok", f"{len(answer)} chars gerados", synth_ms)
-                            
-                            total_ms = int((_t.monotonic() - t_total) * 1000)
-                            response_payload = {
-                                'type': 'response',
-                                'text': answer,
-                                'rota': "SIGAA",
-                                'total_ms': total_ms,
-                                'action_buttons': action_buttons,
-                                'status': status
-                            }
-                            yield f"data: {_json.dumps(response_payload, ensure_ascii=False)}\n\n"
-                            
-                            metrics_payload = {
-                                'type': 'metrics',
-                                'rota': "SIGAA",
-                                'total_ms': total_ms,
-                                'workers': 1,
-                                'confianca': 1.0
-                            }
-                            yield f"data: {_json.dumps(metrics_payload, ensure_ascii=False)}\n\n"
-                            return
-                        else:
-                            resp = {'type': 'response', 'text': f"❌ Falha crítica: worker '{target_action}' não encontrado.", 'rota': "SIGAA", 'total_ms': 10, 'action_buttons': [], 'status': 'error'}
-                            yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
-                            return
+            r_lock = get_redis_text()
+            if not r_lock.set(lock_key, "1", nx=True, ex=60):
+                yield f"data: {_json.dumps({'type': 'error', 'msg': 'Pergunta anterior ainda em processamento — aguarde a resposta.'})}\n\n"
+                yield f"data: {_json.dumps({'type': 'done'})}\n\n"
+                return
 
-                    if msg_lower in ("sim", "s", "yes", "y", "confirmo", "ok"):
-                        r.delete(f"hitl:session:{thread_id}")
-                        action = hitl_state.get("action")
-                        
-                        yield _sse_step("router", "skip", "HITL Interceptado")
-                        yield _sse_step("planner", "skip", "HITL Interceptado")
-                        
-                        if action == "media_download":
-                            from src.application.workers.registry import dispatch
-                            yield _sse_step("dispatch", "ok", "Enviando worker de mídia...")
-                            dispatch(hitl_state.get("worker_name"), hitl_state.get("event"))
-                            
-                            yield _sse_step("synthesis", "ok", "Download iniciado no background")
-                            total_ms = int((_t.monotonic() - t_total) * 1000)
-                            
-                            resp = {'type': 'response', 'text': "✅ Download confirmado! Verifique os logs para acompanhar o progresso.", 'rota': "HITL", 'total_ms': total_ms, 'action_buttons': [], 'status': 'ok'}
-                            yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
-                            yield f"data: {_json.dumps({'type': 'metrics', 'rota': 'HITL', 'total_ms': total_ms, 'workers': 1, 'confianca': 1.0}, ensure_ascii=False)}\n\n"
-                            return
-                        else:
-                            resp = {'type': 'response', 'text': f"✅ Ação '{action}' confirmada.", 'rota': "HITL", 'total_ms': 10, 'action_buttons': [], 'status': 'ok'}
-                            yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
-                            return
-                            
-                    elif msg_lower in ("nao", "não", "n", "no", "cancela", "cancelar"):
-                        r.delete(f"hitl:session:{thread_id}")
-                        resp = {'type': 'response', 'text': "❌ Ação cancelada.", 'rota': "HITL", 'total_ms': 10, 'action_buttons': [], 'status': 'ok'}
-                        yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
-                        return
-                    else:
-                        resp = {'type': 'response', 'text': "⚠️ Responda *SIM* para confirmar ou *NÃO* para cancelar.", 'rota': "HITL", 'total_ms': 10, 'action_buttons': [], 'status': 'ok'}
-                        yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
-                        return
-                except Exception as e:
-                    logger.error("Erro no parse do HITL state no hub: %s", e)
-                    r.delete(f"hitl:session:{thread_id}")
-
-            # ── 1. Router ─────────────────────────────────
-            yield _sse_step("router", "running", "Classificando intenção…")
+        try:
+            yield _sse_step("pipeline", "running", "Processando via Cognitive OS (LangGraph)…")
             t0 = _t.monotonic()
-            from src.router.supervisor import rotear
-            decision = await rotear(msg, thread_id, {"role": "admin"})
-            yield _sse_step("router", "ok",
-                f"→ {decision.rota} ({decision.confianca:.0%})",
-                _t.monotonic() - t0,
-                {"rota": decision.rota}
-            )
 
-            # ── Fast-Paths GREETING / MEDIA_DOWNLOAD / SIGAA ──────
-            if decision.rota == "GREETING":
-                import random
-                answer = random.choice([
-                    "Olá! 😊 Sou o Oráculo UEMA. Como posso ajudar?",
-                    "Oi! Em que posso ajudá-lo(a) hoje?",
-                    "Olá! Pode perguntar sobre calendário, editais, contatos ou suporte. 🎓",
-                ])
-                # Salva turno de saudação imediata no simulador
-                try:
-                    from src.memory.container import create_memory_service
-                    mem_svc = create_memory_service()
-                    mem_svc.persistir_turno(
-                        session_id=thread_id,
-                        user_id=thread_id,
-                        pergunta=msg,
-                        resposta=answer,
-                        rota=decision.rota
-                    )
-                except Exception:
-                    pass
-
-                yield _sse_step("planner", "skip", "Fast-Path (Inline)")
-                yield _sse_step("dispatch", "skip", "Bypass Celery")
-                yield _sse_step("synthesis", "ok", "Resposta instantânea")
-                
-                total_ms = int((_t.monotonic() - t_total) * 1000)
-                resp = {'type': 'response', 'text': answer, 'rota': decision.rota, 'total_ms': total_ms, 'action_buttons': [], 'status': 'ok'}
-                yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
-                
-                metrics = {'type': 'metrics', 'rota': decision.rota, 'total_ms': total_ms, 'workers': 0, 'confianca': round(decision.confianca, 2)}
-                yield f"data: {_json.dumps(metrics, ensure_ascii=False)}\n\n"
-                return
-
-            if decision.rota == "MEDIA_DOWNLOAD":
-                url = decision.dag_hint.get("url", msg)
-                hitl_state = {
-                    "action": "media_download",
-                    "worker_name": decision.dag_hint["steps"][0],
-                    "event": {
-                        "plan_id": "fast_media",
-                        "session_id": thread_id,
-                        "step_id": "s1",
-                        "url": url,
-                        "hitl_confirmed": True,
-                    }
-                }
-                r.setex(f"hitl:session:{thread_id}", 300, _json.dumps(hitl_state, ensure_ascii=False))
-
-                answer = "🎥 **Mídia detectada!**\n\nIdentifiquei um link suportado.\nDeseja iniciar o download deste arquivo agora?"
-                btns = [{"label": "Sim, baixar", "value": "sim"}, {"label": "Não", "value": "nao"}]
-
-                # Salva turno de mídia imediato no simulador
-                try:
-                    from src.memory.container import create_memory_service
-                    mem_svc = create_memory_service()
-                    mem_svc.persistir_turno(
-                        session_id=thread_id,
-                        user_id=thread_id,
-                        pergunta=msg,
-                        resposta=answer,
-                        rota=decision.rota
-                    )
-                except Exception:
-                    pass
-
-                yield _sse_step("planner", "skip", "Fast-Path HITL")
-                yield _sse_step("dispatch", "skip", "Bypass Celery")
-                yield _sse_step("synthesis", "ok", "Ação Manual Requerida")
-                
-                total_ms = int((_t.monotonic() - t_total) * 1000)
-                resp = {'type': 'response', 'text': answer, 'rota': decision.rota, 'total_ms': total_ms, 'action_buttons': btns, 'status': 'hitl_pending'}
-                yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
-                
-                metrics = {'type': 'metrics', 'rota': decision.rota, 'total_ms': total_ms, 'workers': 0, 'confianca': round(decision.confianca, 2)}
-                yield f"data: {_json.dumps(metrics, ensure_ascii=False)}\n\n"
-                return
-
-            if decision.rota == "SIGAA":
-                from src.application.use_cases.sigaa_use_cases import SIGAAUseCase
-                uc = SIGAAUseCase()
-                fluxo = uc.detectar_fluxo(msg)
-                worker = fluxo["worker"] if fluxo else "sigaa_biblioteca"
-                args = fluxo["args"] if fluxo else {}
-                
-                session_key = f"sigaa:session:{thread_id}"
-                if r.exists(session_key):
-                    yield _sse_step("dispatch", "running", f"Disparando {worker} usando sessão existente...")
-                    t0 = _t.monotonic()
-                    
-                    from src.application.workers.registry import _autodiscover_workers, _REGISTRY
-                    _autodiscover_workers()
-                    fn = _REGISTRY.get(worker)
-                    if fn:
-                        plan_id = f"fast_{worker}_{int(_t.time())}"
-                        event = {
-                            "plan_id": plan_id,
-                            "session_id": thread_id,
-                            "step_id": "s1",
-                            "query": msg,
-                            **args
-                        }
-                        fn.s(event).apply_async()
-                        
-                        yield _sse_step("dispatch", "ok", "Worker enfileirado", _t.monotonic() - t0)
-                        yield _sse_step("synthesis", "running", "Aguardando resposta do SIGAA...")
-                        t0 = _t.monotonic()
-                        
-                        from src.application.runtime.dispatcher import _aguardar_resposta_final
-                        final_data = await _aguardar_resposta_final(plan_id, timeout=15.0)
-                        synth_ms = _t.monotonic() - t0
-                        
-                        if final_data is None:
-                            answer = "⏳ A sua requisição continua sendo processada em background. Você será notificado quando terminar."
-                            action_buttons = []
-                            status = "warning"
-                            yield _sse_step("synthesis", "warning", "Processamento em background", synth_ms)
-                        else:
-                            answer = final_data.get("answer", "")
-                            action_buttons = final_data.get("action_buttons", [])
-                            status = final_data.get("status", "ok")
-                            yield _sse_step("synthesis", "ok", f"{len(answer)} chars gerados", synth_ms)
-                        
-                        total_ms = int((_t.monotonic() - t_total) * 1000)
-                        response_payload = {
-                            'type': 'response',
-                            'text': answer,
-                            'rota': decision.rota,
-                            'total_ms': total_ms,
-                            'action_buttons': action_buttons,
-                            'status': status
-                        }
-                        yield f"data: {_json.dumps(response_payload, ensure_ascii=False)}\n\n"
-                        return
-
-                friendly_names = {
-                    "sigaa_notas": "Consultar Minhas Notas",
-                    "sigaa_indice": "Consultar Índice Acadêmico (CR)",
-                    "sigaa_historico": "Emitir Histórico Escolar",
-                    "sigaa_estrutura": "Consultar Estrutura Curricular",
-                    "sigaa_turmas": "Consultar Turmas do Semestre",
-                    "sigaa_calendario": "Consultar Calendário Acadêmico",
-                    "sigaa_extensao": "Realizar Inscrição em Evento de Extensão",
-                    "sigaa_biblioteca": "Consultar Acervo da Biblioteca",
-                    "sigaa_processos": "Consultar Processos Seletivos",
-                }
-                op_desc = friendly_names.get(worker, "Acessar o Portal SIGAA")
-                
-                hitl_state = {
-                    "action": "sigaa_collect_cpf",
-                    "target_action": worker,
-                    "description": op_desc,
-                    "event": {
-                        "plan_id": f"fast_{worker}_{int(_t.time())}",
-                        "session_id": thread_id,
-                        "step_id": "s1",
-                        "query": msg,
-                        **args
-                    }
-                }
-                r.setex(f"hitl:session:{thread_id}", 300, _json.dumps(hitl_state, ensure_ascii=False))
-                
-                yield _sse_step("planner", "skip", "Coleta de Credenciais")
-                yield _sse_step("dispatch", "skip", "Bypass Celery")
-                yield _sse_step("synthesis", "ok", "Identificação Requerida")
-                
-                total_ms = int((_t.monotonic() - t_total) * 1000)
-                answer = f"⚠️ **Autenticação Requerida**\n\nPara executar a operação **{op_desc}**, preciso que você se autentique no SIGAA.\n\nPor favor, informe seu **CPF** (apenas números, sem pontos ou traços):"
-                resp = {
-                    'type': 'response',
-                    'text': answer,
-                    'rota': decision.rota,
-                    'total_ms': total_ms,
-                    'action_buttons': [],
-                    'status': 'hitl_pending'
-                }
-                yield f"data: {_json.dumps(resp, ensure_ascii=False)}\n\n"
-                
-                metrics = {
-                    'type': 'metrics',
-                    'rota': decision.rota,
-                    'total_ms': total_ms,
-                    'workers': 0,
-                    'confianca': round(decision.confianca, 2)
-                }
-                yield f"data: {_json.dumps(metrics, ensure_ascii=False)}\n\n"
-                return
-
-            # ── 2. Planner ────────────────────────────────
-            yield _sse_step("planner", "running", "Gerando plano DAG…")
-            t0 = _t.monotonic()
-            
-            # Carrega memória do usuário para planejamento
+            from src.application.runtime.dispatcher_langgraph import processar as cognitive_processar
             from src.memory.container import create_memory_service
+
             mem_svc = create_memory_service()
             mem_ctx = mem_svc.carregar_contexto(user_id=thread_id, session_id=thread_id, query=msg)
 
-            from src.application.chain.planner import criar_plano
-            plan = await criar_plano(
-                query=msg, session_id=thread_id, rota=decision.rota,
-                dag_hint=decision.dag_hint,
-                user_context={"role": "admin", "nome": "Admin"},
+            user_context = {
+                "nome": "Admin", "curso": "Instituição", "role": "admin",
+                "chat_id": thread_id, "has_media": False, "media_type": "", "msg_key_id": "",
+            }
+
+            result_os = await cognitive_processar(
+                message=msg, session_id=thread_id, user_context=user_context,
                 history=mem_ctx.historico.texto_formatado if mem_ctx.historico else "",
                 fatos=[f.texto for f in mem_ctx.fatos] if mem_ctx.fatos else [],
             )
-            workers_str = " → ".join(s["worker"] for s in plan.steps)
-            yield _sse_step("planner", "ok", workers_str,
-                _t.monotonic() - t0,
-                {"plan_id": plan.plan_id[:8]}
-            )
+            yield _sse_step("pipeline", "ok", f"rota={result_os.rota}", _t.monotonic() - t0, {"rota": result_os.rota})
 
-            # ── 3. Dispatch ───────────────────────────────
-            yield _sse_step("dispatch", "running", f"Despachando {len(plan.steps)} worker(s)…")
-            t0 = _t.monotonic()
-            from src.application.runtime.dispatcher import _despachar_workers, _aguardar_resposta_final
-            await _despachar_workers(plan)
-            yield _sse_step("dispatch", "ok", "Workers enfileirados (Celery)", _t.monotonic() - t0)
-
-            # ── 4. Synthesis ──────────────────────────────
-            yield _sse_step("synthesis", "running", "Aguardando resposta dos workers…")
-            t0 = _t.monotonic()
-            final_data = await _aguardar_resposta_final(plan.plan_id, timeout=15.0)
-            synth_ms = _t.monotonic() - t0
-
-            if final_data is None:
-                answer = "⏳ A sua requisição continua sendo processada em background. Você será notificado quando terminar."
-                action_buttons = []
-                status = "warning"
-                yield _sse_step("synthesis", "warning", "Processamento em background", synth_ms)
-            else:
-                answer = final_data.get("answer", "")
-                action_buttons = final_data.get("action_buttons", [])
-                status = final_data.get("status", "ok")
-                yield _sse_step("synthesis", "ok", f"{len(answer)} chars gerados", synth_ms)
-                
-                # Persiste turno de resposta assíncrona gerada
-                if status == "ok" and answer:
-                    try:
-                        mem_svc.persistir_turno(
-                            session_id=thread_id,
-                            user_id=thread_id,
-                            pergunta=msg,
-                            resposta=answer,
-                            rota=decision.rota
-                        )
-                        mem_svc.extrair_fatos_background(user_id=thread_id, session_id=thread_id)
-                    except Exception as e:
-                        logger.warning("⚠️ Falha ao salvar turno assíncrono no hub: %s", e)
+            if result_os.status == "ok" and result_os.answer:
+                try:
+                    mem_svc.persistir_turno(
+                        session_id=thread_id, user_id=thread_id,
+                        pergunta=msg, resposta=result_os.answer, rota=result_os.rota,
+                    )
+                    mem_svc.extrair_fatos_background(user_id=thread_id, session_id=thread_id)
+                except Exception as e:
+                    logger.warning("⚠️ Falha ao salvar turno no hub/chat: %s", e)
 
             total_ms = int((_t.monotonic() - t_total) * 1000)
-
             response_payload = {
                 'type': 'response',
-                'text': answer,
-                'rota': decision.rota,
+                'text': result_os.answer,
+                'rota': result_os.rota,
                 'total_ms': total_ms,
-                'action_buttons': action_buttons,
-                'status': status
+                'action_buttons': result_os.action_buttons,
+                'status': result_os.status,
             }
-            yield f"data: {json.dumps(response_payload, ensure_ascii=False)}\n\n"
-            
+            yield f"data: {_json.dumps(response_payload, ensure_ascii=False)}\n\n"
+
             metrics_payload = {
                 'type': 'metrics',
-                'rota': decision.rota,
+                'rota': result_os.rota,
                 'total_ms': total_ms,
-                'workers': len(plan.steps),
-                'confianca': round(decision.confianca, 2)
+                'workers': 1,
+                'confianca': 1.0,
             }
-            yield f"data: {json.dumps(metrics_payload, ensure_ascii=False)}\n\n"
+            yield f"data: {_json.dumps(metrics_payload, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             logger.exception("SSE /chat/stream error: %s", e)
-            yield f"data: {json.dumps({'type':'error','msg':str(e)[:200]})}\n\n"
+            yield f"data: {_json.dumps({'type':'error','msg':str(e)[:200]})}\n\n"
         finally:
-            yield f"data: {json.dumps({'type':'done'})}\n\n"
+            if r_lock is not None:
+                try:
+                    r_lock.delete(lock_key)
+                except Exception:
+                    pass
+            yield f"data: {_json.dumps({'type':'done'})}\n\n"
 
     return StreamingResponse(
         _generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-            
+
+
 # Adicionar em src/api/hub.py
 
 from pydantic import BaseModel
@@ -829,6 +478,8 @@ async def agents_data(request: Request):
                 "description": catalogo.get(a.name, {}).get("descricao") or a.description,
                 "permissions": a.permissions,
                 "enabled": status[a.name],
+                "llm_provider": catalogo.get(a.name, {}).get("llm_provider"),
+                "llm_model": catalogo.get(a.name, {}).get("llm_model"),
                 "atualizado_em": (
                     catalogo.get(a.name, {}).get("atualizado_em").isoformat()
                     if catalogo.get(a.name, {}).get("atualizado_em") else None
@@ -893,6 +544,298 @@ async def agents_set_descricao(request: Request, name: str, data: AgentDescricao
         return {"error": "Falha ao gravar no Postgres. Tente novamente."}
 
     return {"name": name, "descricao": data.descricao}
+
+
+class AgentLLMRequest(BaseModel):
+    llm_provider: str | None = None  # "gemini" | "deepseek" | "groq" | None (herda global)
+    llm_model:    str | None = None
+
+
+_PROVIDERS_VALIDOS = ("gemini", "deepseek", "groq")
+
+
+@router.post("/agents/{name}/llm")
+async def agents_set_llm(request: Request, name: str, data: AgentLLMRequest):
+    """Define o override de provider/modelo LLM deste agente (ou limpa,
+    enviando null nos dois — volta a herdar o provider global). Grava em
+    Postgres (fonte de verdade, `agentes_catalogo`) e no cache Redis que
+    `llm_factory.get_llm_provider()` lê no caminho quente (ver
+    `infrastructure/adapters/llm_factory.py::_override_do_agente`)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    if data.llm_provider and data.llm_provider not in _PROVIDERS_VALIDOS:
+        return {"error": f"Provider inválido: {data.llm_provider}. Use um de {_PROVIDERS_VALIDOS}."}
+
+    from src.agents.registry import registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.agent_catalog_repository import AgentCatalogRepository
+    from src.infrastructure.repositories.observability_repository import ObservabilityRepository
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        registry.resolve(name)
+    except KeyError:
+        return {"error": f"Agente '{name}' não encontrado."}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await AgentCatalogRepository(session).set_llm_override(
+                name, data.llm_provider, data.llm_model, admin=payload.sub,
+            )
+            await ObservabilityRepository(session).salvar_audit(
+                admin_id=payload.sub, action="agent_llm_override", target=name,
+                detalhes={"llm_provider": data.llm_provider, "llm_model": data.llm_model},
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao gravar override LLM de '%s': %s", name, exc)
+        return {"error": "Falha ao gravar no Postgres. Tente novamente."}
+
+    # Write-through no cache Redis que o caminho quente lê de verdade —
+    # sem isso, o /hub mostraria a config nova mas o pipeline continuaria
+    # usando a antiga até o próximo restart (mesma classe de bug que o
+    # painel de agentes já teve antes do catálogo Postgres existir).
+    try:
+        r = get_redis_text()
+        chave_provider = f"admin:agent:{name}:llm_provider"
+        chave_model    = f"admin:agent:{name}:llm_model"
+        if data.llm_provider:
+            r.set(chave_provider, data.llm_provider)
+        else:
+            r.delete(chave_provider)
+        if data.llm_model:
+            r.set(chave_model, data.llm_model)
+        else:
+            r.delete(chave_model)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao atualizar cache Redis do override LLM de '%s': %s", name, exc)
+
+    return {"name": name, "llm_provider": data.llm_provider, "llm_model": data.llm_model}
+
+
+class GlobalLLMProviderRequest(BaseModel):
+    provider: str
+
+
+@router.get("/llm/provider")
+async def llm_provider_get(request: Request):
+    """Provider global ativo agora (troca em runtime, sem restart)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.adapters.llm_factory import _provider_global_ativo
+    return {"provider": _provider_global_ativo(), "opcoes": list(_PROVIDERS_VALIDOS)}
+
+
+@router.post("/llm/provider")
+async def llm_provider_set(request: Request, data: GlobalLLMProviderRequest):
+    """Troca o provider LLM global em runtime (Redis `admin:llm_provider`,
+    sem restart) — afeta toda chamada que não tenha override por agente."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    if data.provider not in _PROVIDERS_VALIDOS:
+        return {"error": f"Provider inválido: {data.provider}. Use um de {_PROVIDERS_VALIDOS}."}
+
+    from src.infrastructure.adapters.llm_factory import _CHAVE_PROVIDER_GLOBAL
+    from src.infrastructure.redis_client import get_redis_text
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.observability_repository import ObservabilityRepository
+
+    try:
+        get_redis_text().set(_CHAVE_PROVIDER_GLOBAL, data.provider)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao trocar provider global no Redis: %s", exc)
+        return {"error": "Falha ao gravar no Redis. Tente novamente."}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await ObservabilityRepository(session).salvar_audit(
+                admin_id=payload.sub, action="llm_provider_global_change",
+                detalhes={"provider": data.provider},
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao registrar audit_log da troca de provider: %s", exc)
+
+    return {"provider": data.provider}
+
+
+class BrlRateRequest(BaseModel):
+    taxa: float
+
+
+@router.post("/llm-custo/brl-rate")
+async def llm_custo_brl_rate_set(request: Request, data: BrlRateRequest):
+    """Edita a taxa USD→BRL usada em `/hub/llm-custo` (Redis
+    `admin:usd_brl_rate`, mesmo padrão de `admin:llm_provider` — sem API de
+    câmbio externa, decisão deliberada, ver plano de observabilidade)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    if data.taxa <= 0:
+        return {"error": "Taxa precisa ser maior que zero."}
+
+    from src.infrastructure.observability.pricing import _CHAVE_BRL_RATE
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        get_redis_text().set(_CHAVE_BRL_RATE, str(data.taxa))
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao gravar taxa BRL no Redis: %s", exc)
+        return {"error": "Falha ao gravar no Redis. Tente novamente."}
+
+    return {"taxa": data.taxa}
+
+
+@router.post("/llm-custo/brl-rate/auto")
+async def llm_custo_brl_rate_usar_auto(request: Request):
+    """Remove o override manual — volta a usar a cotação ao vivo (ou o
+    fallback fixo, se a task `atualizar_taxa_brl` ainda não rodou)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.observability.pricing import _CHAVE_BRL_RATE, taxa_brl_ativa, taxa_brl_origem
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        get_redis_text().delete(_CHAVE_BRL_RATE)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao remover override manual de taxa BRL: %s", exc)
+        return {"error": "Falha ao gravar no Redis. Tente novamente."}
+
+    return {"taxa": taxa_brl_ativa(), "origem": taxa_brl_origem()}
+
+
+@router.get("/llm-custo", response_class=HTMLResponse)
+async def llm_custo_page(request: Request):
+    """Página de custo/telemetria real dos providers LLM (Postgres
+    `metricas_llm`, ver analise_custo_real_llm.md)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/llm_custo.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/llm-custo/data")
+async def llm_custo_data(request: Request, horas: int = 24):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.observability_repository import ObservabilityRepository
+    from src.infrastructure.adapters.llm_factory import _provider_global_ativo
+    from src.infrastructure.observability.pricing import taxa_brl_ativa, taxa_brl_origem
+
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = ObservabilityRepository(session)
+            resumo     = await repo.get_metricas_dashboard(horas)
+            por_rota   = await repo.get_metricas_por_rota(horas)
+            por_provider = await repo.get_metricas_por_provider(horas)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler telemetria de custo: %s", exc)
+        return {"error": "Falha ao consultar métricas."}
+
+    taxa_brl = taxa_brl_ativa()
+    custo_usd_total = float(resumo.get("custo_usd") or 0)
+
+    try:
+        from src.infrastructure.semantic_cache import cache_stats, TTL_POR_ROTA, THRESHOLD_POR_ROTA
+        cache = cache_stats()
+        cache["ttl_por_rota"] = TTL_POR_ROTA
+        cache["threshold_por_rota"] = THRESHOLD_POR_ROTA
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler cache_stats: %s", exc)
+        cache = {"total_entradas": 0, "por_rota": {}, "ttl_por_rota": {}, "threshold_por_rota": {}}
+
+    return {
+        "provider_global_ativo": _provider_global_ativo(),
+        "resumo": resumo,
+        "por_rota": por_rota,
+        "por_provider": por_provider,
+        "cache": cache,
+        "horas": horas,
+        "taxa_brl": taxa_brl,
+        "taxa_brl_origem": taxa_brl_origem(),
+        "custo_brl_total": round(custo_usd_total * taxa_brl, 4),
+    }
+
+
+@router.get("/llm-pricing/data")
+async def llm_pricing_data(request: Request):
+    """Tabela de preços editável (`llm_pricing`, migration 008)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.llm_pricing_repository import LlmPricingRepository
+
+    try:
+        async with AsyncSessionLocal() as session:
+            precos = await LlmPricingRepository(session).listar()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler llm_pricing: %s", exc)
+        return {"error": "Falha ao consultar preços."}
+
+    return {"precos": precos}
+
+
+class LlmPricingRequest(BaseModel):
+    provider:       str
+    modelo:         str
+    input_por_1m:   float
+    output_por_1m:  float
+    cache_por_1m:   float | None = None
+
+
+@router.post("/llm-pricing")
+async def llm_pricing_set(request: Request, data: LlmPricingRequest):
+    """Edita o preço/1M tokens de um provider+modelo. Grava em Postgres
+    (fonte de verdade, `llm_pricing`) e faz write-through no cache Redis que
+    `pricing.calcular_custo_usd` lê no caminho quente — mesmo padrão do
+    override de LLM por agente (`agents_set_llm` acima)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.llm_pricing_repository import LlmPricingRepository
+    from src.infrastructure.observability.pricing import chave_redis_preco
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await LlmPricingRepository(session).upsert(
+                data.provider, data.modelo,
+                data.input_por_1m, data.output_por_1m, data.cache_por_1m,
+                admin=payload.sub,
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao gravar llm_pricing (%s/%s): %s", data.provider, data.modelo, exc)
+        return {"error": "Falha ao gravar no Postgres. Tente novamente."}
+
+    try:
+        r = get_redis_text()
+        r.set(chave_redis_preco(data.provider, data.modelo), json.dumps({
+            "input_por_1m": data.input_por_1m,
+            "output_por_1m": data.output_por_1m,
+            "cache_por_1m": data.cache_por_1m,
+        }))
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao atualizar cache Redis de preço (%s/%s): %s", data.provider, data.modelo, exc)
+
+    return {"ok": True, "provider": data.provider, "modelo": data.modelo}
 
 
 @router.get("/agents/{name}/prompt", response_class=HTMLResponse)

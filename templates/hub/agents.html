@@ -77,6 +77,14 @@
     cursor: pointer; border: 1px solid var(--accent); background: var(--accent-dim); color: var(--accent);
   }
 
+  .llm-edit { display: none; margin-top: 8px; gap: 6px; align-items: center; }
+  .llm-edit select, .llm-edit input {
+    background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: var(--mono);
+  }
+  .llm-edit input { flex: 1; }
+  .llm-badge { font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); }
+
   .agent-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
   .agent-status { font-family: var(--mono); font-size: 10px; letter-spacing: .04em; }
   .agent-status.on  { color: var(--green); }
@@ -188,10 +196,22 @@ async function loadAgents() {
         <div class="agent-actions">
           <button class="link-btn" onclick="toggleDescEdit('${a.name}')">✏️ editar descrição</button>
           <a href="/hub/agents/${a.name}/prompt" class="link-btn">📝 prompt</a>
+          <button class="link-btn" onclick="toggleLLMEdit('${a.name}')">🧠 modelo</button>
+          <span class="llm-badge">${a.llm_provider ? a.llm_provider + (a.llm_model ? ':' + a.llm_model : '') : 'herda global'}</span>
         </div>
         <div class="desc-edit" id="desc-edit-${a.name}">
           <input type="text" id="desc-input-${a.name}" value="${a.description.replace(/"/g, '&quot;')}">
           <button onclick="salvarDescricao('${a.name}')">Salvar</button>
+        </div>
+        <div class="llm-edit" id="llm-edit-${a.name}">
+          <select id="llm-provider-${a.name}">
+            <option value="">herda global</option>
+            <option value="gemini" ${a.llm_provider === 'gemini' ? 'selected' : ''}>gemini</option>
+            <option value="deepseek" ${a.llm_provider === 'deepseek' ? 'selected' : ''}>deepseek</option>
+            <option value="groq" ${a.llm_provider === 'groq' ? 'selected' : ''}>groq</option>
+          </select>
+          <input type="text" id="llm-model-${a.name}" placeholder="modelo (opcional, ex: deepseek-chat)" value="${a.llm_model || ''}">
+          <button onclick="salvarLLM('${a.name}')">Salvar</button>
         </div>
       </div>
     `).join('');
@@ -224,6 +244,30 @@ async function toggleAgent(name, checkbox) {
 function toggleDescEdit(name) {
   const el = document.getElementById(`desc-edit-${name}`);
   el.style.display = el.style.display === 'flex' ? 'none' : 'flex';
+}
+
+function toggleLLMEdit(name) {
+  const el = document.getElementById(`llm-edit-${name}`);
+  el.style.display = el.style.display === 'flex' ? 'none' : 'flex';
+}
+
+async function salvarLLM(name) {
+  const llm_provider = document.getElementById(`llm-provider-${name}`).value || null;
+  const llm_model = document.getElementById(`llm-model-${name}`).value || null;
+  try {
+    const r = await fetch(`/hub/agents/${name}/llm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ llm_provider, llm_model }),
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'err'); return; }
+    document.getElementById(`llm-edit-${name}`).style.display = 'none';
+    toast(`Provider LLM de '${name}' atualizado.`);
+    loadAgents();
+  } catch (e) {
+    toast('Erro: ' + e.message, 'err');
+  }
 }
 
 async function salvarDescricao(name) {
