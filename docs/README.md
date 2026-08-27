@@ -8,6 +8,7 @@ documentos parecerem cobrir o mesmo tema, este índice decide qual vale.
 | Onboarding, como rodar, glossário | [`README.md`](../README.md) (raiz) | Ponto de partida para quem chega agora |
 | Arquitetura técnica (camadas, Redis, Celery, DB, fluxo de mensagem) | [`architecture/arquitetura_oraculo.md`](architecture/arquitetura_oraculo.md) | Revisado 2026-08-25 contra o código real |
 | Mapa rápido — "onde fica X?" | [`architecture/system-map.md`](architecture/system-map.md) | Navegação, não duplica a arquitetura |
+| Plano de reorganização de frontend (CSS/JS) e redesign UI/UX do Hub/Admin | [`architecture/plano_frontend_ui_ux.md`](architecture/plano_frontend_ui_ux.md) | Plano técnico por fases, não implementado ainda |
 | Regras de negócio (RBAC, HITL, escopo de agentes) — para liderança não-técnica | [`business/regras_negocio_oraculo.md`](business/regras_negocio_oraculo.md) | Citações `arquivo:linha` do código real |
 | Por que uma decisão foi tomada (não só o quê) | [`decisions/`](decisions/) | ADRs — ver índice abaixo |
 | Problemas conhecidos, não resolvidos de propósito | [`technical-debt.md`](technical-debt.md) | TD-001 a TD-014, cada um com evidência |
