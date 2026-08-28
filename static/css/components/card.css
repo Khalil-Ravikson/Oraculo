@@ -1,0 +1,43 @@
+/* card.css — uma classe base + modificadores (Plano B §F).
+   Fim de .card / .nav-card / .stat-card competindo pelo mesmo conceito. */
+
+.card {
+  background: var(--ink-900);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+}
+.card__head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+.card__title { font-size: var(--text-md); font-weight: var(--weight-semi); }
+.card__desc { color: var(--ink-400); font-size: var(--text-sm); margin-top: var(--space-1); }
+
+/* Navegação: card clicável (substitui os nav-cards numerados da home) */
+.card--nav {
+  display: block;
+  color: inherit;
+  transition: border-color var(--transition), background var(--transition);
+}
+.card--nav:hover { border-color: var(--line-strong); background: var(--ink-850); text-decoration: none; }
+.card--nav .card__title { display: flex; align-items: center; gap: var(--space-2); }
+.card--nav svg { width: 18px; height: 18px; color: var(--signal); }
+
+/* Métrica: um número grande + rótulo pequeno + delta opcional */
+.card--stat { padding: var(--space-4); }
+.card--stat .stat__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semi);
+  line-height: 1;
+}
+.card--stat .stat__label { color: var(--ink-500); font-size: var(--text-xs); margin-top: var(--space-2); text-transform: uppercase; letter-spacing: var(--tracking-eyebrow); }
+.card--stat .stat__delta { font-family: var(--font-mono); font-size: var(--text-xs); margin-top: var(--space-1); }
+.card--stat .stat__delta--up { color: var(--ok); }
+.card--stat .stat__delta--down { color: var(--danger); }
+
+.card--panel { padding: 0; }
+.card--panel > .card__head { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); margin: 0; }
+.card--panel > .card__body { padding: var(--space-4); }

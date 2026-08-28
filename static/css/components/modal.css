@@ -1,0 +1,31 @@
+/* modal.css — diálogo / confirmação (Plano B §F). Substitui o confirm() nativo
+   e as N reimplementações por página. Dirigido por core/modal.js. */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: #0009;
+  backdrop-filter: blur(2px);
+  display: grid;
+  place-items: start center;
+  padding: 12vh var(--space-4) var(--space-4);
+  z-index: 60;
+}
+.modal-overlay[hidden] { display: none; }
+
+.modal {
+  background: var(--ink-900);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-pop);
+  width: 100%;
+  max-width: 480px;
+  overflow: hidden;
+}
+.modal__head { padding: var(--space-4); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+.modal__title { font-size: var(--text-md); font-weight: var(--weight-semi); }
+.modal__body { padding: var(--space-4); color: var(--ink-400); font-size: var(--text-sm); line-height: var(--leading-body); }
+.modal__foot { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: var(--space-2); }
+
+.modal--wide { max-width: 720px; }
+.modal__body--scroll { max-height: 60vh; overflow-y: auto; }

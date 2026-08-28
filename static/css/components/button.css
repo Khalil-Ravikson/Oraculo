@@ -1,0 +1,35 @@
+/* button.css — 4 variantes (Plano B §F). Uma ação diz o que faz ao ser usada. */
+
+.btn {
+  --btn-bg: transparent;
+  --btn-fg: var(--paper);
+  --btn-bd: var(--line-strong);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  color: var(--btn-fg);
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-bd);
+  border-radius: var(--radius-ctl);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), opacity var(--transition);
+}
+.btn:hover { background: var(--ink-800); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn svg { width: 15px; height: 15px; }
+
+.btn--primary   { --btn-bg: var(--signal); --btn-fg: #17120e; --btn-bd: var(--signal); font-weight: var(--weight-semi); }
+.btn--primary:hover { background: color-mix(in srgb, var(--signal) 88%, white); }
+
+.btn--ghost { --btn-bd: transparent; color: var(--ink-400); }
+.btn--ghost:hover { color: var(--paper); }
+
+.btn--danger { --btn-fg: var(--danger); --btn-bd: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.btn--danger:hover { background: var(--danger-weak); }
+
+.btn--sm { padding: var(--space-1) var(--space-2); font-size: var(--text-xs); }

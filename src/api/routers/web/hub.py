@@ -450,6 +450,19 @@ async def routes_page(request: Request):
     )
 
 
+@router.get("/_styleguide", response_class=HTMLResponse)
+async def styleguide_page(request: Request):
+    """Plano B / Fase 0 — tokens e componentes isolados. NÃO linkada no menu;
+    referência de construção, não toca nenhuma página real ainda."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/_styleguide.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
 @router.get("/agents", response_class=HTMLResponse)
 async def agents_page(request: Request):
     """Serve a página do catálogo de agentes (Agent Registry)."""

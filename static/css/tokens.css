@@ -1,0 +1,88 @@
+/* ============================================================================
+   tokens.css — Oráculo · console operacional (Plano B, §B)
+   ----------------------------------------------------------------------------
+   Fonte única de cor / tipo / espaço / raio / sombra. Nenhuma página deve
+   declarar hex, px solto ou família de fonte fora daqui.
+
+   Direção: painel de instrumento. Base grafite fria (não preto puro), UM
+   acento (laranja queimado dessaturado) usado só como sinal de estado/ação
+   — nunca decoração de fundo. Cor comunica estado (ok/atenção/erro/ativo);
+   se uma cor não diz isso, não deveria estar lá.
+   ========================================================================== */
+
+:root {
+  /* ── Superfícies (grafite frio) ─────────────────────────────────────── */
+  --ink-950: #0b0d10;   /* fundo base */
+  --ink-900: #12151a;   /* card / painel */
+  --ink-850: #171b21;   /* linha zebrada de tabela */
+  --ink-800: #1b1f26;   /* superfície elevada: hover, modal, dropdown */
+  --line:    #262b33;   /* bordas e divisores */
+  --line-strong: #333a44;
+
+  /* ── Texto ─────────────────────────────────────────────────────────── */
+  --paper:   #e8eaed;   /* texto primário (não branco puro) */
+  --ink-400: #9aa2b1;   /* texto secundário */
+  --ink-500: #7b8394;   /* legenda / placeholder */
+
+  /* ── Sinais (só estado, nunca decoração) ───────────────────────────── */
+  --signal:      #d97a3f;   /* ação primária, foco, estado "ativo" */
+  --signal-weak: #d97a3f26; /* fundo sutil do estado ativo (15%) */
+  --ok:     #3ba55c;
+  --warn:   #c9982e;
+  --danger: #d9483f;
+  --ok-weak:     #3ba55c1f;
+  --warn-weak:   #c9982e1f;
+  --danger-weak: #d9483f1f;
+
+  /* ── Tipografia ────────────────────────────────────────────────────── */
+  --font-ui:   "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-xs:  0.6875rem;  /* 11px — legendas, eyebrows */
+  --text-sm:  0.8125rem;  /* 13px — corpo denso, tabelas */
+  --text-md:  0.9375rem;  /* 15px — corpo */
+  --text-lg:  1.125rem;   /* 18px — título de painel */
+  --text-xl:  1.5rem;     /* 24px — título de página */
+
+  --weight-regular: 400;
+  --weight-medium:  500;
+  --weight-semi:    600;
+
+  --leading-tight: 1.25;
+  --leading-body:  1.55;
+  --tracking-eyebrow: 0.08em;
+
+  /* ── Espaço (grade de 8px — sem valores soltos) ────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ── Raio ──────────────────────────────────────────────────────────── */
+  --radius-card: 8px;    /* cards, inputs, painéis */
+  --radius-ctl:  6px;    /* botões, badges */
+  --radius-full: 999px;
+
+  /* ── Sombra (discreta — profundidade, não drama) ───────────────────── */
+  --shadow-panel:   0 1px 2px #0006;
+  --shadow-pop:     0 8px 24px -6px #0009, 0 2px 6px #0006;
+
+  /* ── Shell ─────────────────────────────────────────────────────────── */
+  --sidebar-w:          220px;
+  --sidebar-w-collapsed: 72px;
+  --topbar-h:           52px;
+  --content-max:        1280px;
+
+  --focus-ring: 0 0 0 2px var(--ink-950), 0 0 0 4px var(--signal);
+  --transition: 140ms ease;
+}
+
+/* O viewer/host pinta o próprio fundo atrás da página — body sempre explícito.
+   Tema único (dark): o console é usado em cabine, não alterna. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --transition: 0ms; }
+}

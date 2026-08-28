@@ -1,0 +1,52 @@
+/* layer-indicator.css — o elemento de assinatura (Plano B §B).
+   ----------------------------------------------------------------------------
+   O Supervisor resolve intenção em 5 camadas, da mais barata pra mais cara
+   (regras_negocio §8): regex → heurística → regex-config → semântica → LLM.
+   Esta régua de 5 segmentos mostra em qual camada a última decisão de
+   roteamento foi resolvida. É informação real do sistema, não enfeite —
+   e nenhum dashboard genérico teria isso.
+   ========================================================================== */
+
+.layer-rule {
+  display: inline-flex;
+  gap: 3px;
+  align-items: stretch;
+}
+
+.layer-rule__seg {
+  width: 26px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--ink-800);
+  border: 1px solid var(--line);
+  transition: background var(--transition), border-color var(--transition);
+}
+
+/* Camadas antes da resolvida: "atravessadas" (sutil). A resolvida: acento.
+   Depois dela: apagadas. */
+.layer-rule[data-layer="1"] .layer-rule__seg:nth-child(-n+1),
+.layer-rule[data-layer="2"] .layer-rule__seg:nth-child(-n+2),
+.layer-rule[data-layer="3"] .layer-rule__seg:nth-child(-n+3),
+.layer-rule[data-layer="4"] .layer-rule__seg:nth-child(-n+4),
+.layer-rule[data-layer="5"] .layer-rule__seg:nth-child(-n+5) {
+  background: var(--line-strong);
+  border-color: var(--line-strong);
+}
+.layer-rule[data-layer="1"] .layer-rule__seg:nth-child(1),
+.layer-rule[data-layer="2"] .layer-rule__seg:nth-child(2),
+.layer-rule[data-layer="3"] .layer-rule__seg:nth-child(3),
+.layer-rule[data-layer="4"] .layer-rule__seg:nth-child(4),
+.layer-rule[data-layer="5"] .layer-rule__seg:nth-child(5) {
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.layer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-400);
+}
+.layer-chip__name { color: var(--paper); }

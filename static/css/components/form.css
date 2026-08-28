@@ -1,0 +1,42 @@
+/* form.css — input / select / textarea / toggle + mensagem de erro (Plano B §F) */
+
+.field { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); }
+.field__label { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.field__hint { font-size: var(--text-xs); color: var(--ink-500); }
+.field__error { font-size: var(--text-xs); color: var(--danger); }
+
+.input, .select, .textarea {
+  width: 100%;
+  background: var(--ink-950);
+  color: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  transition: border-color var(--transition);
+}
+.input:hover, .select:hover, .textarea:hover { border-color: var(--ink-500); }
+.input:focus, .select:focus, .textarea:focus { border-color: var(--signal); box-shadow: none; outline: none; }
+.input:disabled, .select:disabled { opacity: 0.5; }
+.textarea { resize: vertical; min-height: 88px; line-height: var(--leading-body); }
+
+.field--invalid .input, .field--invalid .select, .field--invalid .textarea { border-color: var(--danger); }
+
+/* Toggle — liga/desliga; o rótulo diz o que ligar */
+.toggle { display: inline-flex; align-items: center; gap: var(--space-3); cursor: pointer; user-select: none; }
+.toggle input { position: absolute; opacity: 0; }
+.toggle__track {
+  width: 34px; height: 20px; border-radius: var(--radius-full);
+  background: var(--ink-800); border: 1px solid var(--line-strong);
+  position: relative; transition: background var(--transition), border-color var(--transition);
+  flex: none;
+}
+.toggle__track::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: var(--radius-full);
+  background: var(--ink-400); transition: transform var(--transition), background var(--transition);
+}
+.toggle input:checked + .toggle__track { background: var(--signal-weak); border-color: var(--signal); }
+.toggle input:checked + .toggle__track::after { transform: translateX(14px); background: var(--signal); }
+.toggle input:focus-visible + .toggle__track { box-shadow: var(--focus-ring); }
