@@ -1,145 +1,96 @@
-{% extends "hub/_base.html" %}
+{% extends "hub/_shell.html" %}
+{% block nav_active %}chat{% endblock %}
+{% block page_title %}Simular chat{% endblock %}
+
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/chat.css">{% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="/static/css/chat-debugger.css">
+<div class="cx-root" data-thread-id="{{ session_id }}">
 
-<div class="cx-root">
-  <div class="cx-chat">
-    <div class="cx-chat-hdr">
-      <div class="badge">● LIVE</div>
-      <div class="title">Oráculo UEMA — Cognitive OS</div>
-      <div class="cx-session" id="session-id-display">session: {{ session_id | truncate(18, True, '…') }}</div>
-    </div>
+  <section class="cx-chat">
+    <header class="cx-chat__hdr">
+      <span class="badge badge--ok">ao vivo</span>
+      <span class="cx-title">Cognitive OS — pipeline multi-agente</span>
+      <span class="cx-session">{{ session_id | truncate(22, True, '…') }}</span>
+    </header>
+    <div class="cx-progress" id="cx-progress"></div>
 
-    <div class="cx-messages" id="cx-messages">
-      <div class="cx-msg bot">
+    <div class="cx-messages" id="cx-messages" aria-live="polite" aria-atomic="false">
+      <div class="cx-msg cx-msg--bot">
         <div class="cx-avatar">OS</div>
         <div>
-          <div class="cx-bubble">Olá, <strong>{{ username }}</strong>. Cognitive OS ativo — pipeline multi-agente disponível.<br>Pergunte qualquer coisa sobre a UEMA.</div>
-          <div class="cx-meta">sistema · agora</div>
+          <div class="cx-bubble">Olá, <strong>{{ username }}</strong>. Cognitive OS ativo — mande uma pergunta e acompanhe o pipeline resolver à direita.</div>
+          <div class="cx-meta"><span class="badge badge--neutral">sistema</span></div>
         </div>
       </div>
     </div>
-    <div class="cx-typing" id="cx-typing">
-      <div class="cx-avatar" style="background:#1a2520;color:var(--green);border:1px solid #1e3828;">OS</div>
-      <div class="dots">
-        <div class="dot"></div><div class="dot"></div><div class="dot"></div>
-      </div>
-    </div>
 
-    <div class="cx-typing" id="cx-typing">
-      <div class="cx-avatar" style="background:#1a2520;color:var(--green);border:1px solid #1e3828;">OS</div>
-      <div class="dots">
-        <div class="dot"></div><div class="dot"></div><div class="dot"></div>
-      </div>
-    </div>
+    <div class="cx-say" id="cx-say" role="status" hidden>OS respondendo…</div>
 
     <div class="cx-input-row">
-      <textarea
-        id="cx-input"
-        class="cx-input"
-        placeholder="Escreva e pressione Enter…"
-        rows="1"
-      ></textarea>
-      <button class="cx-send" id="cx-send" onclick="window.sendMessage()">ENVIAR</button>
+      <textarea id="cx-input" class="cx-input" rows="1" placeholder="Escreva e pressione Enter…"></textarea>
+      <button class="btn btn--primary" id="cx-send">Enviar</button>
     </div>
-  </div>
+  </section>
 
-  <div class="cx-debug">
+  <aside class="cx-debug">
     <div class="cx-tabs">
-      <button class="cx-tab active" onclick="window.switchTab('pipeline', this)">Pipeline</button>
-      <button class="cx-tab" onclick="window.switchTab('charts', this)">Métricas</button>
-      <button class="cx-tab" onclick="window.switchTab('commands', this)">Comandos</button>
+      <button type="button" class="cx-tab active" data-tab="pipeline">Pipeline</button>
+      <button type="button" class="cx-tab" data-tab="metrics">Métricas</button>
+      <button type="button" class="cx-tab" data-tab="commands">Comandos</button>
     </div>
 
     <div class="cx-tab-content active" id="tab-pipeline">
       <div class="cx-pipeline" id="cx-pipeline">
-        <div class="cx-pipeline-empty" id="pipeline-empty">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/>
-          </svg>
-          Aguardando mensagem…
-        </div>
+        <div class="cx-pipeline-empty" id="pipeline-empty">Aguardando mensagem…</div>
       </div>
     </div>
 
-    <div class="cx-tab-content" id="tab-charts">
-      <div class="cx-charts">
+    <div class="cx-tab-content" id="tab-metrics">
+      <div class="cx-metrics">
         <div class="cx-stat-grid">
-          <div class="cx-stat">
-            <div class="cx-stat-value green" id="stat-total-ms">—</div>
-            <div class="cx-stat-label">Latência Total</div>
-          </div>
-          <div class="cx-stat">
-            <div class="cx-stat-value blue" id="stat-rota">—</div>
-            <div class="cx-stat-label">Última Rota</div>
-          </div>
-          <div class="cx-stat">
-            <div class="cx-stat-value yellow" id="stat-msgs">0</div>
-            <div class="cx-stat-label">Mensagens</div>
-          </div>
-          <div class="cx-stat">
-            <div class="cx-stat-value" id="stat-workers">—</div>
-            <div class="cx-stat-label">Workers</div>
-          </div>
+          <div class="cx-stat"><div class="cx-stat__value cx-stat__value--signal" id="stat-total-ms">—</div><div class="cx-stat__label">latência total</div></div>
+          <div class="cx-stat"><div class="cx-stat__value" id="stat-rota">—</div><div class="cx-stat__label">última rota</div></div>
+          <div class="cx-stat"><div class="cx-stat__value" id="stat-msgs">0</div><div class="cx-stat__label">mensagens</div></div>
+          <div class="cx-stat"><div class="cx-stat__value" id="stat-workers">—</div><div class="cx-stat__label">workers</div></div>
         </div>
         <div class="cx-chart-card">
-          <div class="cx-chart-label">Latência por Step (ms)</div>
-          <canvas id="chart-latency" class="cx-chart-canvas" height="160"></canvas>
+          <div class="cx-chart-card__label">latência por step (ms)</div>
+          <div class="cx-chart-card__canvas"><canvas id="chart-latency"></canvas></div>
         </div>
         <div class="cx-chart-card">
-          <div class="cx-chart-label">Distribuição de Rotas</div>
-          <canvas id="chart-routes" class="cx-chart-canvas" height="140"></canvas>
+          <div class="cx-chart-card__label">distribuição de rotas</div>
+          <div class="cx-chart-card__canvas"><canvas id="chart-routes"></canvas></div>
         </div>
       </div>
     </div>
 
     <div class="cx-tab-content" id="tab-commands">
       <div class="cx-commands">
-        <div class="cx-cmd-section">Perguntas Rápidas</div>
-        <button class="cx-cmd-btn" onclick="window.quickSend('Quando é a matrícula de veteranos 2026.1?')">
-          <span class="icon">📅</span> Matrícula veteranos 2026.1
-        </button>
-        <button class="cx-cmd-btn" onclick="window.quickSend('Quantas vagas tem Engenharia Civil no PAES 2026?')">
-          <span class="icon">📋</span> Vagas PAES 2026
-        </button>
-        <button class="cx-cmd-btn" onclick="window.quickSend('Qual o email do CTIC para suporte técnico?')">
-          <span class="icon">📞</span> Contato CTIC
-        </button>
-        <button class="cx-cmd-btn" onclick="window.quickSend('Oi')">
-          <span class="icon">👋</span> Teste saudação (GREETING)
-        </button>
+        <div class="cx-cmd-section">Perguntas rápidas</div>
+        <button type="button" class="btn cx-cmd-btn" data-send="Quando é a matrícula de veteranos 2026.1?">Matrícula veteranos 2026.1</button>
+        <button type="button" class="btn cx-cmd-btn" data-send="Quantas vagas tem Engenharia Civil no PAES 2026?">Vagas PAES 2026</button>
+        <button type="button" class="btn cx-cmd-btn" data-send="Qual o e-mail do CTIC para suporte técnico?">Contato CTIC</button>
+        <button type="button" class="btn cx-cmd-btn" data-send="Oi">Teste de saudação (GREETING)</button>
 
-        <div class="cx-cmd-section" style="margin-top:8px">Ações de Sistema</div>
-        <button class="cx-cmd-btn" onclick="window.apiAction('/api/admin/cache', 'DELETE', 'Cache limpo!')">
-          <span class="icon">🗑️</span> Limpar cache semântico
-          <span class="key">DELETE</span>
-        </button>
-        <button class="cx-cmd-btn" onclick="window.clearPipeline()">
-          <span class="icon">🔄</span> Limpar painel pipeline
-        </button>
-        <button class="cx-cmd-btn" onclick="window.clearChat()">
-          <span class="icon">💬</span> Limpar chat
-        </button>
+        <div class="cx-cmd-section">Ações de sistema</div>
+        <button type="button" class="btn cx-cmd-btn btn--danger" id="cmd-clear-cache">Limpar cache semântico <span class="cx-key">DELETE</span></button>
+        <button type="button" class="btn cx-cmd-btn" id="cmd-clear-pipeline">Limpar painel de pipeline</button>
+        <button type="button" class="btn cx-cmd-btn" id="cmd-clear-chat">Limpar conversa</button>
 
-        <div class="cx-cmd-section" style="margin-top:8px">Pergunta Customizada</div>
+        <div class="cx-cmd-section">Pergunta customizada</div>
         <div class="cx-cmd-custom">
-          <input type="text" class="cx-cmd-input" id="custom-query" placeholder="Digite uma query de teste…">
-          <button class="cx-cmd-run" onclick="window.runCustom()">▶ RUN</button>
+          <input type="text" class="input" id="custom-query" placeholder="Digite uma query de teste…">
+          <button type="button" class="btn btn--primary" id="cmd-run">Rodar</button>
         </div>
       </div>
     </div>
-  </div>
-</div>
+  </aside>
 
-<script>
-  window.APP_CONFIG = {
-    THREAD_ID: "{{ session_id }}"
-  };
-</script>
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="/static/js/chat-debugger.js?v=2"></script>
+<script src="/static/js/vendor/chart.min.js"></script>
+<script src="/static/js/pages/chat.js"></script>
 {% endblock %}

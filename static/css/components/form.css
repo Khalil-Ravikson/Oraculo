@@ -17,7 +17,10 @@
   transition: border-color var(--transition);
 }
 .input:hover, .select:hover, .textarea:hover { border-color: var(--ink-500); }
-.input:focus, .select:focus, .textarea:focus { border-color: var(--signal); box-shadow: none; outline: none; }
+/* :focus muda só a borda; o anel de foco de teclado vem do :focus-visible de
+   base.css (não suprimir com box-shadow:none — engolia o anel em todas as
+   páginas). */
+.input:focus, .select:focus, .textarea:focus { border-color: var(--signal); outline: none; }
 .input:disabled, .select:disabled { opacity: 0.5; }
 .textarea { resize: vertical; min-height: 88px; line-height: var(--leading-body); }
 
