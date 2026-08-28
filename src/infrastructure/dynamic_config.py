@@ -54,6 +54,8 @@ ALLOWED_DYNAMIC_KEYS: dict[str, str] = {
     "GEMINI_MODEL":                      "str",
     "RAG_CACHE_TTL_SECONDS":             "int",
     "RAG_RERANKER_ENABLED":              "bool",
+    "PARSER_PDF_PRIORIDADE":             "str",   # Fase 4
+    "PARSER_DESABILITADOS":              "str",   # Fase 4
 }
 
 _VERDADEIROS = {"1", "true", "t", "yes", "on", "sim"}
@@ -65,6 +67,7 @@ _FALSOS = {"0", "false", "f", "no", "off", "nao", "não"}
 # dar a falsa impressão de que editá-las tem efeito imediato.
 CHAVES_RECONECTADAS: frozenset[str] = frozenset({
     "GEMINI_MODEL", "RAG_CACHE_TTL_SECONDS", "RAG_RERANKER_ENABLED",
+    "PARSER_PDF_PRIORIDADE", "PARSER_DESABILITADOS",
 })
 
 

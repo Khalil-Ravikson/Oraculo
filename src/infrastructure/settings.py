@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     # /hub/config, sem restart).
     RAG_CACHE_TTL_SECONDS: int  = 3600
     RAG_RERANKER_ENABLED:  bool = True
+    # Fase 4: prioridade/enable de parser via config dinâmica (/hub/config).
+    PARSER_PDF_PRIORIDADE: str  = "docling,pymupdf"
+    PARSER_DESABILITADOS:  str  = ""
     LLAMA_CLOUD_API_KEY:  str = ""
     HF_TOKEN:             str = ""
     DATA_DIR:             str = "/app/dados"

@@ -208,16 +208,25 @@ class ParserFactory:
                 logger.info("📷 PDF scan detectado: %s → usando marker", os.path.basename(file_path))
                 candidates = ["marker", "rapidocr", "unstructured", "pymupdf"]
             else:
-                logger.info("📄 PDF com texto: %s → usando docling", os.path.basename(file_path))
-                candidates = ["docling", "pymupdf"]
+                # Plano A / Fase 4: ordem editável via /hub/config sem restart
+                # (PARSER_PDF_PRIORIDADE). Default = a ordem hardcoded de antes.
+                from src.infrastructure import dynamic_config
+                bruto = dynamic_config.get_str("PARSER_PDF_PRIORIDADE")
+                candidates = [c.strip() for c in bruto.split(",") if c.strip()] or ["docling", "pymupdf"]
+                logger.info("📄 PDF com texto: %s → prioridade %s", os.path.basename(file_path), candidates)
 
-        # DISABLE_DOCLING (settings): docling carrega modelos ML pesados no
-        # pre-load do worker — causa real de SIGKILL sob pressão de memória
-        # (notas.md §8.5/8.6). Sem esta flag, a única forma de desativar era
-        # desinstalar o pacote manualmente.
+        # Parsers desabilitados: PARSER_DESABILITADOS (config dinâmica) +
+        # settings.DISABLE_DOCLING (legado — docling carrega modelos ML
+        # pesados, causa de SIGKILL sob pressão de memória, notas.md §8.5).
+        from src.infrastructure import dynamic_config
         from src.infrastructure.settings import settings
-        if settings.DISABLE_DOCLING and "docling" in candidates:
-            candidates = [c for c in candidates if c != "docling"]
+        desabilitados = {
+            c.strip() for c in dynamic_config.get_str("PARSER_DESABILITADOS").split(",") if c.strip()
+        }
+        if settings.DISABLE_DOCLING:
+            desabilitados.add("docling")
+        if desabilitados:
+            candidates = [c for c in candidates if c not in desabilitados] or ["txt"]
 
         chosen_parser = None
         for parser_name in candidates:

@@ -16,11 +16,17 @@ import pytest
 from src.infrastructure import dynamic_config as dc
 from src.infrastructure.settings import settings
 
-_MIG = pathlib.Path(__file__).parents[3] / "migrations" / "versions" / "009_config_dinamica.py"
-_spec = importlib.util.spec_from_file_location("_migration_009", _MIG)
-_migration_009 = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_migration_009)
-SEED_009 = _migration_009._SEED  # [(chave, tipo, valor_default), ...]
+def _load_seed(nome: str):
+    p = pathlib.Path(__file__).parents[3] / "migrations" / "versions" / nome
+    spec = importlib.util.spec_from_file_location(nome.replace(".py", ""), p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return list(mod._SEED)
+
+
+# Seed acumulado das migrations que alimentam config_dinamica.
+SEED_009 = _load_seed("009_config_dinamica.py")
+SEED_TODAS = SEED_009 + _load_seed("011_config_parser.py")
 
 
 class _FakeRedisText:
@@ -146,7 +152,7 @@ def test_allowlist_defaults_e_seed_da_migration_batem():
     migration 009, os tipos de `ALLOWED_DYNAMIC_KEYS` e os defaults *de código*
     de `settings.py` (o default do campo pydantic — não a instância `settings`,
     que em runtime reflete o `.env` e pode legitimamente divergir)."""
-    seed = {chave: (tipo, valor) for chave, tipo, valor in SEED_009}
+    seed = {chave: (tipo, valor) for chave, tipo, valor in SEED_TODAS}
 
     assert set(seed) == set(dc.ALLOWED_DYNAMIC_KEYS)
     for chave, (tipo, valor) in seed.items():
