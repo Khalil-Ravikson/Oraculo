@@ -6,8 +6,9 @@ from src.graph.nodes.embeddings_node import EmbeddingsNode
 from src.graph.nodes.llm_node import LLMNode
 from src.graph.nodes.parser_node import ParserNode
 from src.graph.nodes.tool_node import ToolNode
-
-# Futuro (Fase 7-8): ChannelNode, MCPToolProviderNode
+from src.graph.nodes.channel_node import ChannelNode
+from src.graph.nodes.mcp_lab_node import MCPLabNode
+from src.graph.nodes.rest_lab_node import RestLabNode
 
 __all__ = [
     "STTNode",
@@ -16,4 +17,7 @@ __all__ = [
     "LLMNode",
     "ParserNode",
     "ToolNode",
+    "ChannelNode",
+    "MCPLabNode",
+    "RestLabNode",
 ]

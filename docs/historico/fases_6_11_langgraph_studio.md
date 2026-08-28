@@ -104,6 +104,22 @@ Cada aresta é um span do OpenTelemetry com `gen_ai.*` semântica.
 
 ### **Fase 7: Channel Abstraction (Telegram, Slack, etc.) — Inbound/Outbound Ports**
 
+> **Atualização 2026-08-28**: metade "saída" já implementada —
+> `ChannelNode` (`src/graph/nodes/channel_node.py`) envolve
+> `EvolutionAdapter` (WhatsApp) com ações `text`/`typing`/`media_url`,
+> registrado no NodeRegistry, visível em `/hub/graph-nodes`. **Inbound
+> (webhook) continua fora do modelo de nó** — decisão explícita: um
+> webhook HTTP é um *trigger* (evento externo que inicia um fluxo), não um
+> nó que se chama com `inputs` e devolve `outputs` no mesmo request, que é
+> o contrato de `BaseNode.execute()`. Hoje inbound continua em
+> `src/application/webhook/webhook_controller.py` (rota `POST
+> /webhook/evolution`) + task Celery, sem mudança. Modelar "trigger" como
+> conceito de grafo (distinto de "nó de execução") é decisão de design
+> ainda em aberto — não é só "criar mais um Node", é decidir se o
+> `BaseNode`/`NodeRegistry` atual sequer é o lugar certo pra isso, ou se
+> merece uma abstração irmã (`TriggerNode`/`EventSource`). Fica registrado
+> aqui pra não se perder, não decidido ainda.
+
 **O quê**: Generalizar EvolutionAdapter (WhatsApp) pra um pattern `ChannelNode` com porta de entrada (webhook de mensagem) e saída (send message).
 
 | Aspecto | Hoje | Amanhã |

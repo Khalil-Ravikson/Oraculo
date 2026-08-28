@@ -260,10 +260,11 @@ class TestGlobalRegistry:
         assert reg1 is reg2
 
     def test_get_registry_creates_on_first_call(self):
-        """Primeira chamada cria novo registry (já com os 6 nós conhecidos auto-registrados)."""
+        """Primeira chamada cria novo registry (já com os nós conhecidos auto-registrados)."""
         registry = get_registry()
         assert isinstance(registry, NodeRegistry)
-        assert registry.count() >= 6  # stt/tts/embeddings/llm/parser/tool
+        # stt/tts/embeddings/llm/parser/tool/channel_whatsapp/lab_mcp/lab_rest
+        assert registry.count() >= 9
 
     def test_reset_registry(self):
         """reset_registry limpa o global registry (nova instância, auto-registro roda de novo)."""

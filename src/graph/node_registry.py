@@ -215,10 +215,14 @@ def _auto_register_known_nodes(registry: NodeRegistry) -> None:
     provider pode ter dependência opcional não instalada, ex.: kokoro).
     """
     from src.graph.nodes import (
-        STTNode, TTSNode, EmbeddingsNode, LLMNode, ParserNode, ToolNode
+        STTNode, TTSNode, EmbeddingsNode, LLMNode, ParserNode, ToolNode,
+        ChannelNode, MCPLabNode, RestLabNode,
     )
 
-    for node_cls in (STTNode, TTSNode, EmbeddingsNode, LLMNode, ParserNode, ToolNode):
+    for node_cls in (
+        STTNode, TTSNode, EmbeddingsNode, LLMNode, ParserNode, ToolNode,
+        ChannelNode, MCPLabNode, RestLabNode,
+    ):
         try:
             registry.register(node_cls())
         except Exception as exc:
