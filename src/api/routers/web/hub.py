@@ -1069,6 +1069,32 @@ async def capabilities_toggle(request: Request, data: CapabilityToggleRequest):
     return {"ok": True, "agente": data.agente, "tool": data.tool, "habilitado": data.habilitado}
 
 
+@router.get("/graph-nodes", response_class=HTMLResponse)
+async def graph_nodes_page(request: Request):
+    """Serve a página somente-leitura do NodeRegistry (Camada 1 / Fase 6)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/graph-nodes.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/graph-nodes/data")
+async def graph_nodes_data(request: Request):
+    """Nós registrados no NodeRegistry (BaseNode: LLM/STT/TTS/Embeddings/
+    Parser/Tool, Camada 1 — ver docs/decision_camada1_nodes.md)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph.node_registry import get_registry
+
+    registry = get_registry()
+    return {"nodes": registry.list_nodes()}
+
+
 @router.get("/eval", response_class=HTMLResponse)
 async def eval_page(request: Request):
     """Serve a página HTML do Dashboard de Avaliação."""

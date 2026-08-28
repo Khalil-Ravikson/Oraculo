@@ -1,0 +1,30 @@
+{% extends "hub/_shell.html" %}
+{% block nav_active %}nodes{% endblock %}
+{% block page_title %}Graph Nodes{% endblock %}
+
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/graph-nodes.css">{% endblock %}
+
+{% block content %}
+<div class="node-view">
+<section class="section">
+  <div class="section__head">
+    <span class="eyebrow">registry de nós · Camada 1 (BaseNode)</span>
+    <a class="btn btn--ghost btn--sm" href="/hub/routes">Rotas →</a>
+  </div>
+
+  <p class="node-view__lead">
+    Todo provider (LLM, STT, TTS, Embeddings, Parser, Tool) exposto sob uma
+    interface comum tipada — este registry valida se dois nós podem se
+    conectar (tipo de porta de saída == tipo de porta de entrada) antes de um
+    grafo declarativo (adendo de nós, ainda não implementado) poder usá-los.
+    Somente leitura — nós são registrados em código, não editáveis aqui.
+  </p>
+
+  <div id="nodes" class="node-grid"><span class="caption">Carregando…</span></div>
+</section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/graph-nodes.js"></script>
+{% endblock %}
