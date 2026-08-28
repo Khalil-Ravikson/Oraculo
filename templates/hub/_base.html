@@ -1,25 +1,10 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    
-    <title>{% block title %}Oráculo UEMA — Sistema Central{% endblock %}</title>
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
-    
-    <link rel="stylesheet" href="/static/css/hub.css">
-    
-    {% block extra_css %}{% endblock %}
-</head>
-<body>
-
-    {% block content %}{% endblock %}
-
-
-    {% block scripts %}{% endblock %}
-    
-</body>
-</html>
+{# ============================================================================
+   _base.html — durante a migração do Plano B (§G), vira um alias fino de
+   `_shell.html` + `hub-bridge.css`. Páginas ainda não reescritas do zero
+   continuam `{% extends "hub/_base.html" %}` e já entram na casca nova
+   (sidebar + topbar + paleta de instrumento), com o conteúdo re-skinado
+   pela ponte. Quando todas forem reescritas, este arquivo + hub.css saem.
+   ========================================================================= #}
+{% extends "hub/_shell.html" %}
+{% block page_title %}Hub{% endblock %}
+{% block base_css %}<link rel="stylesheet" href="/static/css/hub-bridge.css">{% endblock %}

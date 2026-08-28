@@ -1,0 +1,109 @@
+/* ============================================================================
+   hub-bridge.css — ponte de migração (Plano B §G)
+   ----------------------------------------------------------------------------
+   Páginas ainda não reescritas do zero (config parcial, users, audit,
+   llm_custo, chunkviz, eval, chat, agent_prompt) usam classes/vars do
+   `hub.css` antigo dentro do seu `<style>` inline. Esta ponte remapeia esses
+   nomes para os tokens do Plano B — a página entra na casca `_shell.html` e
+   ganha a paleta nova sem uma reescrita completa do conteúdo.
+
+   Remover quando todas as páginas estiverem reescritas (junto com hub.css).
+   ========================================================================== */
+
+:root {
+  /* vars antigas → tokens novos. !important para vencer o `:root` inline que
+     as páginas ainda-não-reescritas declaram no seu <style>. */
+  --bg: var(--ink-950) !important;
+  --bg2: var(--ink-900) !important;
+  --surface: var(--ink-900) !important;
+  --surf: var(--ink-900) !important;
+  --surface2: var(--ink-800) !important;
+  --border: var(--line) !important;
+  --border-hover: var(--line-strong) !important;
+  --accent: var(--signal) !important;
+  --accent-dim: var(--signal-weak) !important;
+  --green: var(--ok) !important;
+  --red: var(--danger) !important;
+  --amber: var(--warn) !important;
+  --blue: #5a8dee !important;
+  --text: var(--paper) !important;
+  --txt: var(--paper) !important;
+  --muted: var(--ink-500) !important;
+  --mono: var(--font-mono) !important;
+}
+
+/* Header/brand/back-btn antigos: a casca já tem topbar+sidebar — esconde o
+   header duplicado que algumas páginas ainda renderizam. */
+.hub-header, .header > .brand, .header .brand { }
+header.header, .hub-header { display: none !important; }
+.back-btn { display: none !important; }
+
+/* Container antigo → largura do content da casca */
+.main, .hub-main { padding: 0 !important; max-width: none !important; margin: 0 !important; }
+
+/* Rótulos de seção antigos */
+.section-label {
+  font-family: var(--font-mono); font-size: var(--text-xs);
+  letter-spacing: var(--tracking-eyebrow); text-transform: uppercase;
+  color: var(--ink-500); margin-bottom: var(--space-4);
+  display: flex; align-items: center; gap: var(--space-2);
+}
+.section-label::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+/* Botões antigos */
+.btn-primary, .save-all-btn {
+  background: var(--signal); color: #17120e; border: 1px solid var(--signal);
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-ctl);
+  font-family: var(--font-ui); font-weight: var(--weight-semi); font-size: var(--text-sm);
+  cursor: pointer;
+}
+.btn-secondary, .btn-refresh, .pag-btn, .link-btn {
+  background: transparent; color: var(--ink-400);
+  border: 1px solid var(--line-strong); padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-ctl); font-family: var(--font-ui); font-size: var(--text-sm); cursor: pointer;
+}
+.btn-danger  { background: var(--danger-weak); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line)); border-radius: var(--radius-ctl); padding: var(--space-2) var(--space-3); cursor: pointer; }
+.btn-success { background: var(--ok-weak); color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--line)); border-radius: var(--radius-ctl); padding: var(--space-2) var(--space-3); cursor: pointer; }
+
+/* Cards / painéis antigos */
+.card, .config-card, .keys-panel, .tool-card, .agent-card, .workers-card,
+.stat-card, .tool-card, .log-entry, .kv-card, .prov-card {
+  background: var(--ink-900); border: 1px solid var(--line); border-radius: var(--radius-card);
+}
+
+/* Inputs antigos */
+.key-input, .config-textarea, .search-input, .filter-sel, .auth-input,
+.desc-edit input, .llm-edit select, .llm-edit input {
+  background: var(--ink-950); color: var(--paper); border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card); padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono); font-size: var(--text-sm);
+}
+
+/* Toast antigo */
+#toast {
+  position: fixed; bottom: var(--space-5); right: var(--space-5);
+  background: var(--ink-800); border: 1px solid var(--line-strong);
+  border-left: 2px solid var(--signal); border-radius: var(--radius-ctl);
+  padding: var(--space-3); font-family: var(--font-mono); font-size: var(--text-sm);
+  color: var(--paper); z-index: 80; opacity: 0; transform: translateY(6px);
+  transition: all var(--transition); pointer-events: none;
+}
+#toast.show { opacity: 1; transform: none; }
+
+/* Toggle switch antigo */
+.switch { position: relative; width: 34px; height: 20px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; inset: 0; cursor: pointer; background: var(--ink-800); border: 1px solid var(--line-strong); border-radius: var(--radius-full); transition: var(--transition); }
+.slider::before { content: ""; position: absolute; height: 14px; width: 14px; left: 2px; bottom: 2px; background: var(--ink-400); border-radius: var(--radius-full); transition: var(--transition); }
+input:checked + .slider { background: var(--signal-weak); border-color: var(--signal); }
+input:checked + .slider::before { transform: translateX(14px); background: var(--signal); }
+
+/* Tabs antigos (audit) */
+.tabs { display: flex; gap: 2px; background: var(--ink-900); border: 1px solid var(--line); border-radius: var(--radius-card); padding: var(--space-1); margin-bottom: var(--space-4); }
+.tab { flex: 1; text-align: center; padding: var(--space-2) var(--space-3); border-radius: var(--radius-ctl); cursor: pointer; font-family: var(--font-mono); font-size: var(--text-xs); text-transform: uppercase; color: var(--ink-500); }
+.tab.active { background: var(--signal-weak); color: var(--paper); border: 1px solid color-mix(in srgb, var(--signal) 30%, transparent); }
+
+/* Tabelas antigas */
+table { border-collapse: collapse; }
+th { color: var(--ink-500); font-family: var(--font-mono); font-size: var(--text-xs); text-transform: uppercase; }
+td, th { border-bottom: 1px solid var(--line); padding: var(--space-2) var(--space-3); }
