@@ -89,12 +89,24 @@ adendo fica só como registro.
 ## O que fazer a seguir (ordem sugerida)
 
 1. **Sign-off visual do Plano B** no browser (bloqueia "dado como pronto").
-2. **Decidir sobre o adendo de nós declarativos** — iniciar Camada 1
-   (`src/graph/` + `BaseNode` + `NodeRegistry`) ou arquivar a proposta.
-3. **Plano A Fases 6+ só quando houver gatilho** — demanda concreta (6–8) ou
-   evento de negócio (9–11). Nada a fazer proativamente.
+2. **Decidir sobre Camada 1 (BaseNode + NodeRegistry)** — ver `decision_camada1_nodes.md`
+   para contexto. Recomendação: **SIM, iniciar junto com Fase 6**. Desbloqueia
+   Fases 6–8 com alicerce sólido.
+3. **Roadmap completo das Fases 6–11** — ver `fases_6_11_langgraph_studio.md`
+   (novo documento). Detalha implementação, testes, Hub como "Graph Studio"
+   visual inspirado em LangGraph Studio.
 4. **Destravar a aposentadoria do `dispatcher.py`** quando
    `FEATURE_LANGGRAPH_NATIVE_ROUTES` puder ser validada em produção.
 
 Nada aqui está com trabalho em andamento — todos os pontos acima são
 inícios de fase, não continuações.
+
+---
+
+## Documentos relacionados (2026-08-28)
+
+- **`fases_6_11_langgraph_studio.md`** — Roadmap completo das próximas fases (6–11),
+  com inspiração visual/arquitetural em LangGraph Studio. Sequência, dependências,
+  gatilhos de decisão, impacto de código.
+- **`decision_camada1_nodes.md`** — Proposta de decisão: iniciar Camada 1
+  (BaseNode + NodeRegistry) agora? Contexto, benefícios, riscos, recomendação.

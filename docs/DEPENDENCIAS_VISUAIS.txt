@@ -1,0 +1,227 @@
+═══════════════════════════════════════════════════════════════════════════════
+ ORÁCULO — DEPENDÊNCIAS E SEQUÊNCIA DAS FASES
+═══════════════════════════════════════════════════════════════════════════════
+
+LEGENDA:
+  ✅  = Concluída, em produção
+  🟢  = Pronta, bloqueante (decisão aguardada)
+  🟡  = Adiada, desbloqueada por demanda ou evento de negócio
+  🟠  = Alto risco, requer validação forte
+  ⏳  = Condicional, não agendada
+
+═══════════════════════════════════════════════════════════════════════════════
+ PLANO A — PLATAFORMA ORIENTADA A CONFIGURAÇÃO
+═══════════════════════════════════════════════════════════════════════════════
+
+                              ┌─────────────────────┐
+                              │  FASES 1–5 ✅       │
+                              │  Concluídas         │
+                              │  - Config dinâmica  │
+                              │  - Route Registry   │
+                              │  - LLM Provider     │
+                              │  - Parser Registry  │
+                              │  - Tool Registry    │
+                              └──────────┬──────────┘
+                                         │
+                                         ▼
+                      ┌──────────────────────────────────┐
+                      │  ADENDO: CAMADA 1 🟢             │
+                      │  BaseNode + NodeRegistry         │
+                      │  ├─ DECISÃO: SIM ou NÃO?        │
+                      │  ├─ Tempo: 1–2 sprints          │
+                      │  └─ Bloqueia: Fases 6–8         │
+                      └──────────┬───────────────────────┘
+                                 │
+                    ┌────────────┴────────────┐
+                    │                         │
+                    ▼                         ▼
+        ┌───────────────────┐    ┌───────────────────┐
+        │  FASE 6 🟢         │    │ CAMADAS 2–3 🟡   │
+        │  STT/TTS/Embeddings│   │ Fan-out + Subgrafos│
+        │  ├─ Tempo: 2 sprint│   │ Condicional à     │
+        │  └─ Bloqueia: Fase 7   │ Camada 1 provar  │
+        └───────────┬────────┘    └──────────────────┘
+                    │
+                    ▼
+        ┌───────────────────────┐
+        │  FASE 7 🟡 (Canais)  │
+        │  Telegram/Slack/etc  │
+        │ ├─ Alto risco: SSRF  │
+        │ └─ Gatilho: demanda  │
+        └───────────┬───────────┘
+                    │
+                    ▼
+        ┌───────────────────────────┐
+        │  FASE 8 🟠 (MCP)         │
+        │  ├─ Pré-req: tool-calling│
+        │  │  nativo em main       │
+        │  ├─ Alto risco: SSRF     │
+        │  └─ Gatilho: demanda +   │
+        │     apresentação CETIC   │
+        └───────────┬───────────────┘
+                    │
+        ╔═══════════╩════════════╗
+        ║ Fases 6–8 Concluídas  ║
+        ║ → Hub é Graph Studio  ║
+        ║   (arrastar nós!)     ║
+        ╚═══════════╤════════════╝
+                    │
+                    ▼
+        ┌───────────────────────────────┐
+        │  FASE 9 ⏳ (Multi-Tenant)    │
+        │ ├─ Condicional: 2º cliente   │
+        │ ├─ Ativa isolamento real     │
+        │ └─ Tempo: 2–3 sprints       │
+        └───────────┬───────────────────┘
+                    │
+                    ▼
+        ┌───────────────────────────────┐
+        │  FASE 10 ⏳ (Secrets Manager) │
+        │ ├─ Condicional: compliance   │
+        │ ├─ Vault / KMS               │
+        │ └─ BYOK (bring your own key) │
+        └───────────┬───────────────────┘
+                    │
+                    ▼
+        ┌───────────────────────────────┐
+        │  FASE 11 ⏳ (Config-as-Code) │
+        │ ├─ Condicional: cliente pede │
+        │ ├─ YAML + GitOps + PR        │
+        │ └─ Tempo: 1–2 sprints       │
+        └───────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ PLANO B — FRONTEND (PARALELO AO PLANO A)
+═══════════════════════════════════════════════════════════════════════════════
+
+  FASES 0–5 ✅ CONCLUÍDAS
+  ├─ Design system novo (tokens, componentes)
+  ├─ Shell com sidebar + topbar
+  ├─ 14 rotas HTML migradas
+  ├─ Zero inline styles/scripts
+  └─ Sign-off visual (pendência não-bloqueante)
+
+  EXTENSÃO FUTURA (após Fases 6–8):
+  └─ Graph Studio Visual (/hub/graph-studio)
+     ├─ Canvas com nós/arestas
+     ├─ Arrastar/soltar
+     ├─ Visualizar fluxo ao vivo
+     └─ Inspiração: LangGraph Studio
+
+═══════════════════════════════════════════════════════════════════════════════
+ PRÉ-REQUISITOS (DEVEM ESTAR ✅ ANTES DE COMEÇAR)
+═══════════════════════════════════════════════════════════════════════════════
+
+Para Camada 1:
+  ✅ LangGraph issues resolvidas (event loop, resumption dupla)
+  ✅ RBAC testado na main
+  ⏳ Tool-calling nativo (google.genai com bind_tools) — pré-req de Fase 8
+
+Para Fase 6:
+  ✅ Camada 1 concluída
+  ✅ Testes de degradação (Postgres, Redis fora)
+  ✅ Testes de concorrência (duas escritas simultâneas)
+
+Para Fase 7:
+  ✅ Fase 6 concluída
+  ✅ SSRF validation framework pronto
+  ✅ Demanda concreta de suporte a Telegram/Slack
+
+Para Fase 8:
+  ✅ Fase 7 concluída (ou paralelizável)
+  ✅ Tool-calling nativo em main (hard requirement)
+  ✅ Security review de SSRF
+  ✅ Apresentação CETIC/UEMA (ou demanda de cliente)
+
+Para Fase 9:
+  ✅ Fases 6–8 concluídas
+  ✅ 2º cliente assinado OU decisão de negócio "Oráculo vira produto"
+  ✅ Separation de secrets por tenant (Fase 10 ou workaround)
+
+═══════════════════════════════════════════════════════════════════════════════
+ DECISÕES PENDENTES DO DONO
+═══════════════════════════════════════════════════════════════════════════════
+
+1️⃣  Camada 1 agora?
+    ├─ SIM  → Começa Sprint X, bloqueia até pronto
+    └─ NÃO  → Fases 6–8 adiadas indefinidamente
+
+2️⃣  Quando é "Oráculo vira produto"?
+    ├─ Não definido → Fases 9–11 são especulativas
+    └─ Definido → Usar como marcador de timeline
+
+3️⃣  Timeline realista?
+    └─ ~2 sprints/fase (6, 7, 8 sequenciais)
+       → Camada 1 + Fase 6 = 4 sprints
+       → Fase 7 + 8 = 4 sprints (paralelo possível)
+       → Fases 9–11 = ??? (sem demanda)
+
+═══════════════════════════════════════════════════════════════════════════════
+ IMPACTO DE CÓDIGO (Arquivos a tocar)
+═══════════════════════════════════════════════════════════════════════════════
+
+Camada 1:
+  + src/graph/base_node.py (novo)
+  + src/graph/node_registry.py (novo)
+  ✏️  src/infrastructure/adapters/llm_provider_registry.py (herdar BaseNode)
+  ✏️  src/graph/nodes/llm_node.py (novo ou refatorar)
+  ✏️  Todos os providers (herdar BaseNode)
+
+Fase 6:
+  + src/graph/nodes/stt_node.py (novo)
+  + src/graph/nodes/tts_node.py (novo)
+  + src/graph/nodes/embeddings_node.py (novo)
+  + tests/unit/graph/test_stt_tts_nodes.py (novo)
+  + templates/hub/graph-nodes.html (novo)
+
+Fase 7:
+  + src/graph/nodes/channel_node.py (novo)
+  + src/adapters/channels/ (novo dir)
+  + src/api/webhook.py (novo)
+  ✏️  src/gatekeeper.py (major refactor)
+  + tests/unit/graph/test_channel_nodes.py (novo)
+  + templates/hub/channels.html (novo)
+
+Fase 8:
+  + src/graph/nodes/mcp_node.py (novo)
+  + src/mcp_connection_manager.py (novo, de mcp_lab/)
+  + src/security/ssrf_validator.py (novo)
+  ✏️  src/infrastructure/adapters/llm_provider_registry.py (bind_tools)
+  + tests/unit/graph/test_mcp_nodes.py (novo)
+  + templates/hub/mcp-servers.html (novo)
+
+Hub (novas rotas):
+  /hub/graph-studio (editor visual) — Fase 6
+  /hub/graph-nodes (registry) — Fase 6
+  /hub/channels (gerenciar canais) — Fase 7
+  /hub/mcp-servers (MCP registry) — Fase 8
+  /hub/graph-history (versões) — Fase 6
+  /hub/graph-export (YAML/GitOps) — Fase 11
+
+═══════════════════════════════════════════════════════════════════════════════
+ LEITURA RECOMENDADA
+═══════════════════════════════════════════════════════════════════════════════
+
+Arquivo                              | Pra quê?
+─────────────────────────────────────┼──────────────────────────
+README_ROADMAP.md                    │ Começar aqui (30 seg)
+ROADMAP_EXECUTIVO.md                 │ Decisão (2 min)
+decision_camada1_nodes.md            │ Contexto da decisão
+fases_6_11_langgraph_studio.md        │ Detalhamento completo
+CHECKLIST_PRE_FASE_6.md              │ Validações antes de começar
+INDEX_ROADMAP_2026.md                │ Navegação por caso de uso
+DEPENDENCIAS_VISUAIS.txt             │ Este arquivo
+
+═══════════════════════════════════════════════════════════════════════════════
+ ESTADO (2026-08-28)
+═══════════════════════════════════════════════════════════════════════════════
+
+Plano A (Config):      Fases 1–5 ✅ | Fases 6–8 🟢 | Fases 9–11 🟡
+Plano B (Frontend):    Fases 0–5 ✅ | Graph Studio 🟡
+Adendo (Nós):          Camada 1 🟢 | Camadas 2–3 🟡
+Bloqueador:            DECISÃO: Camada 1 agora? (dono decide)
+
+═══════════════════════════════════════════════════════════════════════════════
+Última atualização: 2026-08-28
+Próxima revisão: Após decisão de Camada 1
+═══════════════════════════════════════════════════════════════════════════════
