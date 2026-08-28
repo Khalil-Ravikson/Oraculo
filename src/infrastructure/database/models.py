@@ -426,6 +426,32 @@ class GraphNodeConfig(Base):
     atualizado_por   = Column(String(100), nullable=True)
 
 
+class McpServer(Base):
+    """Registro admin de servidor MCP (migration 014, Fase 8 — "MCP
+    Connection Manager", primeira peça). Toda `url` gravada aqui já passou
+    por `ssrf_validator.validar_url_publica()` no momento do registro
+    (ver `src/graph/mcp_server_registry.py`). Ainda não há conexão real —
+    `mcp_lab/clients.py` continua com as 3 URLs hardcoded; esta tabela é
+    só o cadastro (dado), não está ligada à execução ainda."""
+    __tablename__ = "mcp_servers"
+    __table_args__ = (
+        Index(
+            "ux_mcp_servers_tenant_name", "tenant_id", "name",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id             = Column(Integer, primary_key=True)
+    name           = Column(String(80), nullable=False)
+    url            = Column(String(500), nullable=False)
+    description    = Column(String(500), server_default="", nullable=False)
+    habilitado     = Column(Boolean, server_default="true", nullable=False)
+    versao         = Column(Integer, server_default="1", nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por = Column(String(100), nullable=True)
+
+
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
 

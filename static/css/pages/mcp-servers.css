@@ -1,0 +1,35 @@
+/* mcp-servers.css — cadastro de servidores MCP (Fase 8). Form de registro
+   + tabela de listagem. Reusa .field/.input/.table dos componentes globais. */
+
+.mcp-view .mcp-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+  max-width: 920px;
+  margin-bottom: var(--space-4);
+}
+
+.mcp-view .mcp-form .field {
+  margin-bottom: 0;
+}
+
+.mcp-view .mcp-form .btn {
+  height: 38px;
+}
+
+.mcp-view .url-cell {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-400);
+  word-break: break-all;
+}
+
+.mcp-view .col-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.mcp-view .col-actions .btn {
+  margin-left: var(--space-1);
+}

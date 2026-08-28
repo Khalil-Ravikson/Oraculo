@@ -1,0 +1,52 @@
+{% extends "hub/_shell.html" %}
+{% block nav_active %}mcp{% endblock %}
+{% block page_title %}Servidores MCP{% endblock %}
+
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/mcp-servers.css">{% endblock %}
+
+{% block content %}
+<div class="mcp-view">
+<div class="card" style="border-left:2px solid var(--warn);margin-bottom:var(--space-5)">
+  <div class="card__desc" style="margin:0">
+    Cadastro (Fase 8, "MCP Connection Manager") — toda URL passa por
+    validação SSRF obrigatória antes de gravar (rejeita IP privado/
+    loopback/link-local/reservado, inclusive via resolução DNS). Ainda
+    não há conexão real: <code>mcp_lab/</code> continua com as 3 URLs
+    hardcoded do gateway pipeworx. Isto é só o cadastro (dado), sem
+    consumidor de produção ainda.
+  </div>
+</div>
+
+<section class="section">
+  <div class="section__head">
+    <span class="eyebrow">registrar servidor MCP</span>
+  </div>
+  <form id="register-form" class="mcp-form">
+    <div class="field">
+      <label class="field__label" for="f-name">Nome</label>
+      <input class="input" id="f-name" name="name" placeholder="ex: stackexchange" required>
+    </div>
+    <div class="field">
+      <label class="field__label" for="f-url">URL</label>
+      <input class="input" id="f-url" name="url" type="url" placeholder="https://gateway.exemplo.io/pack/mcp" required>
+    </div>
+    <div class="field">
+      <label class="field__label" for="f-desc">Descrição (opcional)</label>
+      <input class="input" id="f-desc" name="description" placeholder="O que este servidor expõe">
+    </div>
+    <button class="btn btn--primary" type="submit">Cadastrar</button>
+  </form>
+</section>
+
+<section class="section">
+  <div class="section__head">
+    <span class="eyebrow">servidores cadastrados</span>
+  </div>
+  <div id="servers" class="table-wrap"><span class="caption">Carregando…</span></div>
+</section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/mcp-servers.js"></script>
+{% endblock %}

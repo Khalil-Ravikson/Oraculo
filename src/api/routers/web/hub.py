@@ -1139,6 +1139,133 @@ async def graph_nodes_toggle(request: Request, data: GraphNodeToggleRequest):
     return {"ok": True, "node_id": data.node_id, "habilitado": data.habilitado}
 
 
+@router.get("/mcp-servers", response_class=HTMLResponse)
+async def mcp_servers_page(request: Request):
+    """Serve a página de cadastro de servidores MCP (Fase 8, Camada 2 de nós)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/mcp-servers.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/mcp-servers/data")
+async def mcp_servers_data(request: Request):
+    """Servidores MCP cadastrados (`mcp_servers`, migration 014)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph import mcp_server_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    servidores = []
+    try:
+        async with AsyncSessionLocal() as session:
+            servidores = await mcp_server_registry.listar(session)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler mcp_servers: %s", exc)
+
+    return {
+        "servers": [
+            {**s, "atualizado_em": s["atualizado_em"].isoformat() if s["atualizado_em"] else None}
+            for s in servidores
+        ]
+    }
+
+
+class McpServerRegisterRequest(BaseModel):
+    name:        str
+    url:         str
+    description: str = ""
+
+
+@router.post("/mcp-servers/register")
+async def mcp_servers_register(request: Request, data: McpServerRegisterRequest):
+    """Cadastra um novo servidor MCP — a URL passa por validação SSRF
+    obrigatória (`ssrf_validator.validar_url_publica`) antes de qualquer
+    escrita. Ainda não conecta de verdade (só cadastro, ver docstring de
+    `mcp_server_registry.py`)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph import mcp_server_registry
+    from src.infrastructure.security.ssrf_validator import URLInseguraError
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            registro = await mcp_server_registry.registrar(
+                session, data.name, data.url, data.description, admin=payload.sub,
+            )
+            await session.commit()
+    except URLInseguraError as exc:
+        return {"error": f"URL rejeitada: {exc}"}
+    except mcp_server_registry.NomeDuplicadoError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao registrar servidor MCP '%s': %s", data.name, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    return {"ok": True, **registro}
+
+
+class McpServerToggleRequest(BaseModel):
+    name:       str
+    habilitado: bool
+
+
+@router.post("/mcp-servers/toggle")
+async def mcp_servers_toggle(request: Request, data: McpServerToggleRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph import mcp_server_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await mcp_server_registry.set_habilitado(session, data.name, data.habilitado, admin=payload.sub)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao togglar servidor MCP '%s': %s", data.name, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    if not ok:
+        return {"error": f"Servidor '{data.name}' não existe."}
+    return {"ok": True, "name": data.name, "habilitado": data.habilitado}
+
+
+class McpServerRemoveRequest(BaseModel):
+    name: str
+
+
+@router.post("/mcp-servers/remove")
+async def mcp_servers_remove(request: Request, data: McpServerRemoveRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph import mcp_server_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await mcp_server_registry.remover(session, data.name)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao remover servidor MCP '%s': %s", data.name, exc)
+        return {"error": "Falha ao remover. Tente novamente."}
+
+    if not ok:
+        return {"error": f"Servidor '{data.name}' não existe."}
+    return {"ok": True, "name": data.name}
+
+
 @router.get("/eval", response_class=HTMLResponse)
 async def eval_page(request: Request):
     """Serve a página HTML do Dashboard de Avaliação."""
