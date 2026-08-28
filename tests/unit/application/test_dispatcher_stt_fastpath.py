@@ -122,7 +122,7 @@ async def test_transcrever_audio_timeout_retorna_none():
              new_callable=AsyncMock,
              return_value=None,
          ), \
-         patch("src.application.runtime.dispatcher._STT_TIMEOUT_S", 0.01):
+         patch("src.application.runtime.audio_intake._STT_TIMEOUT_S", 0.01):
         mock_gw = MagicMock()
         mock_gw.baixar_midia_base64 = AsyncMock(return_value=("YWJj", "audio/ogg", "x.ogg"))
         mock_gw_cls.return_value = mock_gw

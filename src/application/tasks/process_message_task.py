@@ -403,7 +403,7 @@ async def _handle_message_impl(**kwargs) -> None:
         # senão o LLM vê a frase completa e responde SOBRE o pedido de áudio
         # em vez de responder a pergunta de verdade (bug real de produção
         # encontrado testando ao vivo — ver notas.md seção 12).
-        from src.application.runtime.dispatcher import _quer_resposta_em_audio, _remover_pedido_audio
+        from src.application.runtime.audio_intake import _quer_resposta_em_audio, _remover_pedido_audio
         quer_audio = _quer_resposta_em_audio(text)
         mensagem = _remover_pedido_audio(text) if quer_audio else text
 

@@ -311,7 +311,7 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
 
     try:
         # 🔥 Usa o novo Cognitive OS em vez do Oracle Chain
-        from src.application.runtime.dispatcher import processar
+        from src.application.runtime.dispatcher_langgraph import processar
         result = await processar(
             message=question,
             session_id=unique_session_id,

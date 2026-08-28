@@ -46,7 +46,7 @@ async def test_audio_transcrito_antes_de_rotear_e_antes_do_grafo():
     fake_app.ainvoke = AsyncMock(return_value={"answer": "resposta do RAG"})
 
     with patch(
-        "src.application.runtime.dispatcher._transcrever_audio_recebido",
+        "src.application.runtime.audio_intake._transcrever_audio_recebido",
         new_callable=AsyncMock,
         return_value="estou com erro no sistema",
     ), patch(
@@ -77,7 +77,7 @@ async def test_transcricao_falha_retorna_erro_sem_chamar_grafo():
     user_context = {"media_type": "audioMessage", "msg_key_id": "MSG123"}
 
     with patch(
-        "src.application.runtime.dispatcher._transcrever_audio_recebido",
+        "src.application.runtime.audio_intake._transcrever_audio_recebido",
         new_callable=AsyncMock,
         return_value=None,
     ), patch(
@@ -123,7 +123,7 @@ async def test_delegacao_pra_dispatcher_original_recebe_media_type_limpo():
     fake_app.aget_state = AsyncMock(return_value=MagicMock(next=()))
 
     with patch(
-        "src.application.runtime.dispatcher._transcrever_audio_recebido",
+        "src.application.runtime.audio_intake._transcrever_audio_recebido",
         new_callable=AsyncMock,
         return_value="quero consultar meu histórico",
     ), patch(

@@ -13,7 +13,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 # 🔥 Importamos o novo orquestrador do sistema
-from src.application.runtime.dispatcher import processar
+from src.application.runtime.dispatcher_langgraph import processar
 
 logger = logging.getLogger(__name__)
 sse_router = APIRouter(prefix="/api/chain", tags=["chain-sse"])

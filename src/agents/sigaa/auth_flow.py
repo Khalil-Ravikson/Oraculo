@@ -28,7 +28,7 @@ import time
 import uuid
 from typing import Any
 
-from src.application.runtime.dispatcher import OSResult
+from src.application.runtime.contracts import OSResult
 from src.capabilities.persistence import redis_state
 
 logger = logging.getLogger(__name__)

@@ -1432,7 +1432,7 @@ async def eval_query(request: Request):
     queue: asyncio.Queue = asyncio.Queue()
 
     async def _run():
-        from src.application.runtime.dispatcher import processar
+        from src.application.runtime.dispatcher_langgraph import processar
         
         await queue.put(json.dumps({
             "tipo": "step_start", "step": "routing"

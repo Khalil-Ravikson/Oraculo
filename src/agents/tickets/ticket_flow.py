@@ -30,7 +30,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from src.application.runtime.dispatcher import OSResult
+from src.application.runtime.contracts import OSResult
 from src.capabilities.persistence import redis_state
 
 logger = logging.getLogger(__name__)

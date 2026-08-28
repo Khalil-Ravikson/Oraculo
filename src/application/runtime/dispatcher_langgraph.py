@@ -58,7 +58,7 @@ import asyncio
 import logging
 import time
 
-from src.application.runtime.dispatcher import OSResult
+from src.application.runtime.contracts import OSResult
 from src.application.runtime.dispatcher import processar as _processar_original
 
 logger = logging.getLogger(__name__)
@@ -217,7 +217,7 @@ async def processar(
     # contains an empty Part`, capturado/logado pelo SemanticCache mas sem
     # nunca transcrever o áudio de verdade). Ver notas.md seção 11.
     if user_context.get("media_type") == "audioMessage" and user_context.get("msg_key_id"):
-        from src.application.runtime.dispatcher import _transcrever_audio_recebido
+        from src.application.runtime.audio_intake import _transcrever_audio_recebido
         from src.infrastructure.redis_client import get_redis_text
 
         r_stt = get_redis_text()
