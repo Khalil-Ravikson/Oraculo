@@ -97,14 +97,18 @@ async def _get_graph():
         from langgraph_experiment.graph import build_graph
         from src.infrastructure.settings import settings
 
-        # Decisão 04 do plano de integração (Fase 2c): checkpointer isolado
-        # numa DB Redis dedicada, separada dos dados de negócio (DB/0) — antes
-        # disso usava settings.REDIS_URL direto, sem colisão de prefixo
-        # confirmada mas também sem isolamento consciente, só acidente de
-        # configuração padrão. Mesmo padrão de derivação de URL que
-        # celery_app.py já usa pro broker (/1) e result backend (/2).
-        checkpointer_url = settings.REDIS_URL.replace("/0", "/3")
-        _saver_cm = AsyncRedisSaver.from_conn_string(checkpointer_url)
+        # Decisão 04 (Fase 2c) tentou isolar o checkpointer numa DB Redis
+        # dedicada (/3), mesmo padrão de derivação que celery_app.py usa pro
+        # broker (/1) e result backend (/2) — mas AsyncRedisSaver usa
+        # RediSearch internamente pra indexar checkpoints (asetup() roda
+        # FT.CREATE), e o módulo RediSearch só cria índice na DB/0
+        # ("Cannot create index on db != 0", erro do servidor, confirmado em
+        # produção). Diferente do Celery (broker/result backend não usam
+        # RediSearch), o checkpointer é obrigado a ficar na mesma DB/0 do RAG
+        # (idx:rag:chunks/idx:tools) — sem colisão funcional real porque os
+        # prefixos de chave já são distintos (checkpoint:* vs rag:chunk:*/
+        # tools:emb:*).
+        _saver_cm = AsyncRedisSaver.from_conn_string(settings.REDIS_URL)
         saver = await _saver_cm.__aenter__()  # fechado explicitamente em on_worker_process_shutdown
         await saver.asetup()
         _graph = build_graph(saver)

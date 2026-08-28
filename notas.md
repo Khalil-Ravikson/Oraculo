@@ -2093,11 +2093,24 @@ vivos que a Decisão 02 pede não foi feito (sem Docker/Redis/Celery no
 ambiente onde isso foi implementado); fica pendente pro usuário rodar num
 ambiente real antes de considerar a Decisão 02 fechada de verdade.
 
-### 16.4 Fase 2c — checkpointer isolado (Decisão 04)
+### 16.4 Fase 2c — checkpointer isolado (Decisão 04) — **revertido em 2026-08-28**
 
-`AsyncRedisSaver` passa a usar `REDIS_URL` com DB `/3` em vez de `/0`
+`AsyncRedisSaver` passou a usar `REDIS_URL` com DB `/3` em vez de `/0`
 (mesmo padrão de derivação que `celery_app.py` já usa pro broker `/1` e
 result backend `/2`).
+
+**Revertido**: quebrou em produção com `Failed to create index 'checkpoint'
+on Redis: Cannot create index on db != 0` — erro do próprio módulo
+RediSearch (servidor), não bug de lib. `AsyncRedisSaver.asetup()` cria um
+índice RediSearch pros checkpoints (`FT.CREATE`), e RediSearch só cria
+índice na DB/0 (limitação conhecida, não documentada explicitamente no
+plano original da Decisão 04). Diferente do Celery — broker/result backend
+não usam RediSearch, então `/1`/`/2` continuam válidos — o checkpointer é
+obrigado a voltar pra DB/0, mesma do RAG (`idx:rag:chunks`/`idx:tools`).
+Sem colisão funcional real: prefixos de chave já são distintos
+(`checkpoint:*` vs `rag:chunk:*`/`tools:emb:*`). Código:
+`dispatcher_langgraph.py::_get_graph()`; teste atualizado em
+`test_langgraph_checkpointer_redis_db.py`.
 
 ### 16.5 Fase 2d — nodes nativos + achado de segurança não previsto no plano
 

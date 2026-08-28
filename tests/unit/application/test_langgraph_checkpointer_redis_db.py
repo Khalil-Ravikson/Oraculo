@@ -1,9 +1,15 @@
 # tests/unit/application/test_langgraph_checkpointer_redis_db.py
 """
-Fase 2c do plano de integração (Decisão 04): o checkpointer AsyncRedisSaver
-do LangGraph deve usar uma DB Redis dedicada (índice /3), separada da DB/0
-de dados de negócio — antes usava settings.REDIS_URL direto (DB/0, mesma
-dos dados reais), sem isolamento consciente.
+Reversão da Decisão 04 (Fase 2c): o checkpointer AsyncRedisSaver do
+LangGraph precisa ficar na MESMA DB/0 dos dados de negócio (RAG), não numa
+DB isolada (/3) como a Decisão 04 tentou. Motivo: AsyncRedisSaver.asetup()
+cria um índice RediSearch (FT.CREATE) para os checkpoints, e o módulo
+RediSearch só cria índice na DB/0 — usar /3 quebra com "Failed to create
+index 'checkpoint' on Redis: Cannot create index on db != 0" (erro do
+servidor, reproduzido em produção). Sem colisão funcional com o RAG porque
+os prefixos de chave já são distintos (checkpoint:* vs rag:chunk:*/
+tools:emb:*). Celery (broker /1, result backend /2) não é afetado porque
+não usa RediSearch.
 """
 from __future__ import annotations
 
@@ -24,7 +30,9 @@ def _reset_graph_singleton():
 
 
 @pytest.mark.asyncio
-async def test_get_graph_usa_db_redis_dedicada_pro_checkpointer(monkeypatch):
+async def test_get_graph_usa_mesma_db_do_redis_url_pro_checkpointer(monkeypatch):
+    """AsyncRedisSaver precisa da DB/0 (RediSearch só indexa lá) — mesma DB
+    usada por settings.REDIS_URL, sem rebind pra /3."""
     from src.infrastructure import settings as settings_module
 
     monkeypatch.setattr(settings_module.settings, "REDIS_URL", "redis://redis:6379/0")
@@ -43,4 +51,4 @@ async def test_get_graph_usa_db_redis_dedicada_pro_checkpointer(monkeypatch):
         graph = await dlg._get_graph()
 
     assert graph == "grafo-fake"
-    async_redis_saver_cls.from_conn_string.assert_called_once_with("redis://redis:6379/3")
+    async_redis_saver_cls.from_conn_string.assert_called_once_with("redis://redis:6379/0")
