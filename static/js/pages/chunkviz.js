@@ -27,12 +27,12 @@ const COLORS = [
 
 const PARSER_HINTS = {
   auto:         'Detecta automaticamente pelo formato do arquivo',
-  pymupdf:      '⚡ Rápido — ideal para PDFs com texto nativo',
-  llamaparse:   '☁️ Nuvem — Tabelas e IA (Requer internet e API Key)',
-  marker:       '🧠 ML — para PDFs com tabelas ou layout complexo (mais lento)',
-  docling:      '📊 IBM Docling — layout-aware, ótimo para DOCX e editais',
-  csv:          '📋 CSV Semântico — transforma linhas em frases',
-  txt:          '📝 Texto puro — sem processamento especial',
+  pymupdf:      'Rápido — ideal para PDFs com texto nativo',
+  llamaparse:   'Nuvem — Tabelas e IA (Requer internet e API Key)',
+  marker:       'ML — para PDFs com tabelas ou layout complexo (mais lento)',
+  docling:      'IBM Docling — layout-aware, ótimo para DOCX e editais',
+  csv:          'CSV Semântico — transforma linhas em frases',
+  txt:          'Texto puro — sem processamento especial',
 };
 
 /* ─── INIT ──────────────────────────────────────────── */
@@ -47,13 +47,12 @@ function _loadPrefs() {
     if (p.size)     { S.size    = p.size;    $('cv-size').value    = p.size;    $v('cv-sizeval',  p.size);  }
     if (p.overlap)  { S.overlap = p.overlap; $('cv-overlap').value = p.overlap; $v('cv-ovlapval', p.overlap); }
     if (p.strategy) { S.strategy = p.strategy; $('cv-strategy').value = p.strategy; }
-    if (p.docType)  { S.docType  = p.docType;  $('cv-doctype').value  = p.docType;  }
-    if (p.parser)   { S.parser   = p.parser;   $('cv-parser').value   = p.parser;
+    if (p.docType)  { S.docType  = p.docType; }
+    if (p.parser)   { S.parser = p.parser; $('cv-parser').value = p.parser; $v('cv-parserhint', PARSER_HINTS[p.parser] || ''); }
     if (p.eixo)   { S.eixo   = p.eixo;   $('cv-eixo').value   = p.eixo;   }
     if (p.setor)  { S.setor  = p.setor;  $('cv-setor').value  = p.setor;  }
     if (p.campus) { S.campus = p.campus; $('cv-campus').value = p.campus; }
     if (p.ano)    { S.ano    = p.ano;    $('cv-ano').value    = p.ano;    }
-                      $v('cv-parserhint', PARSER_HINTS[p.parser] || ''); }
   } catch(_) {}
 }
 
@@ -68,7 +67,7 @@ function _savePrefs() {
 function showWarning(msg) {
   const w = $('cv-parser-warning');
   if (!w) return;
-  $('cv-parser-warning-msg').textContent = `⚠️ ${msg}`;
+  $('cv-parser-warning-msg').textContent = `${msg}`;
   w.style.display = 'flex';
 }
 
@@ -154,9 +153,9 @@ async function _upload(file) {
     S.ingestMode = 'page';
     _updateIngestButton();
     _updateSrcStats();
-    badge('ok', `✅ ${d.name}`);
+    badge('ok', `${d.name}`);
     _schedSim();
-  } catch(e) { badge('err', `❌ ${e.message}`); }
+  } catch(e) { badge('err', `${e.message}`); }
 }
 /* ─── FEATURE 1: MULTIPLE PAGE SELECTION ────────────── */
 function _buildStrip(pages) {
@@ -213,9 +212,9 @@ async function loadSelectedPages() {
     S.ingestMode = 'selected';
     _updateIngestButton();
     _updateSrcStats();
-    badge('ok', `✅ ${S.selectedPages.size} páginas prontas para chunk`);
+    badge('ok', `${S.selectedPages.size} páginas prontas para chunk`);
     _schedSim();
-  } catch(e) { badge('err', `❌ ${e.message}`); }
+  } catch(e) { badge('err', `${e.message}`); }
 }
 
 async function gotoPage(idx) {
@@ -233,9 +232,9 @@ async function gotoPage(idx) {
     S.ingestMode = 'page';
     _updateIngestButton();
     _updateSrcStats();
-    badge('ok', `✅ Pág. ${idx+1}/${S.pageCount}`);
+    badge('ok', `Pág. ${idx+1}/${S.pageCount}`);
     _schedSim();
-  } catch(e) { badge('err', `❌ ${e.message}`); }
+  } catch(e) { badge('err', `${e.message}`); }
 }
 
 async function loadFullDoc() {
@@ -249,9 +248,9 @@ async function loadFullDoc() {
     S.ingestMode = 'all';
     _updateIngestButton();
     _updateSrcStats();
-    badge('ok', `✅ Doc completo — ${S.text.length.toLocaleString()} chars`);
+    badge('ok', `Doc completo — ${S.text.length.toLocaleString()} chars`);
     _schedSim();
-  } catch(e) { badge('err', `❌ ${e.message}`); }
+  } catch(e) { badge('err', `${e.message}`); }
 }
 
 function prevPage() { gotoPage(S.curPage - 1); }
@@ -261,15 +260,15 @@ function _updateIngestButton() {
   const btn = $('cv-bingest');
   if (!btn) return;
   if (S.source !== 'file') {
-    btn.innerHTML = '💾 Ingerir ao Redis';
+    btn.innerHTML = 'Ingerir ao Redis';
     return;
   }
   if (S.ingestMode === 'all') {
-    btn.innerHTML = '💾 Ingerir DOC INTEIRO';
+    btn.innerHTML = 'Ingerir DOC INTEIRO';
   } else if (S.ingestMode === 'selected') {
-    btn.innerHTML = `💾 Ingerir ${S.selectedPages.size} PÁGS`;
+    btn.innerHTML = `Ingerir ${S.selectedPages.size} PÁGS`;
   } else {
-    btn.innerHTML = `💾 Ingerir SÓ PÁG ${S.curPage+1}`;
+    btn.innerHTML = `Ingerir SÓ PÁG ${S.curPage+1}`;
   }
 }
 
@@ -302,7 +301,7 @@ function _updateSrcStats() {
 async function fetchUrl() {
   const url = $('cv-urlinput').value.trim();
   if (!url) return;
-  badge('busy', '🌐 Fazendo scraping…');
+  badge('busy', 'Fazendo scraping…');
   $v('cv-urlmeta', 'Conectando…');
   try {
     const fd = new FormData();
@@ -313,12 +312,12 @@ async function fetchUrl() {
     S.ingestMode = 'all';
     _updateIngestButton();
     _updateSrcStats();
-    $v('cv-urlmeta', `✅ ${d.title || url} · ${d.total_chars.toLocaleString()} chars`);
-    badge('ok', '✅ Scraping OK');
+    $v('cv-urlmeta', `${d.title || url} · ${d.total_chars.toLocaleString()} chars`);
+    badge('ok', 'Scraping OK');
     _schedSim();
   } catch(e) {
-    $v('cv-urlmeta', `❌ ${e.message}`);
-    badge('err', `❌ ${e.message}`);
+    $v('cv-urlmeta', `${e.message}`);
+    badge('err', `${e.message}`);
   }
 }
 
@@ -327,7 +326,6 @@ function sizeChanged(v)    { S.size    = +v; $v('cv-sizeval',  v); _savePrefs();
 function overlapChanged(v) { S.overlap = +v; $v('cv-ovlapval', v); _savePrefs(); _schedSim(); }
 function settingChanged()  {
   S.strategy = $('cv-strategy').value;
-  S.docType  = $('cv-doctype').value;
   S.eixo     = $('cv-eixo').value;
   S.setor    = $('cv-setor').value;
   S.campus   = $('cv-campus').value;
@@ -358,7 +356,7 @@ async function simulate() {
   const btn = $('cv-bsim');
   btn.disabled = true;
   btn.innerHTML = '<span class="cv-spin"></span>Calculando…';
-  badge('busy', '⚙️ Simulando…');
+  badge('busy', 'Simulando…');
   try {
     const d = await _post('/hub/chunkviz/simulate', {
       text:S.text, size:S.size, overlap:S.overlap,
@@ -374,12 +372,12 @@ async function simulate() {
     $('cv-bingest').style.display = (S.fileId || S.source === 'text') ? '' : 'none';
     $('cv-empty').style.display = 'none';
     renderView();
-    badge('ok', `✅ ${d.total} chunks`);
+    badge('ok', `${d.total} chunks`);
   } catch(e) {
-    badge('err', `❌ ${e.message}`);
+    badge('err', `${e.message}`);
   } finally {
     btn.disabled = false;
-    btn.textContent = '▶ Simular';
+    btn.textContent = 'Simular';
   }
 }
 
@@ -477,7 +475,7 @@ async function ingest() {
   $('cv-ingprog').style.display = '';
   $v('cv-proglbl', 'Iniciando ingestão…');
   $('cv-progfill').style.width = '8%';
-  badge('busy', '💾 Ingerindo…');
+  badge('busy', 'Ingerindo…');
   
   try {
     let d;
@@ -512,7 +510,7 @@ async function ingest() {
   } catch(e) {
     $('cv-ingprog').style.display = 'none';
     btn.disabled = false;
-    badge('err', `❌ ${e.message}`);
+    badge('err', `${e.message}`);
   }
 }
 
@@ -526,12 +524,12 @@ async function _pollTask(tid, btn, polls=0) {
     if (d.state === 'SUCCESS') {
       $('cv-progfill').style.width = '100%';
       const r = d.result || {};
-      $v('cv-proglbl', `✅ ${r.chunks||'?'} chunks salvos em ${r.ms||'?'}ms`);
-      badge('ok', `✅ ${r.chunks||'?'} chunks no Redis`);
+      $v('cv-proglbl', `${r.chunks||'?'} chunks salvos em ${r.ms||'?'}ms`);
+      badge('ok', `${r.chunks||'?'} chunks no Redis`);
       btn.disabled = false; return;
     }
     if (d.state === 'FAILURE') {
-      $v('cv-proglbl', `❌ ${d.error}`); badge('err','❌ Falhou'); btn.disabled=false; return;
+      $v('cv-proglbl', `${d.error}`); badge('err','Falhou'); btn.disabled=false; return;
     }
     setTimeout(() => _pollTask(tid, btn, polls+1), 2000);
   } catch(_) { setTimeout(() => _pollTask(tid, btn, polls+1), 3000); }

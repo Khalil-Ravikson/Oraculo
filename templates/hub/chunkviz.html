@@ -1,165 +1,83 @@
-{% extends "hub/_base.html" %}
+{% extends "hub/_shell.html" %}
+{% block nav_active %}chunk{% endblock %}
+{% block page_title %}Chunks (RAG){% endblock %}
 
-{% block title %}ChunkViz — Oráculo UEMA{% endblock %}
-
-{% block extra_css %}
-<link rel="stylesheet" href="/static/css/chunkviz.css">
-<style>
-  /* ── Avisos e Alertas ── */
-  .cv-warn {
-    background: rgba(255, 183, 0, 0.15);
-    border: 1px solid rgba(255, 183, 0, 0.4);
-    border-left: 4px solid #ffb700;
-    padding: 10px 14px;
-    margin-bottom: 16px;
-    font-size: 13px;
-    color: var(--cv-text);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-radius: 4px;
-  }
-  .cv-warn-close { 
-    cursor: pointer; color: #ffb700; font-size: 18px; 
-    line-height: 1; padding-left: 10px; opacity: 0.7;
-  }
-  .cv-warn-close:hover { opacity: 1; }
-
-  /* ── Botões Secundários (Novo / Selecionar) ── */
-  .cv-btn-outline {
-    background: transparent;
-    border: 1px solid var(--cv-border);
-    color: var(--cv-text);
-    padding: 6px 12px;
-    font-size: 11px;
-    font-weight: 600;
-    border-radius: 4px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    transition: all 0.2s ease;
-  }
-  .cv-btn-outline:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: var(--cv-text);
-  }
-  .cv-btn-outline.danger:hover {
-    background: rgba(239, 68, 68, 0.1);
-    border-color: #ef4444;
-    color: #ef4444;
-  }
-
-  /* ── Miniaturas de Página (Scroll e Checkboxes) ── */
-  .cv-pgstrip {
-    display: flex;
-    overflow-x: auto;
-    gap: 8px;
-    padding-bottom: 8px;
-    /* Estilização da barra de rolagem para caber muitas páginas */
-    scrollbar-width: thin;
-    scrollbar-color: var(--cv-border) transparent;
-  }
-  .cv-pgstrip::-webkit-scrollbar { height: 6px; }
-  .cv-pgstrip::-webkit-scrollbar-thumb { background: var(--cv-border); border-radius: 3px; }
-
-  .cv-pgthumb { 
-    position: relative; 
-    min-width: 32px; /* Garante que não esprema */
-  }
-  .cv-pgthumb-check { 
-    position: absolute; 
-    top: -6px; right: -6px; 
-    transform: scale(0.9); 
-    cursor: pointer;
-    accent-color: var(--accent, #ff6b35);
-    z-index: 2;
-  }
-</style>
-{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/chunkviz.css">{% endblock %}
 
 {% block content %}
-<header>
-  <div class="logo">
-    <div class="logo-icon" style="font-size:20px">🧩</div>
-    <div class="logo-text">
-      <h1>ChunkViz</h1>
-      <span>VISUALIZADOR INTERATIVO DE INGESTÃO</span>
-    </div>
-  </div>
-  <div class="header-right" style="display:flex;align-items:center;gap:12px">
-    <span id="cv-badge" class="cv-badge">Aguardando</span>
-    <a href="/hub/" style="color:var(--accent,#ff6b35);text-decoration:none;border:1px solid currentColor;padding:4px 12px;font-family:monospace;font-size:11px;border-radius:4px">← Hub</a>
-  </div>
-</header>
+<div class="section__head">
+  <span class="eyebrow">simulador de chunking &amp; ingestão · modelo {{ modelo }}</span>
+  <span id="cv-badge" class="cv-badge">Aguardando</span>
+</div>
 
 <div class="cv-root">
 
   <aside class="cv-sidebar">
 
     <div class="cv-tabs">
-      <button class="cv-tab active" data-src="file"  onclick="CV.setSource('file')">📄 Arquivo</button>
-      <button class="cv-tab"        data-src="text"  onclick="CV.setSource('text')">✏️ Texto</button>
-      <button class="cv-tab"        data-src="url"   onclick="CV.setSource('url')">🌐 URL</button>
+      <button class="cv-tab active" data-src="file" onclick="CV.setSource('file')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg> Arquivo
+      </button>
+      <button class="cv-tab" data-src="text" onclick="CV.setSource('text')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg> Texto
+      </button>
+      <button class="cv-tab" data-src="url" onclick="CV.setSource('url')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg> URL
+      </button>
     </div>
 
     <div class="cv-panel" id="cv-panel-file">
-      
+
       <div id="cv-parser-warning" class="cv-warn" style="display:none;">
         <div id="cv-parser-warning-msg"></div>
-        <div class="cv-warn-close" onclick="this.parentElement.style.display='none'">×</div>
+        <button type="button" class="cv-warn-close" aria-label="Fechar aviso" onclick="this.parentElement.style.display='none'">&times;</button>
       </div>
 
-      <div style="margin-bottom: 16px;">
+      <div>
         <label class="cv-lbl">Extrator de PDF</label>
         <select id="cv-parser" class="cv-sel" onchange="CV.parserChanged()">
-          <option value="pymupdf" selected>⚡ PyMuPDF — Texto nativo (rápido)</option>
-          <option value="llamaparse">☁️ LlamaParse — Nuvem (Tabelas perfeitas)</option>
-          <option value="docling">📊 Docling IBM — Layout complexo</option>
-          <option value="marker">🧠 Marker ML — PDF→Markdown</option>
-          <option value="csv">📋 CSV Semântico — Linhas em frases</option>
-          <option value="txt">📝 Texto puro — .txt / .md</option>
-          <option value="auto">🤖 Auto-detect</option>
+          <option value="pymupdf" selected>PyMuPDF — texto nativo (rápido)</option>
+          <option value="llamaparse">LlamaParse — nuvem (tabelas perfeitas)</option>
+          <option value="docling">Docling IBM — layout complexo</option>
+          <option value="marker">Marker ML — PDF → Markdown</option>
+          <option value="csv">CSV semântico — linhas em frases</option>
+          <option value="txt">Texto puro — .txt / .md</option>
+          <option value="auto">Auto-detect</option>
         </select>
-        <div id="cv-parserhint" class="cv-hint" style="margin-top: 4px;">Rápido — ideal para PDFs com texto nativo</div>
+        <div id="cv-parserhint" class="cv-hint" style="margin-top:var(--space-1)">Rápido — ideal para PDFs com texto nativo</div>
       </div>
 
       <div class="cv-dropzone" id="cv-dz"
            ondragover="CV.dzOver(event)" ondragleave="CV.dzLeave(event)"
            ondrop="CV.dzDrop(event)"
            onclick="document.getElementById('cv-fi').click()">
-        <div style="font-size:28px;margin-bottom:6px">📁</div>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 13v8M8 17l4 4 4-4"/><path d="M20 16.6A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 4 15.2"/></svg>
         <div class="cv-dz-title">Arraste ou clique para enviar</div>
         <div class="cv-dz-sub">PDF · DOCX · TXT · MD · CSV · HTML — máx. 50 MB</div>
       </div>
       <input id="cv-fi" type="file" accept=".pdf,.docx,.txt,.md,.csv,.html,.htm" hidden onchange="CV.fileSelected(event)">
 
       <div id="cv-fileinfo" style="display:none" class="cv-fileinfo">
-        
-        <div class="cv-row" style="align-items: flex-start; justify-content: space-between; margin-bottom: 12px;">
-          <div style="max-width: 70%;">
-            <div id="cv-fname" class="cv-fname" style="word-break: break-all;">–</div>
-            <div id="cv-fmeta" class="cv-fmeta" style="margin-top: 4px;">–</div>
+
+        <div class="cv-row" style="flex-direction:row;align-items:flex-start;justify-content:space-between">
+          <div style="max-width:70%">
+            <div id="cv-fname" class="cv-fname">–</div>
+            <div id="cv-fmeta" class="cv-fmeta" style="margin-top:var(--space-1)">–</div>
           </div>
           <button class="cv-btn-outline danger" onclick="CV.resetDocument()" title="Remover e enviar outro arquivo">
-            <span>🗑️</span> Novo
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg> Novo
           </button>
         </div>
 
         <div id="cv-pagenav" style="display:none" class="cv-pagenav">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <button class="cv-pgbtn" onclick="CV.prevPage()" title="Anterior">‹</button>
-            <span style="font-size: 12px;">Pág. <strong id="cv-pgcur">1</strong>/<span id="cv-pgtot">?</span></span>
-            <button class="cv-pgbtn" onclick="CV.nextPage()" title="Próxima">›</button>
+          <div style="display:flex;align-items:center;gap:var(--space-2)">
+            <button class="cv-pgbtn" onclick="CV.prevPage()" title="Anterior">&lsaquo;</button>
+            <span style="font-size:var(--text-xs)">Pág. <strong id="cv-pgcur">1</strong>/<span id="cv-pgtot">?</span></span>
+            <button class="cv-pgbtn" onclick="CV.nextPage()" title="Próxima">&rsaquo;</button>
           </div>
-          
-          <div style="display: flex; gap: 4px; margin-left: auto;">
-            <button class="cv-btn-outline" style="padding: 4px 8px; font-size: 10px;" onclick="CV.loadSelectedPages()">
-              ✓ Selecionadas
-            </button>
-            <button class="cv-btn-outline" style="padding: 4px 8px; font-size: 10px;" onclick="CV.loadFullDoc()">
-              Todas
-            </button>
+          <div style="display:flex;gap:var(--space-1);margin-left:auto">
+            <button class="cv-btn-outline" style="padding:var(--space-1) var(--space-2)" onclick="CV.loadSelectedPages()">Selecionadas</button>
+            <button class="cv-btn-outline" style="padding:var(--space-1) var(--space-2)" onclick="CV.loadFullDoc()">Todas</button>
           </div>
         </div>
 
@@ -174,8 +92,8 @@
 
     <div class="cv-panel" id="cv-panel-url" style="display:none">
       <input id="cv-urlinput" class="cv-input" placeholder="https://..." onkeydown="if(event.key==='Enter')CV.fetchUrl()">
-      <button class="cv-btn cv-btn-accent" style="width:100%;margin-top:8px" onclick="CV.fetchUrl()">🌐 Extrair</button>
-      <div id="cv-urlmeta" class="cv-hint" style="margin-top:8px"></div>
+      <button class="cv-btn cv-btn-accent" style="width:100%;margin-top:var(--space-2)" onclick="CV.fetchUrl()">Extrair</button>
+      <div id="cv-urlmeta" class="cv-hint" style="margin-top:var(--space-2)"></div>
     </div>
 
     <div id="cv-srcstats" class="cv-srcstats" style="display:none">
@@ -191,100 +109,96 @@
       <div class="cv-ctrl">
         <label class="cv-lbl">Estratégia</label>
         <select id="cv-strategy" class="cv-sel" onchange="CV.settingChanged()">
-          <option value="recursive">🔄 Recursive</option>
-          <option value="markdown">📑 Markdown</option>
+          <option value="recursive">Recursive</option>
+          <option value="markdown">Markdown</option>
         </select>
       </div>
 
       <div class="cv-ctrl">
-  <label class="cv-lbl">Eixo</label>
-  <select id="cv-eixo" class="cv-sel" onchange="CV.settingChanged()">
-    <option value="Institucional">Institucional</option>
-    <option value="Ensino">Ensino</option>
-    <option value="Pesquisa">Pesquisa</option>
-    <option value="Extensao">Extensão</option>
-    <option value="Sistemas">Sistemas</option>
-    <option value="Servicos">Serviços</option>
-  </select>
-</div>
+        <label class="cv-lbl">Eixo</label>
+        <select id="cv-eixo" class="cv-sel" onchange="CV.settingChanged()">
+          <option value="Institucional">Institucional</option>
+          <option value="Ensino">Ensino</option>
+          <option value="Pesquisa">Pesquisa</option>
+          <option value="Extensao">Extensão</option>
+          <option value="Sistemas">Sistemas</option>
+          <option value="Servicos">Serviços</option>
+        </select>
+      </div>
 
-<div class="cv-ctrl">
-  <label class="cv-lbl">Setor</label>
-  <select id="cv-setor" class="cv-sel" onchange="CV.settingChanged()">
-    <option value="Geral">Geral</option>
-    <option value="PROG">PROG</option>
-    <option value="PROEXAE">PROEXAE</option>
-    <option value="PPG">PPG</option>
-    <option value="CTIC">CTIC</option>
-    <option value="Reitoria">Reitoria</option>
-  </select>
-</div>
+      <div class="cv-ctrl">
+        <label class="cv-lbl">Setor</label>
+        <select id="cv-setor" class="cv-sel" onchange="CV.settingChanged()">
+          <option value="Geral">Geral</option>
+          <option value="PROG">PROG</option>
+          <option value="PROEXAE">PROEXAE</option>
+          <option value="PPG">PPG</option>
+          <option value="CTIC">CTIC</option>
+          <option value="Reitoria">Reitoria</option>
+        </select>
+      </div>
 
-    <div class="cv-ctrl">
-      <label class="cv-lbl">Campus</label>
-      <select id="cv-campus" class="cv-sel" onchange="CV.settingChanged()">
-        <option value="Todos">Todos</option>
-        <option value="Sao_Luis">São Luís</option>
-        <option value="Bacabal">Bacabal</option>
-        <option value="Imperatriz">Imperatriz</option>
-        <option value="Balsas">Balsas</option>
-        <option value="Caxias">Caxias</option>
-      </select>
-    </div>
+      <div class="cv-ctrl">
+        <label class="cv-lbl">Campus</label>
+        <select id="cv-campus" class="cv-sel" onchange="CV.settingChanged()">
+          <option value="Todos">Todos</option>
+          <option value="Sao_Luis">São Luís</option>
+          <option value="Bacabal">Bacabal</option>
+          <option value="Imperatriz">Imperatriz</option>
+          <option value="Balsas">Balsas</option>
+          <option value="Caxias">Caxias</option>
+        </select>
+      </div>
 
-    <div class="cv-ctrl">
-      <label class="cv-lbl">Ano</label>
-      <select id="cv-ano" class="cv-sel" onchange="CV.settingChanged()">
-        <option value="2026">2026</option>
-        <option value="2025">2025</option>
-        <option value="2024">2024</option>
-      </select>
-    </div>
+      <div class="cv-ctrl">
+        <label class="cv-lbl">Ano</label>
+        <select id="cv-ano" class="cv-sel" onchange="CV.settingChanged()">
+          <option value="2026">2026</option>
+          <option value="2025">2025</option>
+          <option value="2024">2024</option>
+        </select>
+      </div>
 
       <div class="cv-ctrl cv-ctrl-slider">
-        <label class="cv-lbl">
-          Tamanho <strong id="cv-sizeval" class="cv-slval">400</strong>
-        </label>
+        <label class="cv-lbl">Tamanho <strong id="cv-sizeval" class="cv-slval">400</strong></label>
         <input id="cv-size" type="range" min="50" max="2000" step="50" value="400" oninput="CV.sizeChanged(this.value)">
         <div class="cv-slrange"><span>50</span><span>2000</span></div>
       </div>
 
       <div class="cv-ctrl cv-ctrl-slider">
-        <label class="cv-lbl">
-          Overlap <strong id="cv-ovlapval" class="cv-slval">60</strong>
-        </label>
+        <label class="cv-lbl">Overlap <strong id="cv-ovlapval" class="cv-slval">60</strong></label>
         <input id="cv-overlap" type="range" min="0" max="500" step="10" value="60" oninput="CV.overlapChanged(this.value)">
         <div class="cv-slrange"><span>0</span><span>500</span></div>
       </div>
 
       <div class="cv-ctrl" style="justify-content:flex-end">
-        <button id="cv-bsim" class="cv-btn cv-btn-accent" onclick="CV.simulate()">▶ Simular</button>
+        <button id="cv-bsim" class="cv-btn cv-btn-accent" onclick="CV.simulate()">Simular</button>
       </div>
 
     </div>
 
     <div id="cv-statsbar" class="cv-statsbar" style="display:none">
       <div class="cv-stat"><span id="sv-total" class="cv-sv">–</span><span class="cv-sl">chunks</span></div>
-      <div class="cv-stat"><span id="sv-avg"   class="cv-sv">–</span><span class="cv-sl">chars/chunk</span></div>
-      <div class="cv-stat"><span id="sv-min"   class="cv-sv">–</span><span class="cv-sl">mín</span></div>
-      <div class="cv-stat"><span id="sv-max"   class="cv-sv">–</span><span class="cv-sl">máx</span></div>
-      <div class="cv-stat"><span id="sv-ovlp"  class="cv-sv">–</span><span class="cv-sl">overlaps</span></div>
+      <div class="cv-stat"><span id="sv-avg" class="cv-sv">–</span><span class="cv-sl">chars/chunk</span></div>
+      <div class="cv-stat"><span id="sv-min" class="cv-sv">–</span><span class="cv-sl">mín</span></div>
+      <div class="cv-stat"><span id="sv-max" class="cv-sv">–</span><span class="cv-sl">máx</span></div>
+      <div class="cv-stat"><span id="sv-ovlp" class="cv-sv">–</span><span class="cv-sl">overlaps</span></div>
       <div class="cv-statactions">
-        <button id="cv-vtext"  class="cv-vbtn active"  onclick="CV.setView('text')">¶ Texto</button>
-        <button id="cv-vcards" class="cv-vbtn"          onclick="CV.setView('cards')">▦ Cards</button>
-        <button id="cv-bingest" class="cv-btn cv-btn-ingest" style="display:none" onclick="CV.ingest()">💾 Ingerir</button>
+        <button id="cv-vtext" class="cv-vbtn active" onclick="CV.setView('text')">Texto</button>
+        <button id="cv-vcards" class="cv-vbtn" onclick="CV.setView('cards')">Cards</button>
+        <button id="cv-bingest" class="cv-btn cv-btn-ingest" style="display:none" onclick="CV.ingest()">Ingerir</button>
       </div>
     </div>
 
     <div class="cv-vizarea" id="cv-vizarea">
       <div id="cv-empty" class="cv-empty">
-        <div style="font-size:40px;opacity:.4">🧩</div>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg>
         <div>Carregue um arquivo, cole texto ou informe uma URL<br>e clique em <strong>Simular</strong></div>
       </div>
 
       <div id="cv-textview" style="display:none" class="cv-textview">
         <div id="cv-textcontent" class="cv-textcontent"></div>
-        <div id="cv-legend"      class="cv-legend"></div>
+        <div id="cv-legend" class="cv-legend"></div>
       </div>
 
       <div id="cv-cardsview" style="display:none">
@@ -302,5 +216,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/chunkViz.js"></script>
+<script src="/static/js/pages/chunkviz.js"></script>
 {% endblock %}
