@@ -1,12 +1,14 @@
 {# ============================================================================
    _shell.html — casca do Hub (Plano B §E). Sidebar de navegação global +
-   topbar. Migração por fases: páginas ainda no `_base.html` antigo convivem
-   até serem migradas (§G). Quando todas migrarem, `_base.html` + `hub.css` saem.
+   topbar. Todas as páginas do Hub estendem esta casca diretamente (a
+   migração §G terminou; `_base.html`/`hub.css`/`hub-bridge.css` foram
+   removidos).
 
    Uso:  {% extends "hub/_shell.html" %}
          {% block nav_active %}config{% endblock %}
          {% block page_title %}Configuração{% endblock %}
          {% block content %} ... {% endblock %}
+         {% block extra_css %}<link rel="stylesheet" href="/static/css/pages/x.css">{% endblock %}
    ========================================================================= #}
 {%- macro navlink(id, href, label, active, icon) -%}
 <a class="navlink" href="{{ href }}"{% if id == active %} aria-current="page"{% endif %}>
@@ -39,7 +41,6 @@
   <link rel="stylesheet" href="/static/css/components/modal.css">
   <link rel="stylesheet" href="/static/css/components/toast.css">
   <link rel="stylesheet" href="/static/css/components/layer-indicator.css">
-  {% block base_css %}{% endblock %}
   {% block extra_css %}{% endblock %}
 </head>
 <body>

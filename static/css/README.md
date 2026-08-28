@@ -19,9 +19,18 @@ components/
   layer-indicator.css  ASSINATURA — régua de 5 segmentos das camadas do Supervisor
 ```
 
+```
+pages/
+  routes.css        escopado sob .routes-view
+  chunkviz.css      escopado sob .cv-
+  eval.css          escopado sob .eval-dash
+  chat.css          escopado sob .cx-
+```
+
 Cada página carrega `tokens + base + layout + components/*` uma vez (via
-`_base.html`, a partir da Fase 1) e **só** o próprio `pages/<nome>.css`.
-Nunca `<link>` solto no meio do `content`.
+`_shell.html`) e **só** o próprio `pages/<nome>.css` no `{% block extra_css %}`.
+Nunca `<link>` solto no meio do `content`. Regras de página ficam escopadas
+sob um ancestral único da página (nunca classe genérica no topo).
 
 ## JS (`static/js/`, ES modules)
 
@@ -52,7 +61,10 @@ onde a última decisão parou. Dado real do sistema, não enfeite; único do Or�
 
 Ícones: SVG inline stroke 1.5 (Lucide), nunca emoji.
 
-## Fase 0 (feita)
+## Progresso da migração (§G)
 
-Tokens + base + layout + components + core/components JS, isolados em
-`/hub/_styleguide` (não linkada no menu). **Nenhuma página real tocada.**
+- **Fase 0** — tokens/base/layout/components + core JS, referência em `/hub/_styleguide`. ✅
+- **Fases 1–3** — todas as 14 páginas do Hub estendem `_shell.html` direto. ✅
+- **Fase 4** — `_base.html`, `hub-bridge.css`, `hub.css`, `hub_index.css` e os
+  templates órfãos (`admin/*`, `monitor/*`, `hub/dashboard.html`) removidos. ✅
+- **Fase 5** — auditoria final (contraste AA, teclado, 375px, favicon/title). Pendente.
