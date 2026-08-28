@@ -61,6 +61,16 @@ x-worker-base: &worker-base
       condition: service_healthy
     redis:
       condition: service_healthy
+  # A imagem tem um HEALTHCHECK embutido (curl localhost:9000/health) que só
+  # faz sentido para a API — todo worker herdava isso e ficava eternamente
+  # "unhealthy". Aqui trocamos por um ping Celery ao próprio nó do worker.
+  # `beat` não é um nó Celery e sobrescreve este bloco no seu serviço.
+  healthcheck:
+    test: ["CMD-SHELL", "celery -A src.infrastructure.celery_app.celery_app inspect ping -d celery@$$HOSTNAME --timeout 5 >/dev/null 2>&1 || exit 1"]
+    interval: 30s
+    timeout: 10s
+    start_period: 45s
+    retries: 3
 
 # ── Perfis de recursos (contenção de memória/CPU por container) ────────────────
 # Usamos mem_limit/cpus (chaves "legacy" do Compose) em vez de deploy.resources:
@@ -325,6 +335,14 @@ services:
     container_name: oraculo_beat
     profiles: ["app"]
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+    # beat não responde a `inspect ping` (não é um nó worker). Verificamos só
+    # que o broadcast chega ao broker e que a frota responde.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A src.infrastructure.celery_app.celery_app inspect ping --timeout 5 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 3
 
   # ── EVOLUTION API v2.3.7 (imagem oficial pré-compilada) ──
   # Nota: o Docker Hub do projeto mudou de organização — não é mais "atendai/evolution-api".
