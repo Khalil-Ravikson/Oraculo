@@ -1,49 +1,63 @@
 """
-src/capabilities/registry.py
-===============================
-Ex `domain/tools/crud_tools.py` + `domain/tools/tool_registry.py` (este
-último já deletado na Fase 1 — era `StructuredTool` factory morta; o
-mecanismo escolhido aqui é o decorator+dict de `crud_tools.py`, mais simples
-e com um padrão real de uso). Fase 6 do PLANO_REFATORACAO_SUPERVISOR.md,
-seção 2.5.
+src/capabilities/registry.py — Tool/Capability Registry
+================================================================================
+Registro EXPLÍCITO de capabilities (via decorator `@tool`), com autodiscovery
+de `capabilities/tools/tool_*.py` (pkgutil). Plano A / Fase 5: cada entrada
+carrega um **manifesto** (§S) — nome, versão de interface, permissões que
+precisa, se exige confirmação — em vez de um dict cru `{nome: fn}`.
 
-Sprint 2 (Fase 2): ganhou autodiscovery via `pkgutil`, mesmo padrão de
-`application/workers/registry.py::_autodiscover_workers()` — as tools
-concretas moraram em `capabilities/tools/tool_*.py` (ver débito técnico
-documentado lá) em vez de hardcoded neste arquivo.
+NÃO é plugin architecture com código externo — continua registro no mesmo
+pacote, pelo mesmo time. O vínculo agente↔capability é dado (tabela
+`agente_tools`, migration 012), não código; ver `capabilities/agent_tools.py`.
 
-ACHADO da Fase 6 original: nenhum destes tools tinha consumidor vivo — o
-único import de `crud_tools.executar_tool` era em
-`application/chain/oracle_chain.bak` (arquivo `.bak`, nunca executado). A
-rota "CRUD" do Supervisor não despacha nenhum destes hoje — ver
-`agents/tickets/service.py` pro histórico completo. Migrado mesmo assim
-porque a implementação é válida e reaproveitável — só não está conectada a
-nenhum fluxo de produção no momento. Conectar isso é trabalho de produto
-(decidir COMO o CRUD confirma e dispara), não desta fase estrutural.
+Histórico: até a Fase 5 as 3 tools estavam quebradas (importavam
+`infrastructure/database/connection` e `repositories/postgres_user_repository`,
+módulos que não existem) — `_autodiscover_tools` engolia o ImportError e
+nada registrava. Consertado nesta fase.
 """
 from __future__ import annotations
 
 import importlib
 import logging
 import pkgutil
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-_TOOL_REGISTRY: dict[str, callable] = {}
+_INTERFACE = "ICapability/1"
+
+_TOOL_REGISTRY: dict[str, "callable"] = {}
+_MANIFESTS: dict[str, "CapabilityManifest"] = {}
 _TOOLS_LOADED: bool = False
 
 
-def tool(name: str):
-    """Decorator para registrar capabilities por nome."""
+@dataclass(frozen=True)
+class CapabilityManifest:
+    nome: str
+    descricao: str
+    interface: str
+    permissoes: tuple[str, ...]
+    confirmacao: bool          # exige confirmação HITL antes de executar?
+
+
+def tool(nome: str, *, descricao: str = "", permissoes=(), confirmacao: bool = False):
+    """Registra uma capability + seu manifesto."""
     def decorator(fn):
-        _TOOL_REGISTRY[name] = fn
+        _TOOL_REGISTRY[nome] = fn
+        _MANIFESTS[nome] = CapabilityManifest(
+            nome=nome,
+            descricao=descricao or (fn.__doc__ or "").strip().splitlines()[0].strip() or nome,
+            interface=_INTERFACE,
+            permissoes=tuple(permissoes),
+            confirmacao=confirmacao,
+        )
         return fn
     return decorator
 
 
-def _autodiscover_tools():
-    """Escaneia `capabilities/tools/` e importa todo módulo `tool_*.py`,
-    disparando os decoradores `@tool(...)`. Roda uma única vez (lazy)."""
+def _autodiscover_tools() -> None:
+    """Importa todo `capabilities/tools/tool_*.py`, disparando os `@tool(...)`.
+    Roda uma única vez (lazy)."""
     global _TOOLS_LOADED
     if _TOOLS_LOADED:
         return
@@ -52,11 +66,11 @@ def _autodiscover_tools():
 
     for _, module_name, is_pkg in pkgutil.iter_modules(tools_pkg.__path__):
         if not is_pkg and module_name.startswith("tool_"):
-            full_module_name = f"src.capabilities.tools.{module_name}"
+            full = f"src.capabilities.tools.{module_name}"
             try:
-                importlib.import_module(full_module_name)
+                importlib.import_module(full)
             except Exception as e:
-                logger.error("❌ [CAPABILITIES REGISTRY] Falha ao auto-importar %s: %s", full_module_name, e)
+                logger.error("❌ [CAPABILITIES REGISTRY] Falha ao auto-importar %s: %s", full, e)
 
     _TOOLS_LOADED = True
 
@@ -66,10 +80,20 @@ async def executar_tool(tool_name: str, args: dict) -> dict:
     _autodiscover_tools()
     fn = _TOOL_REGISTRY.get(tool_name)
     if not fn:
-        raise ValueError(f"Tool '{tool_name}' não encontrada.")
+        raise ValueError(f"Capability '{tool_name}' não encontrada. Disponíveis: {', '.join(_TOOL_REGISTRY)}")
     return await fn(**args)
 
 
 def available() -> list[str]:
     _autodiscover_tools()
     return list(_TOOL_REGISTRY.keys())
+
+
+def manifesto(nome: str) -> CapabilityManifest | None:
+    _autodiscover_tools()
+    return _MANIFESTS.get(nome)
+
+
+def manifestos() -> list[CapabilityManifest]:
+    _autodiscover_tools()
+    return list(_MANIFESTS.values())

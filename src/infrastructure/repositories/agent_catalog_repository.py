@@ -2,9 +2,9 @@
 src/infrastructure/repositories/agent_catalog_repository.py
 ===============================================================
 Sprint 2 (Fase 4) — repositório do catálogo administrável de agentes
-(`agentes_catalogo`, migration 005). `permissions` é sempre espelho
-somente-leitura do código via `upsert_from_code`; `descricao`/`ativo` são o
-estado administrável, editado via hub, nunca sobrescrito pelo upsert.
+(`agentes_catalogo`, migration 005). `descricao`/`ativo` são o estado
+administrável, editado via hub, nunca sobrescrito por `upsert_from_code`.
+(A coluna `permissions` foi removida na Fase 5 — ver `capabilities/agent_tools.py`.)
 """
 from __future__ import annotations
 
@@ -21,19 +21,13 @@ class AgentCatalogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def upsert_from_code(self, nome: str, descricao_padrao: str, permissions: list[str]) -> None:
-        """Garante que a linha do agente existe e que `permissions` reflete o
-        código atual. NÃO sobrescreve `descricao`/`ativo` se a linha já
-        existir — preserva edição administrativa feita via hub."""
-        stmt = pg_insert(AgenteCatalogo).values(
-            nome=nome,
-            descricao=descricao_padrao,
-            permissions=permissions,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["nome"],
-            set_={"permissions": stmt.excluded.permissions},
-        )
+    async def upsert_from_code(self, nome: str, descricao_padrao: str) -> None:
+        """Garante que a linha do agente existe. NÃO sobrescreve
+        `descricao`/`ativo` se a linha já existir — preserva edição
+        administrativa feita via hub. (A coluna `permissions` foi removida na
+        Fase 5 — o vínculo agente↔capability é `agente_tools`.)"""
+        stmt = pg_insert(AgenteCatalogo).values(nome=nome, descricao=descricao_padrao)
+        stmt = stmt.on_conflict_do_nothing(index_elements=["nome"])
         await self._session.execute(stmt)
         await self._session.flush()
 
@@ -43,7 +37,6 @@ class AgentCatalogRepository:
             {
                 "nome": row.nome,
                 "descricao": row.descricao,
-                "permissions": row.permissions,
                 "ativo": row.ativo,
                 "llm_provider": row.llm_provider,
                 "llm_model": row.llm_model,
@@ -64,7 +57,6 @@ class AgentCatalogRepository:
         return {
             "nome": row.nome,
             "descricao": row.descricao,
-            "permissions": row.permissions,
             "ativo": row.ativo,
             "llm_provider": row.llm_provider,
             "llm_model": row.llm_model,

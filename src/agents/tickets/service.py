@@ -76,7 +76,7 @@ class TicketAgent(AgentEnabledMixin):
         "dados/tmp/ em vez de abrir chamado de verdade ou gravar no Postgres (ver "
         "settings.DEV_TEST_NO_DB_WRITE). Envio de e-mail real segue fora de uso."
     )
-    permissions: list[str] = []
+    tools: list[str] = ["get_student_info", "update_student_email", "update_student_telefone"]
 
     def __init__(self) -> None:
         self._service = TicketService()

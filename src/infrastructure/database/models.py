@@ -227,16 +227,15 @@ class IntentRouter(Base):
 class AgenteCatalogo(Base):
     """Catálogo administrável de agentes (Sprint 2, Fase 3).
 
-    `permissions` é espelho somente-leitura do código (populado por upsert em
-    `AgentCatalogRepository.upsert_from_code`, ver Fase 4) — não editável via
-    hub. `ativo`/`descricao` são o estado administrável de verdade.
+    `ativo`/`descricao` são o estado administrável de verdade. A coluna
+    `permissions` (espelho vazio do RBAC nunca conectado) foi removida na
+    Fase 5 — o vínculo agente↔capability virou a tabela `agente_tools`.
     """
     __tablename__ = "agentes_catalogo"
 
     id             = Column(Integer, primary_key=True)
     nome           = Column(String(50), nullable=False, unique=True, index=True)
     descricao      = Column(Text, nullable=True)
-    permissions    = Column(ARRAY(String), server_default="{}", nullable=False)
     ativo          = Column(Boolean, server_default="true", nullable=False)
     # Override de provider/modelo LLM por agente (migration 007). NULL nos
     # dois = herda o provider/modelo global (settings.LLM_PROVIDER ou
@@ -377,6 +376,28 @@ class RouteRegistryHistorico(Base):
     tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
     atualizado_por = Column(String(100), nullable=True)
     atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AgenteTool(Base):
+    """Vínculo agente↔capability (migration 012, Plano A / Fase 5). Substitui
+    `agentes_catalogo.permissions`. Sem FK física (mesma decisão de
+    `agent_prompts`). Código decide QUAIS via `agente.tools`; admin liga/desliga
+    `habilitado` via /hub/capabilities. `tenant_id` sempre NULL (§M)."""
+    __tablename__ = "agente_tools"
+    __table_args__ = (
+        Index(
+            "ux_agente_tools_tenant_agente_tool", "tenant_id", "agente", "tool",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id             = Column(Integer, primary_key=True)
+    agente         = Column(String(50), nullable=False)
+    tool           = Column(String(60), nullable=False)
+    habilitado     = Column(Boolean, server_default="true", nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por = Column(String(100), nullable=True)
 
 
 class DocumentChunk(Base):

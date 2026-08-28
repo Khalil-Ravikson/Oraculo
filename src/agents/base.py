@@ -46,7 +46,7 @@ class AgentResponse:
 class BaseAgent(Protocol):
     name: str
     description: str
-    permissions: list[str]
+    tools: list[str]          # nomes de capabilities (capabilities/registry.py); vínculo em agente_tools
 
     async def can_execute(self, context: AgentContext) -> bool: ...
     async def execute(self, context: AgentContext) -> AgentResponse: ...

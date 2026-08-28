@@ -390,7 +390,7 @@ def _source_para_titulo(source: str) -> str:
 class AcademicKnowledgeAgent(AgentEnabledMixin):
     name = "academic_knowledge"
     description = "Responde perguntas acadêmicas via RAG (calendário, editais, contatos, wiki)."
-    permissions: list[str] = []
+    tools: list[str] = []
 
     def __init__(self) -> None:
         self._rag = RAGSearchService()

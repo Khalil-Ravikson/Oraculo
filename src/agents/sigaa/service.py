@@ -326,7 +326,7 @@ class SigaaService:
 class SigaaAgent(AgentEnabledMixin):
     name = "sigaa"
     description = "Consulta dados acadêmicos do discente no SIGAA (notas, histórico, turmas, CR/IRA, estrutura curricular)."
-    permissions: list[str] = []
+    tools: list[str] = []
 
     def __init__(self) -> None:
         self._service = SigaaService()

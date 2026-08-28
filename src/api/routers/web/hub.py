@@ -503,7 +503,7 @@ async def agents_data(request: Request):
             {
                 "name": a.name,
                 "description": catalogo.get(a.name, {}).get("descricao") or a.description,
-                "permissions": a.permissions,
+                "tools": list(getattr(a, "tools", [])),
                 "enabled": status[a.name],
                 "llm_provider": catalogo.get(a.name, {}).get("llm_provider"),
                 "llm_model": catalogo.get(a.name, {}).get("llm_model"),
@@ -1006,22 +1006,67 @@ async def capabilities_page(request: Request):
 
 @router.get("/capabilities/data")
 async def capabilities_data(request: Request):
-    """Lista as capabilities/tools registradas (autodiscovery de capabilities/registry.py)."""
+    """Capabilities registradas (manifesto §S) + vínculo agente↔capability
+    (`agente_tools`, Fase 5)."""
     payload = _verificar_cookie(request)
     if not payload:
         return {"error": "Não autorizado"}
 
-    from src.capabilities.registry import available
+    from src.capabilities.registry import manifestos
+    from src.capabilities import agent_tools
+    from src.infrastructure.database.session import AsyncSessionLocal
 
-    # Nenhuma das tools existentes tem consumidor vivo em produção hoje (ver
-    # débito técnico documentado em capabilities/tools/__init__.py) — o hub
-    # avisa isso explicitamente em vez de sugerir que são operacionais.
+    bindings = []
+    try:
+        async with AsyncSessionLocal() as session:
+            bindings = await agent_tools.listar(session)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler agente_tools: %s", exc)
+
     return {
-        "tools": [
-            {"name": nome, "sem_consumidor_producao": True}
-            for nome in available()
-        ]
+        "capabilities": [
+            {
+                "nome": m.nome, "descricao": m.descricao, "interface": m.interface,
+                "permissoes": list(m.permissoes), "confirmacao": m.confirmacao,
+            }
+            for m in manifestos()
+        ],
+        "bindings": [
+            {**b, "atualizado_em": b["atualizado_em"].isoformat() if b["atualizado_em"] else None}
+            for b in bindings
+        ],
     }
+
+
+class CapabilityToggleRequest(BaseModel):
+    agente:     str
+    tool:       str
+    habilitado: bool
+
+
+@router.post("/capabilities/toggle")
+async def capabilities_toggle(request: Request, data: CapabilityToggleRequest):
+    """Liga/desliga um vínculo agente↔capability."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.capabilities import agent_tools
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await agent_tools.set_habilitado(
+                session, data.agente, data.tool, data.habilitado, admin=payload.sub,
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao togglar capability %s/%s: %s", data.agente, data.tool, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    if not ok:
+        return {"error": f"Vínculo {data.agente}↔{data.tool} não existe."}
+    return {"ok": True, "agente": data.agente, "tool": data.tool, "habilitado": data.habilitado}
 
 
 @router.get("/eval", response_class=HTMLResponse)

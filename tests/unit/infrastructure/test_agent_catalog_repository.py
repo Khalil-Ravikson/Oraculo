@@ -21,7 +21,7 @@ async def test_upsert_from_code_executa_insert_on_conflict():
     session = _make_session()
     repo = AgentCatalogRepository(session)
 
-    await repo.upsert_from_code("sigaa", "Consulta SIGAA", ["aluno"])
+    await repo.upsert_from_code("sigaa", "Consulta SIGAA")
 
     session.execute.assert_awaited_once()
     session.flush.assert_awaited_once()
@@ -30,7 +30,7 @@ async def test_upsert_from_code_executa_insert_on_conflict():
 @pytest.mark.asyncio
 async def test_listar_converte_rows_em_dicts():
     row = MagicMock(
-        nome="sigaa", descricao="desc", permissions=["aluno"], ativo=True,
+        nome="sigaa", descricao="desc", ativo=True,
         llm_provider=None, llm_model=None,
         criado_em="2026-01-01", atualizado_em="2026-01-02", atualizado_por="admin",
     )
@@ -43,7 +43,7 @@ async def test_listar_converte_rows_em_dicts():
     linhas = await repo.listar()
 
     assert linhas == [{
-        "nome": "sigaa", "descricao": "desc", "permissions": ["aluno"], "ativo": True,
+        "nome": "sigaa", "descricao": "desc", "ativo": True,
         "llm_provider": None, "llm_model": None,
         "criado_em": "2026-01-01", "atualizado_em": "2026-01-02", "atualizado_por": "admin",
     }]

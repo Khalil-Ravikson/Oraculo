@@ -132,7 +132,7 @@ class ConversationAgent(AgentEnabledMixin):
         "🧪 Rodada de testes: com settings.DEV_TEST_NO_DB_WRITE ativo, o cadastro final "
         "grava JSON em dados/tmp/cadastro_dev/ em vez de INSERT/UPDATE real em `pessoas`."
     )
-    permissions: list[str] = []
+    tools: list[str] = []
 
     def __init__(self) -> None:
         self._funnel = RegistrationFunnel()

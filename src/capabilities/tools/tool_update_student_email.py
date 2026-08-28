@@ -1,35 +1,39 @@
 """
 src/capabilities/tools/tool_update_student_email.py
 ======================================================
-Ex `capabilities/registry.py` (Fase 6 do PLANO_REFATORACAO_SUPERVISOR.md).
-Ver débito técnico documentado em `capabilities/tools/__init__.py`.
+Capability: atualiza o e-mail da pessoa. Exige confirmação (§S) — é escrita.
 """
 from __future__ import annotations
 
 import logging
+import re
 
 from src.capabilities.registry import tool
 
 logger = logging.getLogger(__name__)
 
+_RE_EMAIL = re.compile(r"^[\w.+-]+@[\w-]+\.[a-z]{2,}$", re.IGNORECASE)
 
-@tool("update_student_email")
+
+@tool(
+    "update_student_email",
+    descricao="Atualiza o e-mail cadastral da pessoa.",
+    permissoes=("pessoa:write",),
+    confirmacao=True,
+)
 async def update_email(user_id: str, novo_valor: str) -> dict:
-    """Atualiza e-mail do aluno autenticado."""
-    import re
-    from src.infrastructure.database.connection import AsyncSessionLocal
-    from src.infrastructure.repositories.postgres_user_repository import PostgresUserRepository
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.pessoa_repository import PessoaRepository
 
-    if not re.match(r"^[\w.+-]+@[\w-]+\.[a-z]{2,}$", novo_valor, re.IGNORECASE):
+    if not _RE_EMAIL.match(novo_valor or ""):
         raise ValueError("E-mail inválido.")
 
     async with AsyncSessionLocal() as session:
-        repo  = PostgresUserRepository(session)
-        aluno = await repo.get_by_id(user_id)
+        aluno = await PessoaRepository(session).get_by_id(int(user_id))
         if not aluno:
-            raise ValueError("Usuário não encontrado.")
-        await repo.update(aluno, {"email": novo_valor})
+            raise ValueError("Pessoa não encontrada.")
+        aluno.email = novo_valor
         await session.commit()
 
-    logger.info("✅ E-mail atualizado: user=%s", user_id)
+    logger.info("✅ [CAPABILITY] E-mail atualizado: user=%s", user_id)
     return {"mensagem": f"E-mail atualizado para *{novo_valor}* com sucesso!"}

@@ -54,14 +54,19 @@ async def _upsert_catalogo_best_effort() -> None:
         from src.infrastructure.database.session import AsyncSessionLocal
         from src.infrastructure.repositories.agent_catalog_repository import AgentCatalogRepository
 
+        from src.capabilities.agent_tools import upsert_binding_from_code
+
         async with AsyncSessionLocal() as session:
             repo = AgentCatalogRepository(session)
             for agente in registry.all():
                 await repo.upsert_from_code(
                     nome=agente.name,
                     descricao_padrao=agente.description,
-                    permissions=list(agente.permissions),
                 )
+                # Vínculo agente↔capability (Fase 5): código declara em
+                # `agente.tools`, bootstrap semeia `agente_tools` (não mexe no
+                # `habilitado` de quem já existe — preserva o toggle do admin).
+                await upsert_binding_from_code(session, agente.name, list(getattr(agente, "tools", [])))
             await session.commit()
         logger.info("✅ [AGENT CATALOG] Upsert de %d agentes no Postgres concluído.", len(registry.all()))
     except Exception as exc:
