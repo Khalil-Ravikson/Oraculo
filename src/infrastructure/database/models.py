@@ -400,6 +400,32 @@ class AgenteTool(Base):
     atualizado_por = Column(String(100), nullable=True)
 
 
+class GraphNodeConfig(Base):
+    """Toggle habilitado/desabilitado + config overrides por nó do
+    NodeRegistry (migration 013, continuação da Camada 1 — ver
+    docs/decision_camada1_nodes.md). Mesmo padrão de `AgenteTool`: o código
+    (`src/graph/nodes/`) decide QUAIS nós existem; esta tabela é só a
+    Configuration Layer. `node_id` sem linha aqui é implicitamente
+    habilitado. `versao` para optimistic concurrency (mesmo padrão de
+    `config_dinamica`, §N)."""
+    __tablename__ = "graph_node_config"
+    __table_args__ = (
+        Index(
+            "ux_graph_node_config_tenant_node", "tenant_id", "node_id",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id               = Column(Integer, primary_key=True)
+    node_id          = Column(String(80), nullable=False)
+    habilitado       = Column(Boolean, server_default="true", nullable=False)
+    config_overrides = Column(JSONB, server_default="{}", nullable=False)
+    versao           = Column(Integer, server_default="1", nullable=False)
+    tenant_id        = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em    = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por   = Column(String(100), nullable=True)
+
+
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
 

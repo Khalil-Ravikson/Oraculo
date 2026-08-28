@@ -1084,15 +1084,59 @@ async def graph_nodes_page(request: Request):
 @router.get("/graph-nodes/data")
 async def graph_nodes_data(request: Request):
     """Nós registrados no NodeRegistry (BaseNode: LLM/STT/TTS/Embeddings/
-    Parser/Tool, Camada 1 — ver docs/decision_camada1_nodes.md)."""
+    Parser/Tool/Channel/MCP/REST, Camada 1 — ver
+    docs/decision_camada1_nodes.md), mesclados com o toggle habilitado/
+    desabilitado de `graph_node_config` (migration 013)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph.node_registry import get_registry
+    from src.graph import node_config
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    nos = get_registry().list_nodes()
+
+    config_rows = []
+    try:
+        async with AsyncSessionLocal() as session:
+            config_rows = await node_config.listar(session)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler graph_node_config: %s", exc)
+
+    return {"nodes": node_config.mesclar_com_registry(nos, config_rows)}
+
+
+class GraphNodeToggleRequest(BaseModel):
+    node_id:    str
+    habilitado: bool
+
+
+@router.post("/graph-nodes/toggle")
+async def graph_nodes_toggle(request: Request, data: GraphNodeToggleRequest):
+    """Liga/desliga um nó do registry (não remove/recria — só a Configuration
+    Layer, o nó continua existindo em código)."""
     payload = _verificar_cookie(request)
     if not payload:
         return {"error": "Não autorizado"}
 
     from src.graph.node_registry import get_registry
 
-    registry = get_registry()
-    return {"nodes": registry.list_nodes()}
+    if get_registry().get(data.node_id) is None:
+        return {"error": f"Nó '{data.node_id}' não existe no registry."}
+
+    from src.graph import node_config
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await node_config.set_habilitado(session, data.node_id, data.habilitado, admin=payload.sub)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao togglar nó '%s': %s", data.node_id, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    return {"ok": True, "node_id": data.node_id, "habilitado": data.habilitado}
 
 
 @router.get("/eval", response_class=HTMLResponse)
