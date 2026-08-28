@@ -283,20 +283,26 @@ tem).
 
 ## J. Migração — sequência recomendada
 
+> **Estado (2026-08-28): Fases 1–5 concluídas, testadas e rodando.** Fases 6–8
+> deliberadamente não iniciadas (sem demanda); 9–11 condicionais a evento de
+> negócio. A metade "Workflow" da Fase 2 (topologia do grafo como dado) virou
+> um adendo à parte: `arquitetura_nos_declarativa.md`. Status consolidado em
+> `estado_e_roteiro_planos.md`.
+
 Ordem por risco crescente e reaproveitamento decrescente do que já existe.
 As Fases 1-8 são as mesmas da v1 (não regridem); esta revisão adiciona
 Fases 9-11 como **capacidades que só fazem sentido se/quando o Oráculo virar
 produto multi-cliente** — deliberadamente depois das Fases 1-8, e
 deliberadamente não implementadas agora.
 
-| Fase | O quê | Risco | Por quê nessa posição |
+| Fase | O quê | Estado | Por quê nessa posição |
 |---|---|---|---|
-| **1** | Dynamic Configuration, endurecida com version column + read-repair (§N) | Baixo | Já pronta, generaliza padrão comprovado, mais robusta que a v1 |
-| **2** | Route/Workflow Registry | Médio | Maior valor concreto identificado |
-| **3** | Provider Registry (LLM) + health-check/circuit breaker (§O) | Baixo-médio | Plumbing de override já existe; resiliência é o item novo |
-| **4** | Parser: mover prioridade/enable pra config | Baixo | Reaproveita quase tudo |
-| **5** | Tool Registry — revivido + manifesto de capability (§S) | Médio-alto | Decidido revivir (§L); também TD-003 |
-| **6** | STT/TTS/Embeddings — mesmo tratamento do LLM | Baixo urgência | Sem demanda concreta ainda |
+| **1** | Dynamic Configuration, endurecida com version column + read-repair (§N) | ✅ concluída | Já pronta, generaliza padrão comprovado, mais robusta que a v1 |
+| **2** | Route/Workflow Registry | ✅ metade "Route" concluída; "Workflow" → adendo | Maior valor concreto identificado |
+| **3** | Provider Registry (LLM) + health-check/circuit breaker (§O) | ✅ concluída | Plumbing de override já existe; resiliência é o item novo |
+| **4** | Parser: mover prioridade/enable pra config | ✅ concluída | Reaproveita quase tudo |
+| **5** | Tool Registry — revivido + manifesto de capability (§S) | ✅ concluída | Decidido revivir (§L); também TD-003 |
+| **6** | STT/TTS/Embeddings — mesmo tratamento do LLM | ⏸ não iniciada | Sem demanda concreta ainda |
 | **7** | Channel abstraction | Alto esforço | Adiado |
 | **8** | MCP Connection Manager | Alto risco (SSRF) | Adiado |
 | **9** *(novo)* | Tenancy real — `tenant_id` deixa de ser sempre nulo, isolamento testado (§M) | Alto (dados) | **Só se/quando houver um 2º cliente real** — condicional, não agendado |

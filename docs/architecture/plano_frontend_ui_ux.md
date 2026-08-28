@@ -1,7 +1,11 @@
 # Oráculo — Plano de Reorganização de Frontend (Scripts) e Redesign UI/UX
 
-> **Status: plano técnico, pronto para implementar por fases mediante
-> aprovação.** Produzido em 2026-08-27 a partir de auditoria completa de
+> **Status: IMPLEMENTADO (Fases 0–5), 2026-08-28.** As 14 rotas HTML do Hub
+> estendem `_shell.html`; legado (`_base.html`, `hub.css`, `hub-bridge.css`,
+> `hub_index.css`) removido. Pendência não-bloqueante: sign-off visual no
+> browser. Ver `docs/historico/estado_e_roteiro_planos.md`.
+>
+> Produzido em 2026-08-27 a partir de auditoria completa de
 > `static/` e `templates/` (16 templates, 7 CSS, 6 JS, ~8.700 linhas) mais
 > pesquisa externa de referência (Linear, Stripe, Grafana, tipografia de
 > dashboard 2026). Sem framework novo, sem build step novo — o objetivo é
@@ -310,14 +314,16 @@ botão "voltar" estilizado diferente.
 
 ## G. Migração por fases (risco crescente, sem quebrar nada em produção)
 
-| Fase | Escopo | Risco |
+> **Todas concluídas em 2026-08-28.** Notas de execução ao lado de cada fase.
+
+| Fase | Escopo | Estado |
 |---|---|---|
-| **0** | `tokens.css`, `base.css`, `layout.css`, `components/*.css`, `core/*.js` — construídos e testados isoladamente numa página de referência nova (`/hub/_styleguide`, não linkada no menu), sem tocar nenhuma página real ainda | Nenhum |
-| **1** | `_base.html` ganha shell real (sidebar+topbar); `index.html`, `login.html`, `dashboard.html` migradas — são as mais visitadas e as com bug mais visível (paleta dupla, variável quebrada) | Baixo |
-| **2** | `config.html`, `agents.html`, `users.html` — as maiores/mais "tudo num código só" (33 emojis, 569-583 linhas cada) | Médio (páginas grandes, testar cada ação/form depois da migração) |
-| **3** | `audit.html`, `llm_custo.html`, `chat.html`, `chunkviz.html`, `eval.html`, `capabilities.html`, `agent_prompt.html` | Médio |
-| **4** | `admin/login.html`, `admin/test_area.html`, `monitor/dashboard.html` — hoje visualmente órfãos (`test_area.html` nem usa `_base.html`) | Baixo-médio |
-| **5** | Auditoria final: favicon em produção, `<title>` consistente em todas, checagem de contraste AA, teste de teclado (tab order, foco visível), teste mobile (375px) em cada página, zero emoji restante, zero `<style>`/`<script>` inline restante | Baixo |
+| **0** | `tokens.css`, `base.css`, `layout.css`, `components/*.css`, `core/*.js` — construídos e testados isoladamente em `/hub/_styleguide` | ✅ |
+| **1** | shell real (`_shell.html`, sidebar+topbar); `index.html`, `login.html` migradas (`dashboard.html` era órfã → removida na Fase 4) | ✅ |
+| **2** | `config.html`, `agents.html`, `users.html` | ✅ |
+| **3** | `audit.html`, `llm_custo.html`, `chat.html`, `chunkviz.html`, `eval.html`, `capabilities.html`, `agent_prompt.html`, `routes.html` | ✅ (Chart.js vendorado local; chat com design novo de bolhas; chunkviz com JS re-modularizado) |
+| **4** | remoção do legado: `_base.html`, `hub-bridge.css`, `hub.css`, `hub_index.css`, `admin/*`, `monitor/*` (+ `src/api/monitor.py`), `hub/dashboard.html`, JS órfãos | ✅ (todos eram código morto sem rota — decisão registrada nas AskUserQuestion do dono) |
+| **5** | Auditoria final: `<title>` (auto via `_shell`), favicon (data-URI SVG no `_shell`), contraste, tab order + foco visível (fix global no `form.css`), 375px, zero emoji, zero `<style>`/`<script>` inline, zero `on*=` | ✅ |
 
 Critério de "pronto" por página (checklist literal, não opinião):
 
