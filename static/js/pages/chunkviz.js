@@ -12,18 +12,13 @@ const S = {
   eixo:'Institucional', setor:'Geral', campus:'Todos', ano:'2026', 
 };
 
+// Paleta funcional (chunks adjacentes = cor distinta). Alinhada com as classes
+// .ck0-9 de chunkviz.css — dessaturada do neon original, legível no grafite.
 const COLORS = [
-  {hex:'#00e5a0', bg:'rgba(0,229,160,.22)',   bdr:'rgba(0,229,160,.7)'},
-  {hex:'#4af0ff', bg:'rgba(74,240,255,.22)',  bdr:'rgba(74,240,255,.7)'},
-  {hex:'#ffb700', bg:'rgba(255,183,0,.22)',   bdr:'rgba(255,183,0,.7)'},
-  {hex:'#ff6b35', bg:'rgba(255,107,53,.22)',  bdr:'rgba(255,107,53,.7)'},
-  {hex:'#b06eff', bg:'rgba(176,110,255,.22)', bdr:'rgba(176,110,255,.7)'},
-  {hex:'#ff4060', bg:'rgba(255,64,96,.22)',   bdr:'rgba(255,64,96,.7)'},
-  {hex:'#3d8ef8', bg:'rgba(61,142,248,.22)',  bdr:'rgba(61,142,248,.7)'},
-  {hex:'#f59e0b', bg:'rgba(245,158,11,.22)',  bdr:'rgba(245,158,11,.7)'},
-  {hex:'#34d399', bg:'rgba(52,211,153,.22)',  bdr:'rgba(52,211,153,.7)'},
-  {hex:'#ef4444', bg:'rgba(239,68,68,.22)',   bdr:'rgba(239,68,68,.7)'},
-];
+  { hex: '#3ba55c' }, { hex: '#4a90c7' }, { hex: '#c9982e' }, { hex: '#d97a3f' },
+  { hex: '#9a6ec7' }, { hex: '#d9483f' }, { hex: '#5a8dee' }, { hex: '#b98a30' },
+  { hex: '#4bb88a' }, { hex: '#c1554e' },
+].map((c) => ({ ...c, bg: c.hex + '33', bdr: c.hex + 'b0' }));
 
 const PARSER_HINTS = {
   auto:         'Detecta automaticamente pelo formato do arquivo',
@@ -39,6 +34,41 @@ const PARSER_HINTS = {
 function init() {
   _loadPrefs();
   _setupDnD();
+  _wireEvents();
+}
+
+/* Liga todos os controles do template (sem handlers inline). */
+function _wireEvents() {
+  document.querySelectorAll('.cv-tab').forEach((t) => (t.onclick = () => setSource(t.dataset.src)));
+  document.querySelectorAll('.cv-setting').forEach((s) => (s.onchange = settingChanged));
+  document.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
+
+  $('cv-parser').onchange = parserChanged;
+  $('cv-warn-close').onclick = () => ($('cv-parser-warning').hidden = true);
+  $('cv-fi').onchange = fileSelected;
+  $('cv-reset').onclick = resetDocument;
+  $('cv-prev').onclick = prevPage;
+  $('cv-next').onclick = nextPage;
+  $('cv-load-selected').onclick = loadSelectedPages;
+  $('cv-load-full').onclick = loadFullDoc;
+  $('cv-textarea').oninput = textChanged;
+  $('cv-urlinput').onkeydown = (e) => { if (e.key === 'Enter') fetchUrl(); };
+  $('cv-url-extract').onclick = fetchUrl;
+  $('cv-size').oninput = (e) => sizeChanged(e.target.value);
+  $('cv-overlap').oninput = (e) => overlapChanged(e.target.value);
+  $('cv-bsim').onclick = simulate;
+  $('cv-bingest').onclick = ingest;
+
+  // delegação: miniaturas de página + spans/legenda de chunk (conteúdo dinâmico)
+  $('cv-pgstrip').addEventListener('click', (e) => {
+    const chk = e.target.closest('[data-page-check]');
+    if (chk) { togglePageSelect(e, Number(chk.dataset.pageCheck)); return; }
+    const thumb = e.target.closest('[data-page]');
+    if (thumb) gotoPage(Number(thumb.dataset.page));
+  });
+  const hl = (e) => { const el = e.target.closest('[data-ci]'); if (el) hlChunk(Number(el.dataset.ci)); };
+  $('cv-textcontent').addEventListener('click', hl);
+  $('cv-legend').addEventListener('click', hl);
 }
 
 function _loadPrefs() {
@@ -68,7 +98,7 @@ function showWarning(msg) {
   const w = $('cv-parser-warning');
   if (!w) return;
   $('cv-parser-warning-msg').textContent = `${msg}`;
-  w.style.display = 'flex';
+  w.hidden = false;
 }
 
 function _checkParserFallback(responseInfo) {
@@ -78,7 +108,7 @@ function _checkParserFallback(responseInfo) {
     msg += `O sistema usou '${responseInfo.parser_used}' como fallback automático.`;
     showWarning(msg);
   } else {
-    $('cv-parser-warning').style.display = 'none';
+    $('cv-parser-warning').hidden = true;
   }
 }
 
@@ -89,13 +119,13 @@ function resetDocument() {
   S.selectedPages.clear();
   S.ingestMode = 'all';
   
-  $('cv-dz').style.display = '';
-  $('cv-fileinfo').style.display = 'none';
-  $('cv-statsbar').style.display = 'none';
-  $('cv-vizarea').children[0].style.display = ''; // Mostra empty state
-  $('cv-textview').style.display = 'none';
-  $('cv-cardsview').style.display = 'none';
-  $('cv-parser-warning').style.display = 'none';
+  $('cv-dz').hidden = false;
+  $('cv-fileinfo').hidden = true;
+  $('cv-statsbar').hidden = true;
+  $('cv-vizarea').children[0].hidden = false; // Mostra empty state
+  $('cv-textview').hidden = true;
+  $('cv-cardsview').hidden = true;
+  $('cv-parser-warning').hidden = true;
   
   _updateSrcStats();
   badge('info', 'Documento removido');
@@ -106,20 +136,24 @@ function resetDocument() {
 function _setupDnD() {
   const dz = $('cv-dz');
   if (!dz) return;
-  ['dragenter','dragover'].forEach(e => dz.addEventListener(e, ev => {
+  dz.addEventListener('click', () => $('cv-fi').click());
+  ['dragenter', 'dragover'].forEach((e) => dz.addEventListener(e, (ev) => {
     ev.preventDefault(); dz.classList.add('over');
   }));
-  ['dragleave','drop'].forEach(e => dz.addEventListener(e, () => dz.classList.remove('over')));
+  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    dz.classList.remove('over');
+    const f = ev.dataTransfer?.files?.[0];
+    if (f) _upload(f);
+  });
 }
 
-function dzOver(e) { e.preventDefault(); }
-function dzLeave() {}
-function dzDrop(e) { e.preventDefault(); const f = e.dataTransfer?.files?.[0]; if(f) _upload(f); }
-function fileSelected(e) { const f = e.target.files?.[0]; if(f) _upload(f); }
+function fileSelected(e) { const f = e.target.files?.[0]; if (f) _upload(f); }
 
 /* ─── FILE UPLOAD ───────────────────────────────────── */
 async function _upload(file) {
-  badge('busy', `⏳ Enviando ${file.name}…`);
+  badge('busy', `Enviando ${file.name}…`);
   const fd = new FormData();
   fd.append('file', file);
   fd.append('parser', S.parser);
@@ -136,17 +170,17 @@ async function _upload(file) {
     // Verifica fallback do backend
     _checkParserFallback(d);
 
-    $('cv-dz').style.display = 'none';
-    $('cv-fileinfo').style.display = '';
+    $('cv-dz').hidden = true;
+    $('cv-fileinfo').hidden = false;
     $v('cv-fname', d.name);
     $v('cv-fmeta', `${d.size_kb} KB · ${d.page_count} págs · ${d.total_chars.toLocaleString()} chars`);
 
     if (d.page_count > 1) {
-      $('cv-pagenav').style.display = '';
+      $('cv-pagenav').hidden = false;
       $v('cv-pgcur', '1'); $v('cv-pgtot', d.page_count);
       _buildStrip(d.pages);
     } else {
-      $('cv-pagenav').style.display = 'none';
+      $('cv-pagenav').hidden = true;
     }
 
     S.text = d.first_text;
@@ -162,11 +196,9 @@ function _buildStrip(pages) {
   const strip = $('cv-pgstrip');
   // Alteração aqui: Removemos o limite de 60 páginas!
   strip.innerHTML = pages.map((p, i) =>
-    `<div class="cv-pgthumb${i===0?' active':''}" onclick="CV.gotoPage(${i})"
-         title="${esc(p.preview)}…">
-      <input type="checkbox" class="cv-pgthumb-check" title="Selecionar página para ingestão"
-             onchange="CV.togglePageSelect(event, ${i})">
-      ${i+1}
+    `<div class="cv-pgthumb${i === 0 ? ' active' : ''}" data-page="${i}" title="${esc(p.preview)}…">
+      <input type="checkbox" class="cv-pgthumb-check" data-page-check="${i}" aria-label="Selecionar página ${i + 1} para ingestão">
+      ${i + 1}
     </div>`
   ).join('');
 }
@@ -185,7 +217,7 @@ async function loadSelectedPages() {
     return;
   }
   
-  badge('busy', `⏳ Carregando ${S.selectedPages.size} páginas selecionadas…`);
+  badge('busy', `Carregando ${S.selectedPages.size} páginas selecionadas…`);
   try {
     const fd = new FormData();
     fd.append('file_id', S.fileId); 
@@ -223,7 +255,7 @@ async function gotoPage(idx) {
   $v('cv-pgcur', idx + 1);
   document.querySelectorAll('.cv-pgthumb').forEach((t, i) =>
     t.classList.toggle('active', i === idx));
-  badge('busy', `⏳ Carregando página ${idx + 1}…`);
+  badge('busy', `Carregando página ${idx + 1}…`);
   try {
     const fd = new FormData();
     fd.append('file_id', S.fileId); fd.append('page', idx);
@@ -239,7 +271,7 @@ async function gotoPage(idx) {
 
 async function loadFullDoc() {
   if (!S.fileId) return;
-  badge('busy', '⏳ Carregando documento inteiro…');
+  badge('busy', 'Carregando documento inteiro…');
   try {
     const fd = new FormData();
     fd.append('file_id', S.fileId); fd.append('page', -1);
@@ -291,8 +323,8 @@ function textChanged() {
 
 function _updateSrcStats() {
   const ss = $('cv-srcstats');
-  if (!S.text) { ss.style.display='none'; return; }
-  ss.style.display = '';
+  if (!S.text) { ss.hidden = true; return; }
+  ss.hidden = false;
   const w = S.text.trim() ? S.text.trim().split(/\s+/).length : 0;
   $v('cv-src-chars', S.text.length.toLocaleString());
   $v('cv-src-words', w.toLocaleString());
@@ -339,7 +371,7 @@ function setSource(src) {
   document.querySelectorAll('.cv-tab').forEach(t => t.classList.toggle('active', t.dataset.src===src));
   ['file','text','url'].forEach(s => {
     const p = $(`cv-panel-${s}`);
-    if (p) p.style.display = s===src ? '' : 'none';
+    if (p) p.hidden = s !== src;
   });
   _updateIngestButton();
 }
@@ -363,14 +395,14 @@ async function simulate() {
       strategy:S.strategy, doc_type:S.docType, file_id:S.fileId,
     });
     S.chunks = d.chunks;
-    $('cv-statsbar').style.display = '';
+    $('cv-statsbar').hidden = false;
     $v('sv-total', d.total);
     $v('sv-avg',   d.avg_size);
     $v('sv-min',   d.min_size);
     $v('sv-max',   d.max_size);
     $v('sv-ovlp',  d.overlap_regions);
-    $('cv-bingest').style.display = (S.fileId || S.source === 'text') ? '' : 'none';
-    $('cv-empty').style.display = 'none';
+    $('cv-bingest').hidden = !(S.fileId || S.source === 'text');
+    $('cv-empty').hidden = true;
     renderView();
     badge('ok', `${d.total} chunks`);
   } catch(e) {
@@ -390,8 +422,8 @@ function setView(v) {
 }
 
 function renderView() {
-  $('cv-textview').style.display  = S.view==='text'  ? '' : 'none';
-  $('cv-cardsview').style.display = S.view==='cards' ? '' : 'none';
+  $('cv-textview').hidden  = S.view !== 'text';
+  $('cv-cardsview').hidden = S.view !== 'cards';
   S.view === 'text' ? _renderText() : _renderCards();
 }
 
@@ -421,9 +453,7 @@ function _renderText() {
     } else {
       const cn = ci % COLORS.length;
       const cls = ov ? `ck ck${cn} ckOV` : `ck ck${cn}`;
-      html += `<span class="${cls}" data-ci="${ci}"
-                    onclick="CV.hlChunk(${ci})"
-                    title="Chunk ${ci+1} · ${S.chunks[ci].length} chars">${seg}</span>`;
+      html += `<span class="${cls}" data-ci="${ci}" title="Chunk ${ci + 1} · ${S.chunks[ci].length} chars">${seg}</span>`;
     }
     i = j;
   }
@@ -431,10 +461,9 @@ function _renderText() {
 
   const legItems = S.chunks.slice(0, 20).map((ck, ci) => {
     const c = COLORS[ci % COLORS.length];
-    return `<div class="cv-leg" style="background:${c.bg};border-color:${c.bdr};color:${c.hex}"
-                 onclick="CV.hlChunk(${ci})" title="${esc(ck.preview)}">
+    return `<div class="cv-leg" data-ci="${ci}" style="background:${c.bg};border-color:${c.bdr};color:${c.hex}" title="${esc(ck.preview)}">
               <div class="cv-legdot" style="background:${c.hex}"></div>
-              C${ci+1} <span style="opacity:.5">${ck.length}c</span>
+              C${ci + 1} <span class="cv-leg__n">${ck.length}c</span>
             </div>`;
   }).join('');
   $('cv-legend').innerHTML = legItems +
@@ -472,7 +501,7 @@ async function ingest() {
   const label = S.source === 'text' ? 'TEXTO_DIRETO' : (S.fileName||'DOC').replace(/\.[^/.]+$/,'').toUpperCase().replace(/[-_]/g,' ');
   const btn = $('cv-bingest');
   btn.disabled = true;
-  $('cv-ingprog').style.display = '';
+  $('cv-ingprog').hidden = false;
   $v('cv-proglbl', 'Iniciando ingestão…');
   $('cv-progfill').style.width = '8%';
   badge('busy', 'Ingerindo…');
@@ -508,7 +537,7 @@ async function ingest() {
     $('cv-progfill').style.width = '25%';
     _pollTask(d.task_id, btn);
   } catch(e) {
-    $('cv-ingprog').style.display = 'none';
+    $('cv-ingprog').hidden = true;
     btn.disabled = false;
     badge('err', `${e.message}`);
   }
@@ -563,14 +592,7 @@ async function _post(url, body, isForm=false) {
   return r.json();
 }
 
-return {
-  init, setSource, dzOver, dzLeave, dzDrop, fileSelected,
-  parserChanged, textChanged, fetchUrl,
-  sizeChanged, overlapChanged, settingChanged,
-  simulate, setView, hlChunk, ingest,
-  prevPage, nextPage, gotoPage, loadFullDoc,
-  togglePageSelect, loadSelectedPages, resetDocument // Expostas novas
-};
+return { init };
 })();
 
 document.addEventListener('DOMContentLoaded', CV.init);

@@ -8,7 +8,7 @@ function build({ titulo, corpo, acao = 'Confirmar', perigo = false }) {
     <div class="modal" role="dialog" aria-modal="true" aria-label="${titulo}">
       <div class="modal__head">
         <span class="modal__title"></span>
-        <button class="btn btn--ghost btn--sm" data-x aria-label="Fechar">✕</button>
+        <button class="btn btn--ghost btn--sm" data-x aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
       <div class="modal__body"></div>
       <div class="modal__foot">

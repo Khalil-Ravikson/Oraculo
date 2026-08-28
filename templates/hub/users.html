@@ -21,11 +21,14 @@
 </div>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-3)">
   <span class="caption" id="pag-info">—</span>
-  <span><button class="btn btn--sm" id="prev" disabled>← Anterior</button> <button class="btn btn--sm" id="next" disabled>Próximo →</button></span>
+  <span>
+    <button class="btn btn--sm" id="prev" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15 18-6-6 6-6"/></svg> Anterior</button>
+    <button class="btn btn--sm" id="next" disabled>Próximo <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m9 18 6-6-6-6"/></svg></button>
+  </span>
 </div>
 
 <div class="modal-overlay" id="modal" hidden><div class="modal">
-  <div class="modal__head"><span class="modal__title" id="m-title">Nova pessoa</span><button class="btn btn--ghost btn--sm" id="m-x">✕</button></div>
+  <div class="modal__head"><span class="modal__title" id="m-title">Nova pessoa</span><button class="btn btn--ghost btn--sm" id="m-x" aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
   <div class="modal__body">
     <input type="hidden" id="edit-id">
     <div class="field"><label class="field__label">Nome</label><input class="input" id="f-nome"></div>

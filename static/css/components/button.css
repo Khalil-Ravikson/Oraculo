@@ -23,7 +23,7 @@
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn svg { width: 15px; height: 15px; }
 
-.btn--primary   { --btn-bg: var(--signal); --btn-fg: #17120e; --btn-bd: var(--signal); font-weight: var(--weight-semi); }
+.btn--primary   { --btn-bg: var(--signal); --btn-fg: var(--ink-950); --btn-bd: var(--signal); font-weight: var(--weight-semi); }
 .btn--primary:hover { background: color-mix(in srgb, var(--signal) 88%, white); }
 
 .btn--ghost { --btn-bd: transparent; color: var(--ink-400); }

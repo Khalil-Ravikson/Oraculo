@@ -6,6 +6,10 @@
 
 html { -webkit-text-size-adjust: 100%; }
 
+/* `hidden` sempre vence — regras de componente (`.cx-panel{display:flex}`) não
+   devem re-exibir um elemento marcado hidden. */
+[hidden] { display: none !important; }
+
 body {
   background: var(--ink-950);
   color: var(--paper);
