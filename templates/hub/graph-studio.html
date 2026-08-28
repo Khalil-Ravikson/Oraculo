@@ -1,0 +1,50 @@
+{% extends "hub/_shell.html" %}
+{% block nav_active %}studio{% endblock %}
+{% block page_title %}Graph Studio{% endblock %}
+
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/graph-studio.css">{% endblock %}
+
+{% block content %}
+<div class="studio-view">
+<div class="card" style="border-left:2px solid var(--warn);margin-bottom:var(--space-4)">
+  <div class="card__desc" style="margin:0">
+    Composição visual (Camada 3, adendo de nós declarativos) — arraste nós
+    da paleta, conecte portas compatíveis (clique na porta de saída, depois
+    na porta de entrada), salve. Validação (tipos de porta + grafo
+    acíclico) roda no servidor antes de gravar. <strong>Sem execução
+    real ainda</strong> — salvar aqui só persiste a composição, nenhum
+    fluxo de produção lê isso.
+  </div>
+</div>
+
+<div class="studio-toolbar">
+  <input class="input" id="topo-name" placeholder="nome da topologia" style="max-width:240px">
+  <select class="select" id="topo-load" style="max-width:220px">
+    <option value="">Carregar topologia salva…</option>
+  </select>
+  <button class="btn btn--ghost btn--sm" id="btn-new">Nova</button>
+  <button class="btn btn--ghost btn--sm" id="btn-delete">Remover</button>
+  <span class="studio-toolbar__spacer"></span>
+  <button class="btn btn--primary btn--sm" id="btn-save">Salvar</button>
+</div>
+
+<div class="studio-layout">
+  <aside class="studio-palette">
+    <div class="studio-palette__label">Nós disponíveis</div>
+    <div id="palette" class="studio-palette__list"><span class="caption">Carregando…</span></div>
+    <div class="studio-palette__hint">Clique num nó pra adicionar ao canvas.</div>
+  </aside>
+
+  <div class="studio-canvas-wrap">
+    <div id="canvas"></div>
+  </div>
+</div>
+
+<div id="errors" class="studio-errors" hidden></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/vendor/konva.min.js"></script>
+<script type="module" src="/static/js/pages/graph-studio.js"></script>
+{% endblock %}

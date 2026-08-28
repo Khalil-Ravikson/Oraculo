@@ -1266,6 +1266,121 @@ async def mcp_servers_remove(request: Request, data: McpServerRemoveRequest):
     return {"ok": True, "name": data.name}
 
 
+@router.get("/graph-studio", response_class=HTMLResponse)
+async def graph_studio_page(request: Request):
+    """Serve o canvas de composição visual de grafo (adendo de nós
+    declarativos, Camada 3)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/graph-studio.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/graph-studio/nodes")
+async def graph_studio_nodes(request: Request):
+    """Nós disponíveis pra arrastar no canvas — mesmo registry de
+    /hub/graph-nodes, formato reduzido (só o que o canvas precisa)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph.node_registry import get_registry
+
+    return {"nodes": get_registry().list_nodes()}
+
+
+@router.get("/graph-studio/topologies")
+async def graph_studio_topologies(request: Request):
+    """Topologias salvas (`graph_topology`, migration 015)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph import topology_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    topologias = []
+    try:
+        async with AsyncSessionLocal() as session:
+            topologias = await topology_registry.listar(session)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler graph_topology: %s", exc)
+
+    return {
+        "topologies": [
+            {**t, "atualizado_em": t["atualizado_em"].isoformat() if t["atualizado_em"] else None}
+            for t in topologias
+        ]
+    }
+
+
+class GraphTopologySaveRequest(BaseModel):
+    name:          str
+    topology_json: dict
+    description:   str = ""
+    status:        str = "draft"
+
+
+@router.post("/graph-studio/save")
+async def graph_studio_save(request: Request, data: GraphTopologySaveRequest):
+    """Valida (tipos de porta + DAG) e persiste uma topologia. Retorna os
+    erros de validação sem gravar nada se a topologia for inválida."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph import topology_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            resultado = await topology_registry.salvar(
+                session, data.name, data.topology_json,
+                data.description, data.status, admin=payload.sub,
+            )
+            await session.commit()
+    except topology_registry.TopologiaInvalidaError as exc:
+        return {"error": "Topologia inválida.", "detalhes": exc.erros}
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao salvar topologia '%s': %s", data.name, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    return {
+        "ok": True,
+        **{k: v for k, v in resultado.items() if k != "atualizado_em"},
+        "atualizado_em": resultado["atualizado_em"].isoformat() if resultado["atualizado_em"] else None,
+    }
+
+
+class GraphTopologyRemoveRequest(BaseModel):
+    name: str
+
+
+@router.post("/graph-studio/remove")
+async def graph_studio_remove(request: Request, data: GraphTopologyRemoveRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph import topology_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await topology_registry.remover(session, data.name)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao remover topologia '%s': %s", data.name, exc)
+        return {"error": "Falha ao remover. Tente novamente."}
+
+    if not ok:
+        return {"error": f"Topologia '{data.name}' não existe."}
+    return {"ok": True, "name": data.name}
+
+
 @router.get("/eval", response_class=HTMLResponse)
 async def eval_page(request: Request):
     """Serve a página HTML do Dashboard de Avaliação."""

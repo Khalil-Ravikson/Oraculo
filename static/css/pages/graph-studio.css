@@ -1,0 +1,90 @@
+/* graph-studio.css — canvas de composição visual (Camada 3, Konva.js). */
+
+.studio-view .studio-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.studio-view .studio-toolbar__spacer {
+  flex: 1;
+}
+
+.studio-view .studio-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: var(--space-4);
+}
+
+.studio-view .studio-palette {
+  background: var(--ink-900);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: var(--space-3);
+  align-self: start;
+}
+
+.studio-view .studio-palette__label {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-400);
+  margin-bottom: var(--space-2);
+}
+
+.studio-view .studio-palette__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.studio-view .studio-palette__item {
+  text-align: left;
+  background: var(--ink-950);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-ctl);
+  padding: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--paper);
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+.studio-view .studio-palette__item:hover { border-color: var(--signal); }
+.studio-view .studio-palette__item:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.studio-view .studio-palette__hint {
+  margin-top: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--ink-500);
+  line-height: var(--leading-body);
+}
+
+.studio-view .studio-canvas-wrap {
+  background: var(--ink-950);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  overflow: auto;
+}
+
+.studio-view #canvas {
+  width: 100%;
+  height: 640px;
+}
+
+.studio-view .studio-errors {
+  margin-top: var(--space-4);
+  background: var(--danger-weak);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: var(--radius-card);
+  padding: var(--space-3);
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+.studio-view .studio-errors ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+}

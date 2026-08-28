@@ -452,6 +452,31 @@ class McpServer(Base):
     atualizado_por = Column(String(100), nullable=True)
 
 
+class GraphTopology(Base):
+    """Composição visual de grafo (migration 015, adendo de nós
+    declarativos, Camada 3). `topology_json` = {"nodes": [...], "edges":
+    [...]} — validado por `src/graph/topology_validator.py` (tipos de
+    porta + DAG) ANTES de qualquer escrita. Sem execução real ainda
+    (GraphExecutor não existe) — só persistência da composição."""
+    __tablename__ = "graph_topology"
+    __table_args__ = (
+        Index(
+            "ux_graph_topology_tenant_name", "tenant_id", "name",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id             = Column(Integer, primary_key=True)
+    name           = Column(String(80), nullable=False)
+    description    = Column(String(500), server_default="", nullable=False)
+    topology_json  = Column(JSONB, nullable=False)
+    status         = Column(String(20), server_default="draft", nullable=False)
+    versao         = Column(Integer, server_default="1", nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por = Column(String(100), nullable=True)
+
+
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
 
