@@ -24,12 +24,11 @@ ROTAS_VALIDAS = frozenset({
 VALID_WORKERS = frozenset({"rag_search", "synthesis", "greeting"})
 
 # ── Rotas que nunca fazem sentido cachear (SemanticCache) ──────────────────────
-# Fonte única de verdade (Fase 3.5): antes vivia duplicada como lista solta em
-# worker_synthesis.py e dispatcher.py. SIGAA/MEDIA_DOWNLOAD são consultas
-# dinâmicas de sistema externo (resposta muda a cada chamada real), GREETING/
-# CHECK_STATUS são respondidas sem RAG em outro lugar (nunca chegam aqui de
-# qualquer forma), CRUD é ação de escrita — cachear resposta de escrita é
-# incorreto por definição, não só desnecessário.
+# Plano A / Fase 2: a fonte de verdade em runtime passou a ser a coluna
+# `cacheavel` do `route_registry` (migration 010) — lida por semantic_cache.py /
+# worker_synthesis.py / dispatcher.py / nodes.py via `route_registry.get(rota)`.
+# Este frozenset fica como baseline hardcoded (espelha `route_registry._DEFAULTS`;
+# `test_route_registry` trava a paridade) e para consumidores de teste/doc.
 ROTAS_SEM_CACHE = frozenset({"SIGAA", "MEDIA_DOWNLOAD", "GREETING", "CRUD", "CHECK_STATUS"})
 
 

@@ -43,11 +43,9 @@ def _doc_type_para_rota(rota: str, query: str) -> str:
     return _dag_hint_para_rota(rota, query).get("doc_type", "geral")
 
 
-# Rotas que não fazem sentido cachear: SIGAA/MEDIA_DOWNLOAD são consultas
-# dinâmicas de sistema externo, GREETING/CHECK_STATUS são respondidas sem RAG
-# em outro lugar, CRUD é ação de escrita — mesma lista usada por
-# worker_synthesis.py/dispatcher.py, consolidada aqui pra não divergir.
-from src.router.contracts import ROTAS_SEM_CACHE
+# Se a rota é cacheável vem do `route_registry` (coluna `cacheavel`, migration
+# 010) — mesma fonte usada por semantic_cache.py/worker_synthesis.py/dispatcher.py.
+from src.infrastructure import route_registry
 
 
 async def responder_rag_direto(
@@ -71,7 +69,7 @@ async def responder_rag_direto(
     from src.infrastructure.settings import settings
 
     fatos = fatos or []
-    cacheavel = rota not in ROTAS_SEM_CACHE
+    cacheavel = route_registry.get(rota).cacheavel
 
     if cacheavel:
         cached = await SemanticCache().get(query=mensagem, rota=rota)

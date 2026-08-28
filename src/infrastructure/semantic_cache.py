@@ -19,9 +19,9 @@ import json
 import logging
 import time
 
+from src.infrastructure import route_registry
 from src.infrastructure.redis_client import get_redis_text
 from src.rag.embeddings import get_embeddings
-from src.router.contracts import ROTAS_SEM_CACHE
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,8 @@ TTL_POR_ROTA: dict[str, int] = {
     "WIKI":       12 * 3600,
     "GERAL":      30 * 60,
 }
-_TTL_DEFAULT = 3600
+# Fallback quando a rota não está em TTL_POR_ROTA: config dinâmica
+# `RAG_CACHE_TTL_SECONDS` (default `settings.RAG_CACHE_TTL_SECONDS`).
 
 # Threshold de similaridade cosine por rota — dado factual exige match mais
 # rígido (reduz risco de cache "generoso" numa informação sensível a prazo).
@@ -99,7 +100,7 @@ class SemanticCache:
         """
         Verifica se há um cache hit para a query na rota específica.
         """
-        if rota in ROTAS_SEM_CACHE:
+        if not route_registry.get(rota).cacheavel:
             return None
 
         try:
@@ -156,10 +157,18 @@ class SemanticCache:
         Armazena a resposta no cache. `ttl` explícito sobrescreve o padrão
         por rota (`TTL_POR_ROTA`); omitido, resolve pela rota.
         """
-        if not query or not rota or rota in ROTAS_SEM_CACHE:
+        if not query or not rota or not route_registry.get(rota).cacheavel:
             return
 
-        ttl_efetivo = ttl if ttl is not None else TTL_POR_ROTA.get(rota, _TTL_DEFAULT)
+        # `ttl` explícito > override por rota (`TTL_POR_ROTA`) > config dinâmica
+        # `RAG_CACHE_TTL_SECONDS` (editável via /hub/config, sem restart).
+        if ttl is not None:
+            ttl_efetivo = ttl
+        elif rota in TTL_POR_ROTA:
+            ttl_efetivo = TTL_POR_ROTA[rota]
+        else:
+            from src.infrastructure import dynamic_config
+            ttl_efetivo = dynamic_config.get_int("RAG_CACHE_TTL_SECONDS")
 
         try:
             query_emb = await asyncio.to_thread(self._emb.embed_query, query)

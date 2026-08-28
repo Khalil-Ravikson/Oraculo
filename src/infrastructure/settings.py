@@ -96,6 +96,13 @@ class Settings(BaseSettings):
 
     # ── RAG ───────────────────────────────────────────────────────
     PDF_PARSER:           str = "pymupdf"
+    # Defaults das chaves reconectadas na Fase 1 (Dynamic Configuration).
+    # Estes valores são o fallback hardcoded de `dynamic_config.get_*` quando
+    # Redis/Postgres estão indisponíveis — mesma filosofia de `pricing._PRECOS`.
+    # O valor efetivo em runtime vem de `config_dinamica` (editável via
+    # /hub/config, sem restart).
+    RAG_CACHE_TTL_SECONDS: int  = 3600
+    RAG_RERANKER_ENABLED:  bool = True
     LLAMA_CLOUD_API_KEY:  str = ""
     HF_TOKEN:             str = ""
     DATA_DIR:             str = "/app/dados"

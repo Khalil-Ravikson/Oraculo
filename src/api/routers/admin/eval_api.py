@@ -456,6 +456,9 @@ async def _eval_generation(question: str, answer: str, context: str) -> tuple[fl
         from langchain_core.messages import HumanMessage
         from src.infrastructure.settings import settings
 
+        # Juiz de eval — deliberadamente fora do escopo da reconexão da Fase 1
+        # (Plano A): a eval deve rodar contra um modelo estável/reproduzível,
+        # não seguir o `GEMINI_MODEL` dinâmico de produção.
         llm = ChatGoogleGenerativeAI(
             model=settings.GEMINI_MODEL,
             temperature=0.0,

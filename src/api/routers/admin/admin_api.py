@@ -293,12 +293,14 @@ async def system_flags(_: TokenPayload = Depends(require_admin_jwt)):
 
     # Campos não sensíveis (sem API keys) para pré-preencher /hub/config.
     from src.infrastructure.settings import settings
+    from src.infrastructure import dynamic_config
 
     return {
         "manutencao":     r.get("admin:maintenance_mode") == "1",
         "gemini_bloq":    r.get("admin:gemini_blocked") == "1",
         "prompt_custom":  prompt_custom,
-        "gemini_model":       settings.GEMINI_MODEL,
+        # GEMINI_MODEL é config dinâmica (Fase 1) — valor efetivo, não o .env
+        "gemini_model":       dynamic_config.get_str("GEMINI_MODEL"),
         "deepseek_model":     settings.DEEPSEEK_MODEL,
         "groq_model":         settings.GROQ_MODEL,
         "embedding_provider": settings.EMBEDDING_PROVIDER,
@@ -338,8 +340,11 @@ async def set_prompt(
     return {"ok": True, "msg": msg}
 
 
+# GEMINI_MODEL saiu daqui na Fase 1 (Plano A): virou config dinâmica
+# (`config_dinamica` / /hub/config, sem restart). Editar via .env não teria
+# efeito e divergiria do valor ativo.
 _ENV_KEYS_PERMITIDAS = {
-    "GEMINI_API_KEY", "GEMINI_MODEL", "EMBEDDING_PROVIDER",
+    "GEMINI_API_KEY", "EMBEDDING_PROVIDER",
     "DEEPSEEK_API_KEY", "DEEPSEEK_MODEL",
     "GROQ_API_KEY", "GROQ_MODEL",
     "EVOLUTION_API_KEY", "EVOLUTION_BASE_URL", "EVOLUTION_INSTANCE_NAME",
@@ -465,3 +470,315 @@ async def celery_health(_: TokenPayload = Depends(require_admin_jwt)):
         return {"ok": bool(workers), "workers": workers}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuração dinâmica (Plano A / Fase 1 — config_dinamica, migration 009)
+#
+# Postgres é a fonte de verdade; `dynamic_config` espelha no Redis para o
+# caminho quente. Escrita com controle de concorrência otimista: o cliente
+# manda a `versao` que tinha na tela; se o banco já avançou, devolve 409.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DynamicConfigSetRequest(BaseModel):
+    chave:  str
+    valor:  str
+    versao: int
+
+
+class DynamicConfigRevertRequest(BaseModel):
+    para_versao: int
+    versao:      int
+
+
+@router.get("/config")
+async def get_dynamic_config(_: TokenPayload = Depends(require_admin_jwt)):
+    """Lista as chaves dinâmicas com valor/versão atuais. Reconcilia o
+    espelho Redis a partir do Postgres (fonte de verdade) de passagem —
+    toda abertura da tela sana eventual drift (§N item 2)."""
+    from src.infrastructure import dynamic_config
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.dynamic_config_repository import DynamicConfigRepository
+
+    try:
+        async with AsyncSessionLocal() as session:
+            linhas = await DynamicConfigRepository(session).listar()
+    except Exception as exc:
+        logger.warning("⚠️  [ADMIN] Falha ao ler config_dinamica: %s", exc)
+        raise HTTPException(500, "Falha ao consultar a configuração dinâmica.")
+
+    dynamic_config.espelhar_varias(linhas)
+    return {"chaves": dynamic_config.snapshot(linhas)}
+
+
+@router.get("/config/{chave}/historico")
+async def get_dynamic_config_historico(
+    chave: str,
+    _: TokenPayload = Depends(require_admin_jwt),
+):
+    from src.infrastructure import dynamic_config
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.dynamic_config_repository import DynamicConfigRepository
+
+    if chave not in dynamic_config.ALLOWED_DYNAMIC_KEYS:
+        raise HTTPException(404, f"'{chave}' não é uma chave de configuração dinâmica.")
+
+    try:
+        async with AsyncSessionLocal() as session:
+            hist = await DynamicConfigRepository(session).historico(chave)
+    except Exception as exc:
+        logger.warning("⚠️  [ADMIN] Falha ao ler histórico de '%s': %s", chave, exc)
+        raise HTTPException(500, "Falha ao consultar o histórico.")
+
+    return {
+        "chave": chave,
+        "historico": [
+            {
+                "versao": h["versao"],
+                "valor_antigo": h["valor_antigo"],
+                "valor_novo": h["valor_novo"],
+                "atualizado_por": h["atualizado_por"],
+                "atualizado_em": h["atualizado_em"].isoformat() if h["atualizado_em"] else None,
+            }
+            for h in hist
+        ],
+    }
+
+
+async def _gravar_config_dinamica(
+    chave: str, valor_bruto: str, versao_esperada: int, admin: str, acao: str,
+) -> dict:
+    from src.infrastructure import dynamic_config
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.dynamic_config_repository import (
+        ConflitoDeVersao,
+        DynamicConfigRepository,
+    )
+
+    try:
+        valor, tipo = dynamic_config.normalizar_para_persistir(chave, valor_bruto)
+    except dynamic_config.ChaveNaoPermitida:
+        raise HTTPException(404, f"'{chave}' não é uma chave de configuração dinâmica.")
+    except dynamic_config.ValorInvalido as exc:
+        raise HTTPException(400, str(exc))
+
+    try:
+        async with AsyncSessionLocal() as session:
+            nova_versao = await DynamicConfigRepository(session).upsert(
+                chave, valor, tipo, versao_esperada=versao_esperada, atualizado_por=admin,
+            )
+            await session.commit()
+    except ConflitoDeVersao as exc:
+        raise HTTPException(409, {
+            "erro": "conflito_de_versao",
+            "mensagem": "Este valor mudou desde que você abriu a tela. Recarregue antes de salvar.",
+            "versao_atual": exc.atual,
+        })
+    except Exception as exc:
+        logger.warning("⚠️  [ADMIN] Falha ao gravar config_dinamica '%s': %s", chave, exc)
+        raise HTTPException(500, "Falha ao gravar no Postgres. Tente novamente.")
+
+    dynamic_config.espelhar_redis(chave, valor)
+
+    from src.infrastructure.adapters.redis_audit_log import RedisAuditLog
+    await RedisAuditLog().registar(
+        admin_id=admin, action=acao,
+        target=chave, payload={"valor": valor, "versao": nova_versao}, resultado="ok",
+    )
+
+    return {"ok": True, "chave": chave, "valor": valor, "tipo": tipo, "versao": nova_versao}
+
+
+@router.post("/config")
+async def set_dynamic_config(
+    body:    DynamicConfigSetRequest,
+    payload: TokenPayload = Depends(require_admin_jwt),
+):
+    return await _gravar_config_dinamica(
+        body.chave, body.valor, body.versao, payload.sub, "set_dynamic_config",
+    )
+
+
+@router.post("/config/{chave}/reverter")
+async def revert_dynamic_config(
+    chave:   str,
+    body:    DynamicConfigRevertRequest,
+    payload: TokenPayload = Depends(require_admin_jwt),
+):
+    from src.infrastructure import dynamic_config
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.dynamic_config_repository import DynamicConfigRepository
+
+    if chave not in dynamic_config.ALLOWED_DYNAMIC_KEYS:
+        raise HTTPException(404, f"'{chave}' não é uma chave de configuração dinâmica.")
+
+    try:
+        async with AsyncSessionLocal() as session:
+            alvo = await DynamicConfigRepository(session).valor_na_versao(chave, body.para_versao)
+    except Exception as exc:
+        logger.warning("⚠️  [ADMIN] Falha ao ler versão-alvo de '%s': %s", chave, exc)
+        raise HTTPException(500, "Falha ao consultar o histórico.")
+
+    if alvo is None:
+        raise HTTPException(404, f"Versão {body.para_versao} não encontrada no histórico de '{chave}'.")
+
+    return await _gravar_config_dinamica(
+        chave, alvo, body.versao, payload.sub, "revert_dynamic_config",
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Route/Workflow Registry (Plano A / Fase 2 — route_registry, migration 010)
+#
+# Colapsa os dicts hardcoded de rota→execução. Mesma mecânica do config
+# dinâmico: optimistic lock (409), histórico com snapshot da linha, reverter.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RouteRegistrySetRequest(BaseModel):
+    campos: dict
+    versao: int
+
+
+class RouteRegistryRevertRequest(BaseModel):
+    para_versao: int
+    versao:      int
+
+
+@router.get("/routes")
+async def get_route_registry(_: TokenPayload = Depends(require_admin_jwt)):
+    """Lista as 11 rotas com valor/versão atuais e reconcilia o espelho Redis."""
+    from src.infrastructure import route_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.route_registry_repository import RouteRegistryRepository
+
+    try:
+        async with AsyncSessionLocal() as session:
+            cfgs = await RouteRegistryRepository(session).listar()
+    except Exception as exc:
+        logger.warning("⚠️  [ADMIN] Falha ao ler route_registry: %s", exc)
+        raise HTTPException(500, "Falha ao consultar o registro de rotas.")
+
+    route_registry.espelhar_varias(cfgs)
+    return {
+        "rotas": route_registry.snapshot(cfgs),
+        "nodes_validos": sorted(route_registry.NODES_ENTRYPOINT),
+        "owners_validos": sorted(route_registry.OWNERS_VALIDOS),
+    }
+
+
+@router.get("/routes/{rota}/historico")
+async def get_route_registry_historico(
+    rota: str,
+    _: TokenPayload = Depends(require_admin_jwt),
+):
+    from src.infrastructure import route_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.route_registry_repository import RouteRegistryRepository
+
+    if rota not in route_registry.ROTAS:
+        raise HTTPException(404, f"'{rota}' não é uma rota conhecida.")
+
+    try:
+        async with AsyncSessionLocal() as session:
+            hist = await RouteRegistryRepository(session).historico(rota)
+    except Exception as exc:
+        logger.warning("⚠️  [ADMIN] Falha ao ler histórico da rota '%s': %s", rota, exc)
+        raise HTTPException(500, "Falha ao consultar o histórico.")
+
+    return {
+        "rota": rota,
+        "historico": [
+            {
+                "versao": h["versao"],
+                "snapshot": h["snapshot"],
+                "atualizado_por": h["atualizado_por"],
+                "atualizado_em": h["atualizado_em"].isoformat() if h["atualizado_em"] else None,
+            }
+            for h in hist
+        ],
+    }
+
+
+async def _gravar_route_registry(
+    rota: str, campos: dict, versao_esperada: int, admin: str, acao: str,
+) -> dict:
+    from src.infrastructure import route_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.route_registry_repository import (
+        ConflitoDeVersao,
+        RouteRegistryRepository,
+    )
+
+    if rota not in route_registry.ROTAS:
+        raise HTTPException(404, f"'{rota}' não é uma rota conhecida.")
+
+    try:
+        campos_validos = route_registry.validar_campos(campos)
+    except route_registry.CamposInvalidos as exc:
+        raise HTTPException(400, str(exc))
+
+    try:
+        async with AsyncSessionLocal() as session:
+            cfg = await RouteRegistryRepository(session).upsert(
+                rota, campos_validos, versao_esperada=versao_esperada, atualizado_por=admin,
+            )
+            await session.commit()
+    except ConflitoDeVersao as exc:
+        raise HTTPException(409, {
+            "erro": "conflito_de_versao",
+            "mensagem": "Esta rota mudou desde que você abriu a tela. Recarregue antes de salvar.",
+            "versao_atual": exc.atual,
+        })
+    except Exception as exc:
+        logger.warning("⚠️  [ADMIN] Falha ao gravar route_registry '%s': %s", rota, exc)
+        raise HTTPException(500, "Falha ao gravar no Postgres. Tente novamente.")
+
+    route_registry.espelhar_redis(cfg)   # write-through best-effort (swallows)
+
+    from src.infrastructure.adapters.redis_audit_log import RedisAuditLog
+    await RedisAuditLog().registar(
+        admin_id=admin, action=acao,
+        target=rota, payload={"campos": campos_validos, "versao": cfg.versao}, resultado="ok",
+    )
+
+    return {"ok": True, "rota": rota, "versao": cfg.versao}
+
+
+@router.post("/routes/{rota}")
+async def set_route_registry(
+    rota:    str,
+    body:    RouteRegistrySetRequest,
+    payload: TokenPayload = Depends(require_admin_jwt),
+):
+    return await _gravar_route_registry(
+        rota, body.campos, body.versao, payload.sub, "set_route_registry",
+    )
+
+
+@router.post("/routes/{rota}/reverter")
+async def revert_route_registry(
+    rota:    str,
+    body:    RouteRegistryRevertRequest,
+    payload: TokenPayload = Depends(require_admin_jwt),
+):
+    from src.infrastructure import route_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.route_registry_repository import RouteRegistryRepository
+
+    if rota not in route_registry.ROTAS:
+        raise HTTPException(404, f"'{rota}' não é uma rota conhecida.")
+
+    try:
+        async with AsyncSessionLocal() as session:
+            snap = await RouteRegistryRepository(session).snapshot_da_versao(rota, body.para_versao)
+    except Exception as exc:
+        logger.warning("⚠️  [ADMIN] Falha ao ler versão-alvo da rota '%s': %s", rota, exc)
+        raise HTTPException(500, "Falha ao consultar o histórico.")
+
+    if snap is None:
+        raise HTTPException(404, f"Versão {body.para_versao} não encontrada no histórico de '{rota}'.")
+
+    campos = {k: snap[k] for k in route_registry.CAMPOS_EDITAVEIS if k in snap}
+    return await _gravar_route_registry(
+        rota, campos, body.versao, payload.sub, "revert_route_registry",
+    )

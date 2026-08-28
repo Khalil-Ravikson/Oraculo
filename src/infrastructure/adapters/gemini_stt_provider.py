@@ -24,6 +24,10 @@ class GeminiSTTProvider:
         import google.genai as genai
         from src.infrastructure.settings import settings
 
+        # NB: STT (Fase 6, adiada) continua lendo `GEMINI_MODEL` de `settings` —
+        # não foi reconectado à config dinâmica nesta fase para não deixar a
+        # telemetria de custo em `audio_service.py` (que ainda lê `settings`)
+        # divergir do modelo real. Reconectar os dois juntos quando a Fase 6 vier.
         self._model  = model or settings.GEMINI_MODEL
         self._client = genai.Client(api_key=api_key or settings.GEMINI_API_KEY)
 

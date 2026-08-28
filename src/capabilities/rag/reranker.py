@@ -76,6 +76,13 @@ def get_reranker():
         return None
 
 async def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
+    # Kill-switch do admin (Plano A / Fase 1): `RAG_RERANKER_ENABLED` é config
+    # dinâmica, editável via /hub/config sem restart. Independente da flag
+    # `reranker:status` (auto-desativação por falha de carregamento de modelo).
+    from src.infrastructure import dynamic_config
+    if not dynamic_config.get_bool("RAG_RERANKER_ENABLED"):
+        return chunks[:top_k]
+
     try:
         from src.infrastructure.redis_client import get_redis_text
         r = get_redis_text()

@@ -97,6 +97,18 @@ async def _startup(settings) -> None:
         r = get_redis_text()
         r.delete("reranker:status")
         logger.info("✅ Status do Reranker resetado no Redis (pronto para tentar carregar)")
+
+        # Config dinâmica (Plano A / Fase 1): espelha `config_dinamica`
+        # (Postgres) no Redis para o caminho quente síncrono não depender de
+        # read-repair. Nunca crítico — `dynamic_config.get_*` cai no default.
+        from src.infrastructure import dynamic_config
+        await dynamic_config.hydrate_redis()
+
+        # Route/Workflow Registry (Plano A / Fase 2): espelha `route_registry`
+        # no Redis para o Supervisor / semantic_cache / dispatcher lerem no
+        # caminho quente. Nunca crítico — cai em `route_registry._DEFAULTS`.
+        from src.infrastructure import route_registry
+        await route_registry.hydrate_redis()
         
     except Exception as exc:
         logger.error("❌ Falha crítica no Redis/Seeder: %s", exc)

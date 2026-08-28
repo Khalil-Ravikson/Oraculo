@@ -7,7 +7,8 @@ Nasceu como wrapper fino que intercepta só TICKET_ABERTURA/CRUD/RAG
 (GERAL/CALENDARIO/EDITAL/CONTATOS/WIKI) e delega o resto pro
 `application/runtime/dispatcher.py` original; SIGAA/MEDIA_DOWNLOAD/
 GREETING/CHECK_STATUS estão sendo portadas pra nodes nativos do grafo aqui,
-rota a rota — ver `_ROTAS_LANGGRAPH` e o estado de cada uma abaixo.
+rota a rota. A decisão "grafo vs dispatcher.py" por rota vem do
+`route_registry` (coluna `owner` + FEATURE_LANGGRAPH_NATIVE_ROUTES, Fase 2).
 `dispatcher.py` deixa de ser chamado em produção quando a última rota
 migrar (fica só pra debug/eval).
 
@@ -62,31 +63,16 @@ from src.application.runtime.dispatcher import processar as _processar_original
 
 logger = logging.getLogger(__name__)
 
-# Rotas RAG "puras" (sem HITL) — usadas tanto pro roteamento normal quanto
-# como escopo do "detour" institucional (pergunta solta no meio de um funil
-# HITL): só essas rotas podem interromper um ticket/CRUD pra responder algo
-# e depois retomar. SIGAA/comandos/outras rotas ambíguas NÃO entram no
-# detour — caem no comportamento padrão do node (rejeita/re-pergunta).
-_ROTAS_DETOUR_RAG = {"GERAL", "CALENDARIO", "EDITAL", "CONTATOS", "WIKI"}
-_ROTAS_LANGGRAPH = _ROTAS_DETOUR_RAG | {"TICKET_ABERTURA", "CRUD"}
-
-# Fase 2d (Decisão 01): rotas nativas condicionais — só entram em
-# _ROTAS_LANGGRAPH quando settings.FEATURE_LANGGRAPH_NATIVE_ROUTES está
-# ligada (default: desligada, ver settings.py Fase 1). Com a flag
-# desligada, o comportamento é idêntico a antes desta fase: as 4 rotas
-# continuam delegadas pra dispatcher.py::processar().
-_ROTAS_LANGGRAPH_NATIVAS_CONDICIONAIS = {"CHECK_STATUS", "GREETING", "MEDIA_DOWNLOAD", "SIGAA"}
-
-_ROUTE_TO_ROTA = {
-    "ticket": "TICKET_ABERTURA", "crud": "CRUD",
-    "check_status": "CHECK_STATUS", "greeting": "GREETING",
-    "media_download": "MEDIA_DOWNLOAD", "sigaa": "SIGAA",
-}
-_ROTA_TO_ROUTE = {
-    "TICKET_ABERTURA": "ticket", "CRUD": "crud",
-    "CHECK_STATUS": "check_status", "GREETING": "greeting",
-    "MEDIA_DOWNLOAD": "media_download", "SIGAA": "sigaa",
-}
+# Plano A / Fase 2: os frozensets/dicts de rota→execução que viviam aqui
+# (_ROTAS_DETOUR_RAG, _ROTAS_LANGGRAPH, _ROTAS_LANGGRAPH_NATIVAS_CONDICIONAIS,
+# _ROUTE_TO_ROTA, _ROTA_TO_ROUTE) foram colapsados na tabela `route_registry`
+# (migration 010) — lida via `src.infrastructure.route_registry`, com
+# `_DEFAULTS` hardcoded como fallback fiel ao estado pré-Fase-2.
+#   owner="langgraph"              → tratada pelo grafo
+#   owner="langgraph_conditional"  → grafo só com FEATURE_LANGGRAPH_NATIVE_ROUTES
+#   owner="legacy"                 → sempre delegada pra dispatcher.py
+#   permite_detour                 → pode interromper um funil HITL
+#   entrypoint_node                → qual node do grafo (state.route)
 
 # Singleton de processo: correto desde que o processo Celery mantenha um único event loop
 # vivo pela vida inteira (ver src/infrastructure/celery_app.py::run_in_worker_loop() +
@@ -146,7 +132,8 @@ def _thread_config(session_id: str) -> dict:
 
 
 def _rota_from_route(route: str) -> str:
-    return _ROUTE_TO_ROTA.get(route, (route or "GERAL").upper())
+    from src.infrastructure import route_registry
+    return route_registry.rota_do_node(route)
 
 
 def _reset_payload_para_rota(
@@ -371,7 +358,8 @@ async def processar(
             from src.router.supervisor import rotear
 
             decision = await rotear(message, session_id, user_context)
-            if decision.rota in _ROTAS_DETOUR_RAG:
+            from src.infrastructure import route_registry
+            if route_registry.get(decision.rota).permite_detour:
                 pergunta_pendente = ""
                 if state.tasks and state.tasks[0].interrupts:
                     pergunta_pendente = state.tasks[0].interrupts[0].value.get("question", "")
@@ -405,26 +393,23 @@ async def processar(
 
     decision = await rotear(message, session_id, user_context)
 
-    # Fase 2d (Decisão 01): rotas nativas condicionais entram no escopo do
-    # grafo só com a flag ligada — desligada, comportamento idêntico a
-    # antes (delega as 4 pro dispatcher.py original).
+    # Fase 2: a decisão "grafo vs dispatcher.py legado" vem do `route_registry`
+    # (owner + FEATURE_LANGGRAPH_NATIVE_ROUTES). Flag desligada = comportamento
+    # idêntico a antes (as 4 rotas condicionais delegam pra dispatcher.py).
+    from src.infrastructure import route_registry
     from src.infrastructure.settings import settings
 
-    rotas_langgraph = _ROTAS_LANGGRAPH
-    if settings.FEATURE_LANGGRAPH_NATIVE_ROUTES:
-        rotas_langgraph = rotas_langgraph | _ROTAS_LANGGRAPH_NATIVAS_CONDICIONAIS
+    rr = route_registry.get(decision.rota)
 
-    if decision.rota not in rotas_langgraph:
-        # Não é escopo deste experimento (SIGAA, comandos, greeting...)
-        # → delega inteiro pro pipeline original, sem retrabalho nosso.
-        # `decision_pronta=decision`: bug real corrigido (achado analisando
-        # log de produção) — sem isso, `dispatcher.py::processar()`
-        # reclassificava a MESMA mensagem do zero (2ª chamada Gemini Flash
-        # paga, mesmo custo/latência em dobro pra rotear 1 mensagem só).
+    if rr.delega_para_legado(settings.FEATURE_LANGGRAPH_NATIVE_ROUTES) \
+            or rr.entrypoint_node not in route_registry.NODES_ENTRYPOINT:
+        # Delega inteiro pro pipeline original. `decision_pronta=decision`:
+        # bug real corrigido (log de produção) — sem isso `dispatcher.py`
+        # reclassificava a MESMA mensagem do zero (2ª chamada Gemini Flash paga).
         return await _processar_original(message, session_id, user_context, history, fatos,
                                           decision_pronta=decision)
 
-    route = _ROTA_TO_ROUTE.get(decision.rota, "rag")
+    route = rr.entrypoint_node
     logger.info("🧪 [LANGGRAPH] rota=%s → node=%s (session=%s)", decision.rota, route, session_id)
 
     payload = _reset_payload_para_rota(

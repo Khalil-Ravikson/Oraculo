@@ -250,8 +250,8 @@
           <button class="key-toggle" onclick="toggleKey('key-gemini')">👁</button>
         </div>
         <div class="key-row">
-          <span class="key-name">GEMINI_MODEL</span>
-          <input class="key-input" type="text" id="key-gemini-model" placeholder="gemini-2.0-flash-lite" data-env="GEMINI_MODEL">
+          <span class="key-name" style="color:var(--muted)">GEMINI_MODEL</span>
+          <span style="font-size:11px;color:var(--muted)">agora em <b>Configuração Dinâmica</b> (abaixo) — sem restart</span>
           <span style="width:44px"></span>
         </div>
         <div class="key-row">
@@ -414,6 +414,34 @@
     </div>
   </div>
 
+  <!-- Configuração Dinâmica (Plano A / Fase 1) -->
+  <div class="section">
+    <div class="section-label">// configuração dinâmica — runtime, sem restart</div>
+    <div class="config-card">
+      <div class="config-card-title">🎛️ Chaves dinâmicas</div>
+      <div class="config-card-desc">
+        Entram em vigor na próxima leitura, sem reiniciar serviços. Fonte de
+        verdade: Postgres (<span style="font-family:var(--mono)">config_dinamica</span>),
+        espelhado no Redis. Cada salvamento cria uma versão revertível.
+      </div>
+      <div id="dyn-list" style="font-family:var(--mono);font-size:12px;margin-top:8px;">Carregando…</div>
+      <div style="margin-top:14px;">
+        <a href="/hub/routes" class="btn-secondary" style="text-decoration:none;display:inline-block;">Registro de Rotas (rota→execução) →</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de histórico -->
+  <div id="dyn-hist" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;padding:60px 20px;overflow:auto;">
+    <div style="max-width:640px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div class="config-card-title" id="dyn-hist-title">Histórico</div>
+        <button class="btn-secondary" onclick="document.getElementById('dyn-hist').style.display='none'">FECHAR</button>
+      </div>
+      <div id="dyn-hist-body" style="font-family:var(--mono);font-size:11px;"></div>
+    </div>
+  </div>
+
   <!-- Workers -->
   <div class="section">
     <div class="section-label">// workers celery</div>
@@ -495,7 +523,6 @@ async function loadCurrentConfig() {
       document.getElementById('maint-status').style.color = 'var(--green)';
     }
     // Pré-preencher campos não-sensíveis se retornados pela API
-    if (sys.gemini_model)      document.getElementById('key-gemini-model').value = sys.gemini_model;
     if (sys.evolution_url)     document.getElementById('key-evolution-url').value = sys.evolution_url;
     if (sys.evolution_instance) document.getElementById('key-evolution-inst').value = sys.evolution_instance;
     if (sys.deepseek_model)    document.getElementById('key-deepseek-model').value = sys.deepseek_model;
@@ -565,6 +592,104 @@ async function checkWorkers() {
   }
 }
 
+// ── Configuração Dinâmica (Plano A / Fase 1) ──
+const DYN_VERSOES = {};
+
+// Escapa texto vindo do banco antes de interpolar em HTML (valores como
+// GEMINI_MODEL são texto livre).
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, m => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]
+  ));
+}
+
+function dynWidget(c) {
+  const v = String(c.valor);
+  const off = c.reconectada ? '' : ' disabled';
+  if (c.tipo === 'bool') {
+    return `<select id="dyn-in-${c.chave}" class="key-input" style="max-width:160px"${off}>
+      <option value="true" ${v === 'true' ? 'selected' : ''}>true</option>
+      <option value="false" ${v === 'false' ? 'selected' : ''}>false</option></select>`;
+  }
+  const t = c.tipo === 'int' ? 'number' : 'text';
+  return `<input id="dyn-in-${c.chave}" class="key-input" type="${t}" value="${esc(v)}" style="max-width:260px"${off}>`;
+}
+
+async function loadDynamicConfig() {
+  const box = document.getElementById('dyn-list');
+  try {
+    const d = await api('/config');
+    box.innerHTML = d.chaves.map(c => {
+      DYN_VERSOES[c.chave] = c.versao;
+      const dirty = c.valor !== c.default;
+      const tag = c.reconectada
+        ? `${c.tipo} · v${c.versao}${dirty ? ' · ≠ default' : ''}`
+        : `${c.tipo} · aguarda reconexão (Fase 2/3)`;
+      const salvar = c.reconectada
+        ? `<button class="btn-primary" onclick="saveDynamic('${c.chave}')">SALVAR</button>`
+        : `<button class="btn-secondary" disabled title="Consumidor ainda lê de settings — reconexão em fase futura">SALVAR</button>`;
+      return `<div class="key-row" style="grid-template-columns:260px 1fr auto auto;${c.reconectada ? '' : 'opacity:.55;'}">
+        <span class="key-name">${c.chave}<br><span style="color:var(--muted);font-size:9px">${tag}</span></span>
+        ${dynWidget(c)}
+        ${salvar}
+        <button class="btn-secondary" onclick="showDynHistory('${c.chave}')">HISTÓRICO</button>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    box.innerHTML = `<span style="color:var(--red)">Erro ao carregar: ${esc(e.message)}</span>`;
+  }
+}
+
+async function saveDynamic(chave) {
+  const el = document.getElementById('dyn-in-' + chave);
+  try {
+    const d = await api('/config', { method: 'POST', body: { chave, valor: String(el.value), versao: DYN_VERSOES[chave] } });
+    DYN_VERSOES[chave] = d.versao;
+    toast(`${chave} = ${d.valor} (v${d.versao})`);
+    loadDynamicConfig();
+  } catch (e) {
+    const conflito = /409/.test(e.message);
+    toast(conflito
+      ? `${chave} mudou desde que a tela abriu — recarregado`
+      : `Erro ao salvar ${chave}: ${e.message}`, 'err');
+    loadDynamicConfig();
+  }
+}
+
+async function showDynHistory(chave) {
+  document.getElementById('dyn-hist-title').textContent = 'Histórico — ' + chave;
+  const body = document.getElementById('dyn-hist-body');
+  document.getElementById('dyn-hist').style.display = 'block';
+  body.innerHTML = 'Carregando…';
+  try {
+    const d = await api(`/config/${chave}/historico`);
+    if (!d.historico.length) { body.innerHTML = '<span style="color:var(--muted)">Sem histórico.</span>'; return; }
+    body.innerHTML = d.historico.map(h => `
+      <div class="worker-item" style="justify-content:space-between">
+        <span>v${h.versao} · <b>${esc(h.valor_novo)}</b> <span style="color:var(--muted)">(era ${h.valor_antigo == null ? '—' : esc(h.valor_antigo)})</span></span>
+        <span style="color:var(--muted)">${esc(h.atualizado_por || '?')} · ${esc((h.atualizado_em || '').slice(0,19).replace('T',' '))}</span>
+        <button class="btn-secondary" onclick="revertDynamic('${chave}', ${h.versao})">REVERTER</button>
+      </div>`).join('');
+  } catch (e) {
+    body.innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`;
+  }
+}
+
+async function revertDynamic(chave, paraVersao) {
+  if (!confirm(`Reverter ${chave} para o valor da versão ${paraVersao}?`)) return;
+  try {
+    const d = await api(`/config/${chave}/reverter`, { method: 'POST', body: { para_versao: paraVersao, versao: DYN_VERSOES[chave] } });
+    DYN_VERSOES[chave] = d.versao;
+    toast(`${chave} revertido → ${d.valor} (v${d.versao})`);
+    document.getElementById('dyn-hist').style.display = 'none';
+    loadDynamicConfig();
+  } catch (e) {
+    toast('Erro ao reverter: ' + e.message, 'err');
+    loadDynamicConfig();
+  }
+}
+
 loadCurrentConfig();
+loadDynamicConfig();
 </script>
 {% endblock %}

@@ -187,6 +187,23 @@ def on_worker_process_init(**kwargs):
     except Exception as e:
         logger.warning("⚠️ [CELERY] Falha ao configurar tracing: %s", e)
 
+    # Config dinâmica (Plano A / Fase 1): espelha `config_dinamica` no Redis
+    # deste processo worker — sem gate, são ~7 GET/SET. `dynamic_config.get_*`
+    # (síncrono, caminho quente das tasks) passa a ler do espelho sem
+    # depender de read-repair. Nunca crítico.
+    try:
+        from src.infrastructure import dynamic_config
+        run_in_worker_loop(dynamic_config.hydrate_redis())
+    except Exception as e:
+        logger.warning("⚠️ [CELERY] Falha ao hidratar config dinâmica: %s", e)
+
+    # Route/Workflow Registry (Plano A / Fase 2) — mesmo motivo.
+    try:
+        from src.infrastructure import route_registry
+        run_in_worker_loop(route_registry.hydrate_redis())
+    except Exception as e:
+        logger.warning("⚠️ [CELERY] Falha ao hidratar route_registry: %s", e)
+
     if os.environ.get("CELERY_PRELOAD_RERANKER", "false").lower() != "true":
         return
     try:

@@ -1,13 +1,13 @@
 # src/infrastructure/database/models.py
 from __future__ import annotations
-from sqlalchemy import Boolean, Column, DateTime, Enum as SQLEnum, BigInteger, ForeignKey, Text, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, DateTime, Enum as SQLEnum, BigInteger, ForeignKey, Index, Text, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase
 # Importa os Enums do domínio para tipar as colunas
 from src.domain.entities.enums import RoleEnum, CentroEnum, StatusMatriculaEnum,TurnoEnum
 from datetime import datetime, timezone
 from sqlalchemy.orm import relationship
 
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
 class Base(DeclarativeBase):
     pass
 
@@ -282,6 +282,101 @@ class AgentPrompt(Base):
     active       = Column(Boolean, server_default="false", nullable=False)
     created_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     created_by   = Column(String(100), nullable=True)
+
+
+class ConfigDinamica(Base):
+    """Valor atual de cada chave de configuração dinâmica (migration 009,
+    Plano A / Fase 1). Fonte de verdade é o Postgres; `dynamic_config.py`
+    mantém um espelho no Redis para leitura no caminho quente.
+
+    `versao` sobe a cada escrita e é usada para controle de concorrência
+    otimista no repositório (`WHERE versao = :versao_lida`, §N). `tenant_id`
+    é sempre NULL hoje — reservado para a Fase 9 (§M), nunca filtrado no
+    código das Fases 1-5. Índice único `(tenant_id, chave)` com
+    `NULLS NOT DISTINCT` (ver migration).
+    """
+    __tablename__ = "config_dinamica"
+    __table_args__ = (
+        Index(
+            "ux_config_dinamica_tenant_chave", "tenant_id", "chave",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id             = Column(Integer, primary_key=True)
+    chave          = Column(String(80), nullable=False)
+    valor          = Column(Text, nullable=False)
+    tipo           = Column(String(10), nullable=False)   # bool | int | str
+    versao         = Column(Integer, server_default="1", nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por = Column(String(100), nullable=True)
+
+
+class ConfigDinamicaHistorico(Base):
+    """Histórico append-only de `config_dinamica` (migration 009, §N).
+    Nunca recebe UPDATE/DELETE do código — cada escrita insere uma linha
+    com `valor_antigo`/`valor_novo` para o botão "reverter" do Hub.
+    """
+    __tablename__ = "config_dinamica_historico"
+
+    id             = Column(Integer, primary_key=True)
+    chave          = Column(String(80), nullable=False, index=True)
+    valor_antigo   = Column(Text, nullable=True)
+    valor_novo     = Column(Text, nullable=False)
+    versao         = Column(Integer, nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_por = Column(String(100), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class RouteRegistry(Base):
+    """Mapa rota→EXECUÇÃO (migration 010, Plano A / Fase 2). Colapsa os
+    dicts/frozensets hardcoded de `contracts.py` / `dispatcher.py` /
+    `dispatcher_langgraph.py` / `supervisor.py::_HINTS`.
+
+    Fonte de verdade é o Postgres; `route_registry.py` espelha no Redis para
+    o caminho quente. `versao` = optimistic lock (§N). `tenant_id` sempre
+    NULL hoje (§M). Índice único `(tenant_id, rota)` NULLS NOT DISTINCT.
+    Não cobre classificação — isso é `intents_router` (migration 003).
+    """
+    __tablename__ = "route_registry"
+    __table_args__ = (
+        Index(
+            "ux_route_registry_tenant_rota", "tenant_id", "rota",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id              = Column(Integer, primary_key=True)
+    rota            = Column(String(40), nullable=False)
+    entrypoint_node = Column(String(40), nullable=False)   # state.route: rag|ticket|crud|greeting|sigaa|media_download|check_status
+    owner           = Column(String(24), nullable=False)   # langgraph | langgraph_conditional | legacy
+    agente          = Column(String(50), nullable=True)    # nome no registry; NULL p/ rotas utilitárias
+    cacheavel       = Column(Boolean, nullable=False)
+    permite_detour  = Column(Boolean, server_default="false", nullable=False)
+    doc_type        = Column(String(30), nullable=True)
+    k               = Column(Integer, nullable=True)
+    planner_steps   = Column(ARRAY(String), nullable=True)
+    versao          = Column(Integer, server_default="1", nullable=False)
+    tenant_id       = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por  = Column(String(100), nullable=True)
+
+
+class RouteRegistryHistorico(Base):
+    """Histórico append-only de `route_registry` (migration 010, §N). Guarda
+    um snapshot da linha inteira por versão — o botão "reverter" do Hub
+    restaura o snapshot como uma escrita nova."""
+    __tablename__ = "route_registry_historico"
+
+    id             = Column(Integer, primary_key=True)
+    rota           = Column(String(40), nullable=False, index=True)
+    versao         = Column(Integer, nullable=False)
+    snapshot       = Column(JSONB, nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_por = Column(String(100), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class DocumentChunk(Base):

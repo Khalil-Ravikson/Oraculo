@@ -121,13 +121,14 @@ async def dashboard(request: Request):
     if not payload:
         return RedirectResponse("/hub/login", status_code=302)
 
+    from src.infrastructure import dynamic_config
     return templates.TemplateResponse(
         request=request,
         name="hub/index.html",
         context={
             "request":  request,
             "username": payload.sub,
-            "modelo":   settings.GEMINI_MODEL,
+            "modelo":   dynamic_config.get_str("GEMINI_MODEL"),  # config dinâmica (Fase 1)
             "dev_mode": settings.DEV_MODE,
         },
     )
@@ -416,13 +417,14 @@ async def chunkviz_page(request: Request):
     if not payload:
         return RedirectResponse("/hub/login", status_code=302)
 
+    from src.infrastructure import dynamic_config
     return templates.TemplateResponse(
         request=request,
         name="hub/chunkviz.html", # Verifique se o arquivo está nesta pasta
         context={
-            "request": request, 
+            "request": request,
             "username": payload.sub,
-            "modelo": settings.GEMINI_MODEL
+            "modelo": dynamic_config.get_str("GEMINI_MODEL"),  # config dinâmica (Fase 1)
         },
     )
 @router.get("/config", response_class=HTMLResponse)
@@ -432,6 +434,18 @@ async def config_page(request: Request):
         return RedirectResponse("/hub/login", status_code=302)
     return templates.TemplateResponse(
         request=request, name="hub/config.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/routes", response_class=HTMLResponse)
+async def routes_page(request: Request):
+    """Registro de rotas (Plano A / Fase 2) — mapa rota→execução editável."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/routes.html",
         context={"request": request, "username": payload.sub},
     )
 
@@ -992,9 +1006,11 @@ async def eval_page(request: Request):
     payload = _verificar_cookie(request)
     if not payload:
         return RedirectResponse("/hub/login", status_code=302)
+    from src.infrastructure import dynamic_config
     return templates.TemplateResponse(
         request=request, name="hub/eval.html",
-        context={"request": request, "username": payload.sub, "modelo": settings.GEMINI_MODEL},
+        context={"request": request, "username": payload.sub,
+                 "modelo": dynamic_config.get_str("GEMINI_MODEL")},  # config dinâmica (Fase 1)
     )
 # ─────────────────────────────────────────────────────────────────────────────
 # Endpoints Integrados do ChunkViz (Controller)

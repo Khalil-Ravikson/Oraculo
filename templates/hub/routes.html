@@ -1,0 +1,184 @@
+{% extends "hub/_base.html" %}
+{% block title %}Registro de Rotas — Oráculo UEMA{% endblock %}
+
+{% block content %}
+<style>
+  :root {
+    --bg: #090b0d; --surface: #0f1214; --surface2: #141719;
+    --border: #1e2225; --accent: #ff6b35;
+    --green: #2eb872; --red: #e84040; --muted: #5a6370; --text: #c8d0d8;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', sans-serif; }
+  .header { position: sticky; top: 0; z-index: 50; background: rgba(9,11,13,.92);
+    border-bottom: 1px solid var(--border); padding: 0 28px; height: 58px;
+    display: flex; align-items: center; justify-content: space-between; }
+  .brand-title { font-size: 14px; font-weight: 700; }
+  .brand-sub { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+  .back-btn { background: transparent; color: var(--muted); border: 1px solid var(--border);
+    padding: 5px 12px; border-radius: 5px; font-family: var(--mono); font-size: 10px; text-decoration: none; }
+  .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .main { padding: 28px; max-width: 1240px; margin: 0 auto; }
+  .lead { font-size: 12px; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; text-transform: uppercase;
+    font-size: 9px; letter-spacing: .08em; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:hover td { background: var(--surface); }
+  .rota-nome { font-weight: 700; color: var(--text); }
+  input, select { background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    font-family: var(--mono); font-size: 11px; padding: 4px 6px; border-radius: 4px; width: 100%; }
+  input:disabled, select:disabled { opacity: .5; }
+  input[type=checkbox] { width: auto; }
+  .btn { background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: 4px 10px; border-radius: 4px; cursor: pointer; font-family: var(--mono); font-size: 10px; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-primary { background: var(--accent); color: #000; border: none; font-weight: 700; }
+  .col-narrow { width: 90px; } .col-mid { width: 130px; }
+  #toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface);
+    border: 1px solid var(--accent); border-radius: 8px; padding: 12px 18px;
+    font-family: var(--mono); font-size: 12px; color: var(--accent); z-index: 1000;
+    opacity: 0; transform: translateY(8px); transition: all .3s; pointer-events: none; }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #hist { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 900; padding: 60px 20px; overflow: auto; }
+  #hist > div { max-width: 720px; margin: 0 auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: 10px; color: var(--muted); }
+</style>
+
+<header class="header">
+  <div>
+    <div class="brand-title">Registro de Rotas</div>
+    <div class="brand-sub">rota → execução · route_registry</div>
+  </div>
+  <a href="/hub/config" class="back-btn">← Configuração</a>
+</header>
+
+<main class="main">
+  <div class="lead">
+    Mapa rota→execução (migration 010). Editar aqui entra em vigor na próxima
+    leitura, sem restart. <b>Não</b> é a classificação (regex/embeddings) — isso é
+    outra tela. <code>owner</code>: <b>langgraph</b> = grafo · <b>langgraph_conditional</b>
+    = grafo só com FEATURE_LANGGRAPH_NATIVE_ROUTES · <b>legacy</b> = dispatcher.py.
+  </div>
+  <div id="tbl">Carregando…</div>
+</main>
+
+<div id="toast"></div>
+<div id="hist"><div>
+  <div style="display:flex;justify-content:space-between;margin-bottom:14px;">
+    <b id="hist-title" style="font-family:var(--mono)">Histórico</b>
+    <button class="btn" onclick="document.getElementById('hist').style.display='none'">FECHAR</button>
+  </div>
+  <div id="hist-body" style="font-family:var(--mono);font-size:11px"></div>
+</div></div>
+
+<script>
+const VER = {};
+
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+async function api(path, opts = {}) {
+  opts.headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (opts.body && typeof opts.body === 'object') opts.body = JSON.stringify(opts.body);
+  const r = await fetch('/api/admin' + path, opts);
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+function toast(msg, err) {
+  const el = document.getElementById('toast');
+  el.textContent = (err ? '✕ ' : '✓ ') + msg;
+  el.style.borderColor = el.style.color = err ? 'var(--red)' : 'var(--green)';
+  el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+function sel(id, val, opts) {
+  return `<select id="${id}">` + opts.map(o => `<option ${o === val ? 'selected' : ''}>${esc(o)}</option>`).join('') + `</select>`;
+}
+
+async function load() {
+  try {
+    const d = await api('/routes');
+    const rows = d.rotas.map(r => {
+      VER[r.rota] = r.versao;
+      return `<tr>
+        <td class="rota-nome">${r.rota}<div style="color:var(--muted);font-size:9px">v${r.versao}</div></td>
+        <td class="col-mid">${sel('f-'+r.rota+'-entrypoint_node', r.entrypoint_node, d.nodes_validos)}</td>
+        <td class="col-mid">${sel('f-'+r.rota+'-owner', r.owner, d.owners_validos)}</td>
+        <td class="col-mid"><input id="f-${r.rota}-agente" value="${esc(r.agente || '')}" placeholder="—"></td>
+        <td style="text-align:center"><input type="checkbox" id="f-${r.rota}-cacheavel" ${r.cacheavel ? 'checked' : ''}></td>
+        <td style="text-align:center"><input type="checkbox" id="f-${r.rota}-permite_detour" ${r.permite_detour ? 'checked' : ''}></td>
+        <td class="col-mid"><input id="f-${r.rota}-doc_type" value="${esc(r.doc_type || '')}" placeholder="—"></td>
+        <td class="col-narrow"><input id="f-${r.rota}-k" type="number" value="${r.k ?? ''}"></td>
+        <td class="col-mid"><input id="f-${r.rota}-planner_steps" value="${esc((r.planner_steps || []).join(','))}" placeholder="—"></td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-primary" onclick="salvar('${r.rota}')">SALVAR</button>
+          <button class="btn" onclick="hist('${r.rota}')">HIST</button>
+        </td></tr>`;
+    }).join('');
+    document.getElementById('tbl').innerHTML = `<table><thead><tr>
+      <th>rota</th><th>entrypoint_node</th><th>owner</th><th>agente</th><th>cache</th><th>detour</th>
+      <th>doc_type</th><th>k</th><th>planner_steps</th><th></th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+  } catch (e) {
+    document.getElementById('tbl').innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`;
+  }
+}
+
+function coletar(rota) {
+  const g = id => document.getElementById(`f-${rota}-${id}`);
+  const steps = g('planner_steps').value.trim();
+  const k = g('k').value.trim();
+  return {
+    entrypoint_node: g('entrypoint_node').value,
+    owner: g('owner').value,
+    agente: g('agente').value.trim() || null,
+    cacheavel: g('cacheavel').checked,
+    permite_detour: g('permite_detour').checked,
+    doc_type: g('doc_type').value.trim() || null,
+    k: k === '' ? null : Number(k),
+    planner_steps: steps === '' ? null : steps.split(',').map(s => s.trim()).filter(Boolean),
+  };
+}
+
+async function salvar(rota) {
+  try {
+    const d = await api(`/routes/${rota}`, { method: 'POST', body: { campos: coletar(rota), versao: VER[rota] } });
+    toast(`${rota} salvo (v${d.versao})`); load();
+  } catch (e) {
+    toast(/409/.test(e.message) ? `${rota} mudou — recarregado` : `${rota}: ${e.message}`, true);
+    load();
+  }
+}
+
+async function hist(rota) {
+  document.getElementById('hist-title').textContent = 'Histórico — ' + rota;
+  document.getElementById('hist').style.display = 'block';
+  const body = document.getElementById('hist-body');
+  body.innerHTML = 'Carregando…';
+  try {
+    const d = await api(`/routes/${rota}/historico`);
+    body.innerHTML = d.historico.map(h => `
+      <div style="border-bottom:1px solid var(--border);padding:8px 0">
+        <div style="display:flex;justify-content:space-between">
+          <b>v${h.versao}</b>
+          <span style="color:var(--muted)">${esc(h.atualizado_por || '?')} · ${esc((h.atualizado_em || '').slice(0,19).replace('T',' '))}
+            <button class="btn" onclick="reverter('${rota}', ${h.versao})">REVERTER</button></span>
+        </div>
+        <pre>${esc(JSON.stringify(h.snapshot))}</pre>
+      </div>`).join('') || '<span style="color:var(--muted)">Sem histórico.</span>';
+  } catch (e) { body.innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`; }
+}
+
+async function reverter(rota, para) {
+  if (!confirm(`Reverter ${rota} para a versão ${para}?`)) return;
+  try {
+    const d = await api(`/routes/${rota}/reverter`, { method: 'POST', body: { para_versao: para, versao: VER[rota] } });
+    toast(`${rota} revertido (v${d.versao})`);
+    document.getElementById('hist').style.display = 'none'; load();
+  } catch (e) { toast(`Erro ao reverter: ${e.message}`, true); load(); }
+}
+
+load();
+</script>
+{% endblock %}

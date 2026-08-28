@@ -67,16 +67,9 @@ RESPONSE_TIMEOUT_S = 15.0
 POLL_INTERVAL_S    = 0.2
 
 # Circuit-breaker por agente (liga/desliga em /hub/agents, ver agent_config.py).
-# GREETING e MEDIA_DOWNLOAD não são "agentes" (fast-paths utilitários) — ficam
-# sempre ligados. Rotas fora deste mapa também não são gateadas.
-_ROTA_PARA_AGENTE = {
-    "GERAL": "academic_knowledge", "CALENDARIO": "academic_knowledge",
-    "EDITAL": "academic_knowledge", "CONTATOS": "academic_knowledge",
-    "WIKI": "academic_knowledge",
-    "SIGAA": "sigaa",
-    "CRUD": "tickets",
-    "TICKET_ABERTURA": "tickets",
-}
+# Plano A / Fase 2: o mapa rota→agente virou a coluna `agente` do
+# `route_registry` (migration 010). GREETING/MEDIA_DOWNLOAD/CHECK_STATUS têm
+# `agente=NULL` (fast-paths utilitários, sempre ligados).
 
 
 @dataclass
@@ -234,7 +227,9 @@ async def processar(
 
         # ── Circuit-breaker por agente (liga/desliga em /hub/agents) ──────────
         from src.capabilities.persistence.agent_config import is_agent_enabled
-        agente_da_rota = _ROTA_PARA_AGENTE.get(decision.rota)
+        from src.infrastructure import route_registry
+        rota_cfg = route_registry.get(decision.rota)   # reusado no cache gate abaixo
+        agente_da_rota = rota_cfg.agente
         if agente_da_rota and not await is_agent_enabled(r, agente_da_rota):
             ms = int((time.monotonic() - t0) * 1000)
             _OS_LATENCY.observe(ms)
@@ -265,8 +260,7 @@ async def processar(
                 )
 
         # 1b. Semantic Cache de Respostas (threshold por rota, ver semantic_cache.py)
-        from src.router.contracts import ROTAS_SEM_CACHE
-        if decision.rota not in ROTAS_SEM_CACHE:
+        if rota_cfg.cacheavel:
             from src.infrastructure.semantic_cache import SemanticCache
             sem_cache = SemanticCache()
 

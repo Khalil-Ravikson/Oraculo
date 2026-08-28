@@ -345,20 +345,17 @@ def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) 
             "k_text": config.get("k_text", 8),
         }
 
-    _HINTS = {
-        "CALENDARIO":  {"steps": ["rag_search"], "doc_type": "calendario", "k": 8},
-        "EDITAL":      {"steps": ["rag_search"], "doc_type": "edital",     "k": 10},
-        "CONTATOS":    {"steps": ["rag_search"], "doc_type": "contatos",   "k": 6},
-        "WIKI":        {"steps": ["rag_search"], "doc_type": "wiki_ctic",  "k": 6},
-        # dispatcher.py intercepta CRUD antes do Planner (agents/tickets/crud_tool.py)
-        # — ver agents/tickets/service.py pro histórico do worker fantasma que isso evita.
-        "CRUD":        {"steps": ["crud_tool"],                            "k": 0},
-        "TICKET_ABERTURA": {"steps": ["ticket_abertura"],                  "k": 0},
-        "GREETING":    {"steps": ["greeting"],                             "k": 0},
-        "GERAL":       {"steps": ["rag_search"], "doc_type": "geral",      "k": 6},
-        "SIGAA":       {"steps": ["sigaa_biblioteca"],                     "k": 0},
-        # dispatcher.py intercepta CHECK_STATUS antes do Planner (responde a
-        # partir de task_history direto) — nunca chega aqui de verdade.
-        "CHECK_STATUS": {"steps": [],                                      "k": 0},
-    }
-    return _HINTS.get(rota, _HINTS["GERAL"])
+    # Plano A / Fase 2: o `_HINTS` hardcoded virou as colunas
+    # `planner_steps`/`doc_type`/`k` do `route_registry` (migration 010). O
+    # branch `if config:` acima (router:config, de `intents_router`) continua
+    # tendo precedência — este é só o fallback, para rota não semeada em
+    # `router:config` (e para CRUD/CHECK_STATUS, que o dispatcher intercepta
+    # antes do Planner). Rota desconhecida → default de GERAL.
+    from src.infrastructure import route_registry
+    rr = route_registry.get(rota)
+    hint: dict = {"steps": list(rr.planner_steps or [])}
+    if rr.doc_type:
+        hint["doc_type"] = rr.doc_type
+    if rr.k is not None:
+        hint["k"] = rr.k
+    return hint

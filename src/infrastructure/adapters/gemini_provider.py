@@ -31,10 +31,14 @@ class GeminiProvider:
 
     def __init__(self, model: str | None = None, api_key: str | None = None) -> None:
         import google.genai as genai
+        from src.infrastructure import dynamic_config
         from src.infrastructure.settings import settings
 
         self.provider_name = "gemini"
-        self._model  = model   or settings.GEMINI_MODEL
+        # `GEMINI_MODEL` é config dinâmica (Plano A / Fase 1): editável via
+        # /hub/config sem restart. `llm_factory._instanciar` cria um provider
+        # novo a cada chamada, então a troca pega já na próxima resposta.
+        self._model  = model   or dynamic_config.get_str("GEMINI_MODEL")
         self._client = genai.Client(api_key=api_key or settings.GEMINI_API_KEY)
         # Side-channel de telemetria: `gerar_resposta_estruturada_async` devolve
         # só o objeto Pydantic (contrato do ILLMProvider, não muda), mas o
