@@ -771,6 +771,15 @@ async def llm_custo_data(request: Request, horas: int = 24):
         logger.warning("⚠️  [HUB] Falha ao ler cache_stats: %s", exc)
         cache = {"total_entradas": 0, "por_rota": {}, "ttl_por_rota": {}, "threshold_por_rota": {}}
 
+    # Plano A / Fase 3: Provider Registry + circuit breaker (§O/§S)
+    try:
+        from src.infrastructure.adapters import llm_circuit_breaker, llm_provider_registry
+        provider_registry = llm_provider_registry.status()
+        circuit_breaker = llm_circuit_breaker.status()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao ler provider registry/CB: %s", exc)
+        provider_registry, circuit_breaker = [], []
+
     return {
         "provider_global_ativo": _provider_global_ativo(),
         "resumo": resumo,
@@ -781,6 +790,8 @@ async def llm_custo_data(request: Request, horas: int = 24):
         "taxa_brl": taxa_brl,
         "taxa_brl_origem": taxa_brl_origem(),
         "custo_brl_total": round(custo_usd_total * taxa_brl, 4),
+        "provider_registry": provider_registry,
+        "circuit_breaker": circuit_breaker,
     }
 
 

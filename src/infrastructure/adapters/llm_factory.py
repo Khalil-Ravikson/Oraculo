@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import contextmanager
 from typing import Type, TypeVar
 
 from pydantic import BaseModel
@@ -34,30 +35,20 @@ T = TypeVar("T", bound=BaseModel)
 logger = logging.getLogger(__name__)
 
 _CHAVE_PROVIDER_GLOBAL = "admin:llm_provider"
-_PROVIDERS_VALIDOS = ("gemini", "deepseek", "groq")
+
+# Plano A / Fase 3: os providers válidos e a instanciação vêm do
+# `llm_provider_registry` (dict de builders + manifesto §S). Fallback fixo
+# se o import falhar (o registro é código, não deveria falhar).
+try:
+    from src.infrastructure.adapters.llm_provider_registry import registrados as _registrados
+    _PROVIDERS_VALIDOS = _registrados()
+except Exception:  # pragma: no cover
+    _PROVIDERS_VALIDOS = ("gemini", "deepseek", "groq")
 
 
 def _instanciar(provider_name: str, modelo: str | None = None) -> ILLMProvider:
-    from src.infrastructure.settings import settings
-
-    if provider_name == "deepseek":
-        from src.infrastructure.adapters.openai_compatible_provider import OpenAICompatibleProvider
-        return OpenAICompatibleProvider(
-            provider_name="deepseek",
-            base_url=settings.DEEPSEEK_BASE_URL,
-            api_key=settings.DEEPSEEK_API_KEY,
-            model=modelo or settings.DEEPSEEK_MODEL,
-        )
-    if provider_name == "groq":
-        from src.infrastructure.adapters.openai_compatible_provider import OpenAICompatibleProvider
-        return OpenAICompatibleProvider(
-            provider_name="groq",
-            base_url=settings.GROQ_BASE_URL,
-            api_key=settings.GROQ_API_KEY,
-            model=modelo or settings.GROQ_MODEL,
-        )
-    from src.infrastructure.adapters.gemini_provider import GeminiProvider
-    return GeminiProvider(model=modelo)
+    from src.infrastructure.adapters.llm_provider_registry import instanciar
+    return instanciar(provider_name, modelo)
 
 
 def _provider_global_ativo() -> str:
@@ -106,6 +97,17 @@ def get_llm_provider(agente: str | None = None, rota: str = "") -> "MonitoredLLM
         if override_modelo:
             modelo = override_modelo
 
+    # Circuit breaker (§O): se o circuito do provider ativo está aberto,
+    # loga o alerta mas SERVE MESMO ASSIM — troca de provider é decisão do
+    # admin via /hub, nunca automática.
+    from src.infrastructure.adapters import llm_circuit_breaker as _cb
+    if not _cb.permitir(provider_name):
+        logger.warning(
+            "🔴 [LLM_FACTORY] Circuito aberto para '%s' — servindo assim mesmo "
+            "(sem troca automática, §O). Troque o provider em /hub/llm-custo se persistir.",
+            provider_name,
+        )
+
     provider = _instanciar(provider_name, modelo)
     return MonitoredLLMProvider(provider, rota_hint=rota)
 
@@ -120,6 +122,18 @@ class MonitoredLLMProvider:
     def __init__(self, provider: ILLMProvider, rota_hint: str = "") -> None:
         self._provider = provider
         self._rota_hint = rota_hint
+
+    @contextmanager
+    def _circuito(self):
+        """Registra sucesso/falha da chamada real no circuit breaker do
+        provider (§O). Nunca engole a exceção — só observa e re-levanta."""
+        from src.infrastructure.adapters import llm_circuit_breaker as _cb
+        try:
+            yield
+        except Exception:
+            _cb.registrar_falha(self.provider_name)
+            raise
+        _cb.registrar_sucesso(self.provider_name)
 
     @property
     def provider_name(self) -> str:
@@ -149,7 +163,7 @@ class MonitoredLLMProvider:
         from src.infrastructure.observability.tracing import get_tracer, llm_span
 
         t0 = time.monotonic()
-        with llm_span(get_tracer(), "chat", self.provider_name, self.model, rota or self._rota_hint) as span:
+        with llm_span(get_tracer(), "chat", self.provider_name, self.model, rota or self._rota_hint) as span, self._circuito():
             resp = await self._provider.gerar_resposta_async(prompt, system_instruction, temperatura, max_tokens)
             span.set_attribute("gen_ai.usage.input_tokens", resp.input_tokens)
             span.set_attribute("gen_ai.usage.output_tokens", resp.output_tokens)
@@ -169,7 +183,7 @@ class MonitoredLLMProvider:
         from src.infrastructure.observability.tracing import get_tracer, llm_span
 
         t0 = time.monotonic()
-        with llm_span(get_tracer(), "chat_structured", self.provider_name, self.model, rota or self._rota_hint) as span:
+        with llm_span(get_tracer(), "chat_structured", self.provider_name, self.model, rota or self._rota_hint) as span, self._circuito():
             resultado = await self._provider.gerar_resposta_estruturada_async(
                 prompt, response_schema, system_instruction, temperatura,
             )
@@ -191,7 +205,7 @@ class MonitoredLLMProvider:
         from src.infrastructure.observability.tracing import get_tracer, llm_span
 
         t0 = time.monotonic()
-        with llm_span(get_tracer(), "chat", self.provider_name, self.model, rota or self._rota_hint) as span:
+        with llm_span(get_tracer(), "chat", self.provider_name, self.model, rota or self._rota_hint) as span, self._circuito():
             resp = self._provider.gerar_resposta_sincrono(prompt, temperatura, max_tokens)
             span.set_attribute("gen_ai.usage.input_tokens", resp.input_tokens)
             span.set_attribute("gen_ai.usage.output_tokens", resp.output_tokens)

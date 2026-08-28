@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     GROQ_MODEL:   str = "llama-3.3-70b-versatile"
     GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
 
+    # ── Circuit breaker por provider LLM (Plano A / Fase 3, §O) ──────────────
+    # Abre depois de N falhas na janela; alerta (não troca de provider); volta
+    # a testar depois do cooldown. Parâmetros de partida — a prática de produção
+    # convergiu em ~5 falhas / ~60s.
+    LLM_CB_FALHAS_ABRE: int = 5
+    LLM_CB_COOLDOWN_S:  int = 60
+    LLM_CB_JANELA_S:    int = 120
+
     # Nightly Memory flag
     ENABLE_NIGHTLY_MEMORY: bool = False
 
