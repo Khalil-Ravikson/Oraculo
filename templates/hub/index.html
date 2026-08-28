@@ -1,165 +1,54 @@
-{% extends "hub/_base.html" %}
-{% block title %}Hub — Oráculo UEMA{% endblock %}
+{% extends "hub/_shell.html" %}
+{% block nav_active %}home{% endblock %}
+{% block page_title %}Painel{% endblock %}
 
 {% block content %}
-<!-- Chamada para o CSS isolado -->
-<link rel="stylesheet" href="/static/css/hub_index.css">
-
-<!-- Header -->
-<header class="hub-header">
-  <div class="hub-brand">
-    <div class="hub-brand-icon">🔮</div>
-    <div class="hub-brand-text">
-      <h1>Oráculo UEMA</h1>
-      <span>Hub Administrativo</span>
-    </div>
+{%- macro navcard(href, titulo, desc, icon) -%}
+<a class="col-4 card card--nav" href="{{ href }}">
+  <div class="card__title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">{{ icon|safe }}</svg>{{ titulo }}</div>
+  <div class="card__desc">{{ desc }}</div>
+</a>
+{%- endmacro -%}
+<section class="section">
+  <div class="section__head">
+    <span class="eyebrow">estado agora</span>
+    <span class="caption">modelo ativo: <span class="mono">{{ modelo }}</span>{% if dev_mode %} · <span class="badge badge--warn">dev mode</span>{% endif %}</span>
   </div>
-  <div class="hub-header-right">
-    <div class="status-pill" id="chain-status">
-      <div class="status-dot amber" id="chain-dot"></div>
-      <span id="chain-label">verificando...</span>
-    </div>
-    <div class="lc-badge">⛓ LangChain</div>
-    <button class="btn-logout" onclick="logout()">SAIR</button>
+  <div class="grid">
+    <div class="col-3"><div class="card card--stat"><div class="stat__value tabular" id="s-msgs">—</div><div class="stat__label">mensagens hoje</div></div></div>
+    <div class="col-3"><div class="card card--stat"><div class="stat__value tabular" id="s-users">—</div><div class="stat__label">pessoas no banco</div></div></div>
+    <div class="col-3"><div class="card card--stat"><div class="stat__value tabular" id="s-chunks">—</div><div class="stat__label">chunks indexados</div></div></div>
+    <div class="col-3"><div class="card card--stat"><div class="stat__value tabular" id="s-cache">—</div><div class="stat__label">cache hit</div></div></div>
   </div>
-</header>
+  <div id="maint-note" class="caption" style="margin-top:var(--space-3)"></div>
+</section>
 
-<!-- Main -->
-<main class="hub-main">
-
-  <!-- Stats -->
-  <div class="section-label">// métricas rápidas</div>
-  <div class="status-bar" id="stats-bar">
-    <div class="stat-card">
-      <div class="stat-label">mensagens hoje</div>
-      <div class="stat-value" id="stat-msgs">—</div>
-      <div class="stat-sub">via WhatsApp</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">usuários ativos</div>
-      <div class="stat-value" id="stat-users">—</div>
-      <div class="stat-sub">no banco</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">chunks no Redis</div>
-      <div class="stat-value" id="stat-chunks">—</div>
-      <div class="stat-sub">indexados</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">cache hit rate</div>
-      <div class="stat-value" id="stat-cache">—</div>
-      <div class="stat-sub">semântico</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">manutenção</div>
-      <div class="stat-value" id="stat-maint" style="font-size:18px">—</div>
-      <div class="stat-sub" id="stat-maint-sub"></div>
-    </div>
+<section class="section">
+  <div class="section__head"><span class="eyebrow">plataforma</span></div>
+  <div class="grid">
+    {{ navcard('/hub/routes',       'Rotas',              'Mapa rota→execução, editável sem restart.', '<path d="M12 2v20M2 12h20"/>') }}
+    {{ navcard('/hub/config',       'Configuração',       'Chaves dinâmicas, prompt, manutenção, cache.', '<circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4"/>') }}
+    {{ navcard('/hub/agents',       'Agentes',            'Liga/desliga cada agente, escolhe provider/modelo.', '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 14 0v1"/>') }}
+    {{ navcard('/hub/capabilities', 'Capabilities',       'Manifestos e vínculo agente↔capability.', '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>') }}
+    {{ navcard('/hub/llm-custo',    'Custo & Providers',  'Telemetria de tokens/custo, circuit breaker, troca de provider.', '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>') }}
+    {{ navcard('/hub/eval',         'Avaliação RAG',      'Hit rate, MRR, faithfulness por documento.', '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>') }}
+    {{ navcard('/hub/chunkviz',     'Chunks (RAG)',       'Upload e visualização de chunks; ingestão ao Redis.', '<rect x="3" y="3" width="18" height="6" rx="1"/><rect x="3" y="11" width="18" height="4" rx="1"/><rect x="3" y="17" width="12" height="4" rx="1"/>') }}
+    {{ navcard('/hub/users',        'Pessoas',            'Cadastro, papéis, ativo/inativo, busca.', '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>') }}
+    {{ navcard('/hub/audit',        'Auditoria',          'Ações admin e eventos do sistema.', '<path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/>') }}
+    {{ navcard('/hub/chat',         'Simular chat',       'Testa o agente e vê a decisão de roteamento.', '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>') }}
   </div>
+</section>
 
-  <!-- Nav Cards -->
-  <div class="section-label">// plataforma</div>
-  <div class="cards-grid">
-
-    <a class="nav-card" href="/hub/chat">
-      <div class="card-num">01</div>
-      <div class="card-tag">// chat</div>
-      <div class="card-icon">💬</div>
-      <div class="card-title">Simulador de Chat</div>
-      <div class="card-desc">Teste o agente diretamente. Debug de intenções, CRAG score e memória.</div>
-    </a>
-
-    <a class="nav-card" href="/hub/chunkviz">
-      <div class="card-num">02</div>
-      <div class="card-tag">// rag</div>
-      <div class="card-icon">📄</div>
-      <div class="card-title">ChunkViz</div>
-      <div class="card-desc">Upload e visualização de chunks. Ingestão de documentos ao Redis.</div>
-    </a>
-
-    <a class="nav-card" href="/hub/users">
-      <div class="card-num">03</div>
-      <div class="card-tag">// acesso</div>
-      <div class="card-icon">👥</div>
-      <div class="card-title">Gestão de Usuários</div>
-      <div class="card-desc">CRUD completo. Cadastro, roles, ativo/inativo, busca e filtros.</div>
-    </a>
-
-    <a class="nav-card" href="/hub/audit">
-      <div class="card-num">04</div>
-      <div class="card-tag">// logs</div>
-      <div class="card-icon">📋</div>
-      <div class="card-title">Audit Log</div>
-      <div class="card-desc">Todas as ações do sistema. Traces LangChain, ações admin e eventos.</div>
-    </a>
-
-    <a class="nav-card" href="/eval/eval">
-      <div class="card-num">05</div>
-      <div class="card-tag">// qualidade</div>
-      <div class="card-icon">🔬</div>
-      <div class="card-title">Avaliação RAG</div>
-      <div class="card-desc">Hit rate, MRR, CRAG score médio e faithfulness por documento.</div>
-    </a>
-
-    <a class="nav-card" href="/hub/config">
-      <div class="card-num">06</div>
-      <div class="card-tag">// config</div>
-      <div class="card-icon">⚙️</div>
-      <div class="card-title">Configuração</div>
-      <div class="card-desc">API keys, system prompt, modo manutenção, cache e workers Celery.</div>
-    </a>
-
-    <a class="nav-card" href="/hub/agents">
-      <div class="card-num">07</div>
-      <div class="card-tag">// agentes</div>
-      <div class="card-icon">🤖</div>
-      <div class="card-title">Agentes</div>
-      <div class="card-desc">Catálogo do Agent Registry. Liga/desliga cada agente registrado, escolhe modelo/provider.</div>
-    </a>
-
-    <a class="nav-card" href="/hub/llm-custo">
-      <div class="card-num">09</div>
-      <div class="card-tag">// custo</div>
-      <div class="card-icon">💰</div>
-      <div class="card-title">Custo & Providers LLM</div>
-      <div class="card-desc">Telemetria real de tokens/custo por provider e rota. Troca de provider em runtime.</div>
-    </a>
-
-    <a class="nav-card" href="/admin/">
-      <div class="card-num">08</div>
-      <div class="card-tag">// admin</div>
-      <div class="card-icon">🛠️</div>
-      <div class="card-title">Portal Admin</div>
-      <div class="card-desc">Configurações avançadas, scraping, ingestão e controle total.</div>
-    </a>
-
-    <a class="nav-card external" href="http://localhost:3001" target="_blank">
-      <div class="card-num">09</div>
-      <div class="card-tag">// grafana ↗</div>
-      <div class="card-icon">📊</div>
-      <div class="card-title">Grafana</div>
-      <div class="card-desc">Dashboards visuais de métricas, latência P95 e uso de recursos.</div>
-    </a>
-
-    <a class="nav-card external" href="http://localhost:9090" target="_blank">
-      <div class="card-num">10</div>
-      <div class="card-tag">// prometheus ↗</div>
-      <div class="card-icon">🔥</div>
-      <div class="card-title">Prometheus</div>
-      <div class="card-desc">Métricas raw, alertas e séries temporais do sistema.</div>
-    </a>
-
-    <a class="nav-card external" href="http://localhost:16686" target="_blank">
-      <div class="card-num">11</div>
-      <div class="card-tag">// jaeger ↗</div>
-      <div class="card-icon">🕸️</div>
-      <div class="card-title">Jaeger</div>
-      <div class="card-desc">Tracing distribuído (OpenTelemetry) — só com ENABLE_TRACING=true no .env.</div>
-    </a>
-
+<section class="section">
+  <div class="section__head"><span class="eyebrow">observabilidade externa</span></div>
+  <div class="grid">
+    <a class="col-4 card card--nav" href="http://localhost:3001" target="_blank"><div class="card__title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 4-8"/></svg>Grafana ↗</div><div class="card__desc">Dashboards de métricas, latência P95, recursos.</div></a>
+    <a class="col-4 card card--nav" href="http://localhost:9090" target="_blank"><div class="card__title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Prometheus ↗</div><div class="card__desc">Métricas raw, alertas, séries temporais.</div></a>
+    <a class="col-4 card card--nav" href="http://localhost:16686" target="_blank"><div class="card__title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Jaeger ↗</div><div class="card__desc">Tracing distribuído — só com ENABLE_TRACING=true.</div></a>
   </div>
-</main>
+</section>
+{% endblock %}
 
-<!-- Chamada para o JS isolado -->
-<script src="/static/js/hub_index.js"></script>
+{% block scripts %}
+<script type="module" src="/static/js/pages/home.js"></script>
 {% endblock %}
