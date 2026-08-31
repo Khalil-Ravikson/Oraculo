@@ -347,9 +347,10 @@ async function loadPalette() {
         const btn = document.createElement('button');
         btn.className = 'studio-palette__item';
         btn.type = 'button';
-        btn.textContent = n.metadata.name || n.id;
-        btn.dataset.search = `${n.id} ${n.type} ${n.metadata.description || ''}`.toLowerCase();
-        btn.title = n.metadata.description || '';
+        btn.textContent = Glossario.rotulo('node:' + n.id, n.metadata.name || n.id);
+        btn.dataset.tech = n.id;
+        btn.dataset.search = `${n.id} ${n.type} ${btn.textContent} ${n.metadata.description || ''}`.toLowerCase();
+        btn.title = Glossario.ajuda('node:' + n.id) || n.metadata.description || '';
         btn.onclick = () => { addNodeToCanvas(n.id); atualizarValidade(); };
         el.appendChild(btn);
       });

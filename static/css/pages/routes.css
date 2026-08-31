@@ -3,9 +3,11 @@
    Tudo sob `.routes-view`. Só o que os componentes não cobrem: campos
    compactos na célula, checkbox com acento, item de histórico. */
 
-/* Tabela: permitir quebrar largura da célula e não forçar nowrap nos inputs */
+/* Tabela larga: rola dentro do .table-wrap em vez de espremer a coluna de ações */
+.routes-view .table--routes { min-width: 1180px; }
 .routes-view .table--routes td { white-space: normal; vertical-align: middle; }
-.routes-view .rota-nome { font-family: var(--font-mono); font-weight: var(--weight-semi); }
+.routes-view .table--routes .col-actions { white-space: nowrap; }
+.routes-view .rota-nome { font-weight: var(--weight-semi); }
 
 /* Campos dentro da célula: menores que o input padrão, largura da coluna */
 .routes-view .input--cell,

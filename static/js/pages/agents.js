@@ -14,13 +14,23 @@ async function post(path, body) {
   return d;
 }
 
+// Descrições de agente às vezes carregam nota técnica de dev depois de um
+// marcador (🧪 "Rodada de testes:", "ver settings.X"). Mostra só a parte
+// voltada ao operador — o texto completo continua editável em "Editar descrição".
+function descricaoLimpa(txt) {
+  return String(txt || '')
+    .split(/\s*(?:🧪|🔬)\s*|(?:\.\s+)?Rodada de testes:/)[0]
+    .replace(/\s*\(ver settings\.[A-Z_]+\)/g, '')
+    .trim() || String(txt || '');
+}
+
 function card(a) {
   const tools = (a.tools || []);
   return `<div class="card" data-name="${a.name}">
     <div style="display:flex;justify-content:space-between;gap:var(--space-4);align-items:flex-start">
       <div>
         <div class="card__title">${fmt.esc(a.name)}</div>
-        <div class="card__desc" id="d-${a.name}">${fmt.esc(a.description)}</div>
+        <div class="card__desc" id="d-${a.name}">${fmt.esc(descricaoLimpa(a.description))}</div>
         ${tools.length ? `<div class="caption mono" style="margin-top:var(--space-2)">ferramentas: ${tools.map(fmt.esc).join(', ')}</div>` : ''}
         ${a.atualizado_por ? `<div class="caption" style="margin-top:var(--space-1)">editado por ${fmt.esc(a.atualizado_por)} · ${fmt.dateTime(a.atualizado_em)}</div>` : ''}
       </div>

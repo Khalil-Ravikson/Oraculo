@@ -24,6 +24,7 @@ export const TERMOS = {
   'owner:legacy':                { rotulo: 'Motor clássico',        tooltip: 'Rota ainda no orquestrador anterior' },
   'FEATURE_LANGGRAPH_NATIVE_ROUTES':   { rotulo: 'Rotas pelo motor novo',   tooltip: 'Chave de laboratório — desligada por padrão' },
   'FEATURE_LANGGRAPH_CELERY_DISPATCH': { rotulo: 'Processamento em fila pelo motor novo', tooltip: 'Chave de laboratório — desligada por padrão' },
+  'FEATURE_GRAPH_EXECUTOR_PILOTO':     { rotulo: 'Execução real do editor de fluxo', tooltip: 'Chave de laboratório — desligada; sem efeito no fluxo de produção ainda' },
   'dispatcher.py':               { rotulo: 'orquestrador clássico' },
   'dispatcher_langgraph.py':     { rotulo: 'orquestrador novo' },
   'route_registry':              { rotulo: 'Mapa de rotas' },
@@ -56,6 +57,7 @@ export const TERMOS = {
   'port:number':        { rotulo: 'número' },
   'port:array':         { rotulo: 'lista' },
   'port:tokens':        { rotulo: 'tokens' },
+  'port:custom':        { rotulo: 'formato específico' },
 
   // Rotas (assuntos que o Oráculo reconhece)
   'rota:GERAL':           { rotulo: 'Pergunta geral' },
