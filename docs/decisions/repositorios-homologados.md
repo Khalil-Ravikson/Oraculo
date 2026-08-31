@@ -20,6 +20,17 @@
 - **[note.com — HITL com LangGraph + FastAPI](https://note.com/nzw_/n/n4095231ae48d?hl=en)** — único princípio realmente agnóstico de framework do lote de HITL: separar o nó de aprovação do nó de efeito colateral (idempotência). Conferir se `auth_flow.py` já respeita isso.
 - **[LangChain Docs — Multi-agent](https://docs.langchain.com/oss/python/langchain/multi-agent)** — só vocabulário/taxonomia de padrões (router, handoffs, subagents). Nunca adotar o runtime `StateGraph` (ver `docs/decisions/0001-langgraph-nao-aprovado-para-main.md`).
 
+### Hub v2 / Graph Studio (avaliados 2026-08-31 — inspiração, NÃO fork)
+
+Nenhum destes vira base: a stack (FastAPI + Jinja2 + HTMX, sem React) não bate
+com quase todos. Usados só como referência de UX / vocabulário.
+
+- **[LangGraph-GUI/LangGraph-GUI](https://github.com/LangGraph-GUI/LangGraph-GUI)** — UX de canvas node-edge, formato export/import de grafo. Frontend SvelteFlow — não portável.
+- **[ibbybuilds/aegra](https://github.com/ibbybuilds/aegra)** ([aegra.dev](https://www.aegra.dev/)) — modelo de runtime/deploy de agentes (threads/runs/HITL resume, Agent Protocol). Inspira o `GraphExecutor` e uma futura página de "Execuções". É alternativa ao LangGraph Platform; nosso runtime não é LangGraph puro.
+- **[prosdevlab/graphweave](https://github.com/prosdevlab/graphweave)** — vocabulário de tipos de nó (Start/LLM/Tool/Condition/HumanInput/End) + contrato `GraphSchema`. Early dev.
+- **[AjaniBilby/hx-drag](https://github.com/AjaniBilby/hx-drag)** — extensão HTMX de drag&drop (candidata para a paleta de nós do Graph Studio). Não adotada ainda — canvas usa Konva + pointer events.
+- **n8n / Langflow** (UX, não repo) — grade de fundo, toolbar flutuante, minimapa, paleta com busca+categorias. Copiados como padrões no `graph-studio.html`.
+
 ## Descartados (não usar — mantido só para não reabrir a discussão)
 
 onelevenvy/flock (reescrito p/ Rust/Tauri, não é mais FastAPI), jerry609/PaperBot (sem parsing de PDF/chunking, é discovery de papers), Abdulbasit110/nextjs-fastapi (sem auth documentada, premissa SPA não bate com hub Jinja2), anarojoecheburua/RAG-with-Langchain-and-FastAPI (demo didático, inferior ao RAG híbrido atual), post LinkedIn Dheerendra Shivhare (sem código), mabbas-23/multi-agent-orchestration-fastapi (2 commits, showcase vazio), PDF arquivado Celery 2.3 (~2011, API obsoleta), prolifics.ai (marketing, sem framework citado), dev.to interrupts/Command e ivrschool/langchain hitl_design_patterns (100% dependentes do runtime LangGraph, descartado — ver decisão acima).

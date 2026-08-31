@@ -2,7 +2,8 @@
 
 > **Fonte oficial de arquitetura técnica** (ver `docs/README.md`). Revisado
 > em 2026-08-25 (tabelas de filas Celery e model-routing corrigidas contra o
-> código real — ver marcações ⚠️ abaixo). Para regras de negócio (não
+> código real — ver marcações ⚠️ abaixo); **§12 (Hub Admin v2) e a cadeia de
+> migrations adicionadas em 2026-08-31.** Para regras de negócio (não
 > técnicas), a fonte oficial é `docs/business/regras_negocio_oraculo.md`.
 
 ---
@@ -13,7 +14,7 @@
 
 **Oráculo UEMA v5.1** — assistente acadêmico via WhatsApp (Evolution API) + portal admin FastAPI. Pipeline principal: **Router (Supervisor) → Agents → Capabilities** (multi-agente assíncrono sobre Celery + Redis Streams), sucessor do antigo `OracleChain` monolítico e do God Object `CognitiveOS` (decomposto na refatoração Supervisor — ver seção 3).
 
-**Stack:** Python 3.12, FastAPI, Celery, PostgreSQL 16 (SQLAlchemy async), Redis Stack (RediSearch + RedisVL), Google Gemini (`google-genai`), LangChain (embeddings apenas).
+**Stack:** Python 3.12, FastAPI, Celery, PostgreSQL 16 (SQLAlchemy async), Redis Stack (RediSearch + RedisVL), Google Gemini (`google-genai`), LangChain (embeddings apenas). **Frontend admin:** Jinja2 + HTMX + Alpine.js, sem build step (ver §12).
 
 ---
 
@@ -137,9 +138,11 @@ def create_app() -> FastAPI:
 **Rotas críticas:**
 
 - `POST /webhook/evolution` → enfileira Celery (`processar_mensagem_whatsapp.delay()`).
-- `/hub/`* — portal admin (Jinja2).
-- `/api/admin/*` — REST admin.
-- `/health`, `/metrics` — observabilidade.
+- `/hub/*` — portal admin (Jinja2 + HTMX/Alpine, sem SPA). Controller
+  `src/api/routers/web/hub.py`; ~90 rotas. Redesenho v2 em §12.
+- `/api/admin/*` — REST admin (`src/api/routers/admin/admin_api.py`).
+- `/health`, `/metrics` — observabilidade. `/static/*` com `Cache-Control:
+  no-cache` (`_RevalidatingStaticFiles` em `main.py`).
 
 ### 4.2 Redis Stack (multi-tenant por DB)
 
@@ -254,14 +257,30 @@ WhatsApp (grupo homologado ALLOWED_GROUP_ID)
 ### 6.2 Cadeia de Migrations
 
 ```
-001_observability_tables  (base)
-    ↓
-002_ltree_institutional   (CREATE EXTENSION ltree, unidades_institucionais, documentos_unidades)
-    ↓
-003_intents_chunks        (intents_router, document_chunks + seed CALENDARIO/EDITAL/...)
-    ↓
-004_recria_tabela_pessoas (pessoas — identidade/RBAC)
+001 observability_tables   (base: metricas_llm, audit_log, feedback, monitor_logs)
+002 ltree_institutional     (EXTENSION ltree, unidades_institucionais, documentos_unidades)
+003 intents_chunks          (intents_router, document_chunks + seed CALENDARIO/EDITAL/...)
+004 recria_tabela_pessoas   (pessoas — identidade/RBAC)
+005 agentes_catalogo   ·  006 agent_prompts  ·  007 agentes_catalogo (cols)
+008 llm_pricing            (preço/1M tokens editável sem rebuild)
+── Plataforma orientada a config (Plano A) ──
+009 config_dinamica + config_dinamica_historico   (Fase 1: version column, read-repair)
+010 route_registry + histórico                    (Fase 2: rota→execução como dado)
+011 config_parser                                 (Fase 4: PARSER_PDF_PRIORIDADE/DESABILITADOS)
+012 agente_tools                                  (Fase 5: vínculo agente↔capability)
+── Camada de nós / Graph Studio ──
+013 graph_node_config  ·  014 mcp_servers  ·  015 graph_topology
+── Hub v2 (2026-08-31, ver §12) ──
+016 tools_catalogo     (ferramenta HTTP/MCP criada pelo painel)
+017 llm_providers      (provedor de LLM criado pelo painel; chave fica no .env)
+018 canais             (instância de comunicação criada pelo painel)
+019 mcp_servers +cols  (auth_tipo/auth_env/latency_ms/last_checked/tools_expostas)
+020 config: FEATURE_GRAPH_EXECUTOR_PILOTO   (default false, nada lê no hot path)
 ```
+
+Toda tabela de config/registro nasce com `tenant_id UUID NULL` + índice único
+`(tenant_id, chave/nome)` `NULLS NOT DISTINCT` — precondição de multi-tenancy
+(§M de `plataforma_orientada_a_configuracao.md`), sempre NULL hoje.
 
 ### 6.3 Tabelas Principais
 
@@ -274,6 +293,10 @@ WhatsApp (grupo homologado ALLOWED_GROUP_ID)
 | `documentos_unidades`                                              | Mapeamento chunk ↔ unidade                                       |
 | `intents_router`                                                   | Config dinâmica de roteamento (regex, exemplos, k_vector/k_text) |
 | `document_chunks`                                                  | Metadados de chunks pós-ingestão                                 |
+| `agentes_catalogo`, `agent_prompts`, `agente_tools`, `llm_pricing` | Catálogo admin-editável de agentes / prompts / tools / preços    |
+| `config_dinamica` (+`_historico`), `route_registry` (+`_historico`)| Config e rota→execução como dado, versionadas (Plano A, §M/§N)   |
+| `graph_node_config`, `graph_topology`, `mcp_servers`               | Camada de nós: toggle de componente, topologia visual, servidores MCP |
+| `tools_catalogo`, `llm_providers`, `canais`                        | **Hub v2**: ferramentas / provedores de LLM / canais criados pelo painel (§12) |
 
 
 **ORM:** `src/infrastructure/database/models.py` — enums do domínio (`RoleEnum`, `CentroEnum`, etc.).
@@ -434,6 +457,60 @@ scraping/
 2. `discovery.py::descobrir_paginas()` não está agendado (Celery beat) — só rodado manualmente/pontual até agora.
 
 **Testes:** `tests/eval/test_ctic_wiki_eval.py` (9 casos) + fixtures reais congeladas em `tests/fixtures/ctic_wiki/*.txt` (baixadas 1x via `do=export_raw`) — cobre conversão wikitext→Markdown, hierarquia, propagação de taxonomia, fidelidade do chunker `markdown`.
+
+---
+
+## 12. Hub Admin v2 (2026-08-31)
+
+Redesenho do portal `/hub/*` de "painel de toggles" para centro de controle
+operacional. Sem framework novo: **Jinja2 + HTMX + Alpine.js vendorados**
+(`static/js/vendor/`), design system próprio em `static/css/` (tokens +
+componentes), zero build step. Fatiado em sprints — o roadmap completo e o
+estado de cada sprint vivem no plano
+`C:\Users\User\.claude\plans\silly-percolating-ritchie.md`.
+
+**Camada de tradução (glossário).** `templates/hub/_glossario.html` (macros
+server-side) + `static/js/core/glossario.js` (`window.Glossario`, espelho para
+conteúdo montado via fetch). Converte termo de backend → rótulo humano;
+nenhuma página imprime identificador de código, nome de tabela, migration ou
+`.py` fora de `data-tech`/tooltip.
+
+**Registries dinâmicos — adicionar pelo painel, não no código.** Postgres é
+fonte de verdade; espelho Redis para o caminho quente síncrono (mesmo padrão
+de `agentes_catalogo`/`llm_pricing`):
+
+| Recurso | Tabela | Módulo | Espelho Redis | Execução |
+|---|---|---|---|---|
+| Ferramenta HTTP/MCP | `tools_catalogo` (016) | `src/capabilities/tool_catalog.py` | — | `dynamic_tool_executor.py` (SSRF revalidado na chamada; MCP via sessão de vida curta). `capabilities/registry.py::executar_tool` cai aqui se o nome não está no registro de código. |
+| Provedor de LLM | `llm_providers` (017) | `src/infrastructure/adapters/llm_provider_store.py` | `admin:llm_providers` | `llm_provider_registry` lê seed de código + linhas `openai_compat` do espelho → `OpenAICompatibleProvider`. `llm_factory._providers_validos()` virou função (provedor novo é selecionável sem restart). Chave de API **nunca** no banco — `api_key_env` guarda só o nome da variável. |
+| Canal (WhatsApp/Evolution) | `canais` (018) | `src/services/channel_store.py` | `admin:canais` | Só "conectar instância existente" (status/QR/webhook via Evolution). **Hot path de envio/recebimento continua lendo `settings.EVOLUTION_*`** — a tabela seeda com os mesmos valores; migrar o hot path é follow-up. |
+| Servidor MCP | `mcp_servers` (014 + 019) | `src/graph/mcp_server_registry.py` | — | "Testar Conexão" abre sessão MCP real (mede latência, lista tools); "Sincronizar Ferramentas" insere as tools em `tools_catalogo` (tipo `mcp`). |
+
+**Painéis de infraestrutura** (`src/infrastructure/observability/`):
+
+- `/hub/infra/storage` — `storage_health.py`: Redis `INFO`/`MODULE LIST`/
+  `SLOWLOG`/persistência + Postgres (conexões, tamanho, `pg_stat_statements`).
+  Ação segura "Recriar índices" (idempotente). **Sem FLUSHDB** — removido após
+  incidente (apagava índices RediSearch + chunks de RAG, que não se
+  reconstroem sozinhos). Ação destrutiva de infra só se cirúrgica.
+- `/hub/infra/search` — `search_health.py`: índices RediSearch (`FT._LIST`/
+  `FT.INFO` → campos tipados + params HNSW) + teste de busca híbrida
+  interativo (usa o caminho **síncrono** `redis_client.busca_hibrida`; o
+  `HybridQuery` do RedisVL emite `FT.HYBRID`, não suportado nesta versão do
+  Redis Stack — dívida, ver `technical-debt.md`).
+- `/hub/infra/health` — `system_health.py`: agrega circuit breakers dos
+  provedores, saúde dos componentes (`node_health.py`), latência MCP, estado
+  de Redis/Postgres/filas Celery, flags de laboratório ativas.
+
+**GraphExecutor (MVP).** `src/graph/graph_executor.py` executa uma topologia
+de `graph_topology`: valida (reusa `topology_validator`), ordem topológica
+(Kahn), passa saída→entrada por aresta, respeita `graph_node_config` (nó
+desabilitado = pulado). `dry_run=True` (padrão) **não chama `node.execute()`**
+— o botão "Testar" do Graph Studio usa isso para destacar o caminho no canvas.
+Execução real atrás de `FEATURE_GRAPH_EXECUTOR_PILOTO` (migration 020, default
+`false`) — **nada lê essa flag no pipeline de produção ainda**. Não é o
+dispatcher; é o degrau que prova que registry + topologia + toggle executam
+um trecho de ponta a ponta.
 
 ---
 

@@ -3,14 +3,23 @@
 > Consolidação do que já foi implementado e do que resta, nos dois planos em
 > curso + o adendo de arquitetura de nós. Ponto único de verdade para retomar
 > o trabalho. Atualizado em 2026-08-28.
+>
+> **Superado em parte (2026-08-31):** o redesign do Hub (Hub v2) retomou e
+> avançou muito além do que este doc descreve — HTMX+Alpine, camada de
+> tradução, registries dinâmicos (tools/provedores/canais), painéis de infra,
+> Camada 1 de nós virou consumidor real, GraphExecutor MVP. Plano vivo:
+> `C:\Users\User\.claude\plans\silly-percolating-ritchie.md`; arquitetura em
+> `docs/architecture/arquitetura_oraculo.md` §12; decisão em
+> `docs/decisions/0007-hub-v2-htmx-alpine-e-registries-dinamicos.md`.
+> Migrations 016–020. Este doc abaixo reflete o estado de 2026-08-28.
 
 ---
 
 ## Resumo em uma linha
 
-**Plano B (frontend) — concluído.** **Plano A (plataforma orientada a
-config) — Fases 1–5 concluídas; 6–11 deliberadamente não iniciadas.** O adendo
-de nós declarativos é proposta escrita, não iniciado.
+**Plano B (frontend) — concluído** (e depois retomado como Hub v2, ver nota
+acima). **Plano A (plataforma orientada a config) — Fases 1–5 concluídas;
+6–8 retomadas parcialmente no Hub v2 (nós, MCP, canais); 9–11 condicionais.**
 
 ---
 

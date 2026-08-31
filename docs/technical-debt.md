@@ -316,3 +316,47 @@ da checagem da Fase 7 do plano.
 **Escopo desta execução:** documentado, **não corrigido** (atualizar/
 remover é decisão sobre arquivos de teste fora do escopo das Decisões
 00-06, mesmo raciocínio do TD-012).
+
+---
+
+## TD-015 — `RedisVLVectorAdapter.buscar_hibrido` emite `FT.HYBRID` (não suportado)
+
+**Problema:** `src/infrastructure/adapters/redis_vector_adapter.py::buscar_hibrido`
+usa `HybridQuery` do RedisVL, que nesta versão gera o comando `FT.HYBRID`.
+O Redis Stack em uso (módulo `search` v21020) responde `unknown command
+'FT.HYBRID'`. A função captura a exceção e retorna `[]` — busca vetorial +
+textual falham silenciosamente.
+
+**Estado atual:** o **hot path de produção não usa esse método** — as tools
+(`calendar_tool`, `tool_edital`, `tool_contatos`) e `rag_search_service` usam
+`redis_client.busca_hibrida` (síncrono, duas `FT.SEARCH` + RRF manual), que
+funciona. O adapter async só é exercido por consumidores que não existem em
+produção hoje. Descoberto ao construir `/hub/infra/search` (Hub v2), que
+inicialmente chamava o adapter async e agora usa o caminho sync.
+
+**Impacto:** baixo hoje (código morto), médio se alguém ligar o adapter async
+achando que funciona.
+
+**Correção:** subir a versão do módulo `search` do Redis Stack, ou reescrever
+`buscar_hibrido` para o padrão de duas queries + RRF (igual ao sync).
+
+**Evidência:** `POST /hub/infra/search/test` via adapter async, 2026-08-31.
+
+---
+
+## TD-016 — `llm_circuit_breaker.status()` ignora provedores dinâmicos
+
+**Problema:** `src/infrastructure/adapters/llm_circuit_breaker.py::status()` e
+`_falhas()` iteram uma tupla hardcoded `("gemini", "deepseek", "groq")`. Com
+o Hub v2, provedores `openai_compat` podem ser cadastrados pelo painel
+(`llm_providers`, migration 017) e são selecionáveis como provider global —
+mas o disjuntor não os monitora nem os mostra em `/hub/llm-custo` /
+`/hub/infra/health`.
+
+**Impacto:** baixo — o circuito ainda *funciona* para provedores dinâmicos
+(`registrar_falha`/`estado` recebem o nome como argumento); só a *visão
+agregada* está incompleta.
+
+**Correção:** trocar a tupla por `llm_provider_registry.registrados()`.
+
+**Evidência:** revisão de código do Sprint 7 (Hub v2), 2026-08-31.
