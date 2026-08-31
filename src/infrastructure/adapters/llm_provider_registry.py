@@ -85,30 +85,76 @@ _REGISTRY: dict[str, ProviderManifest] = {
 }
 
 
+# ─── Provedores dinâmicos (painel → Postgres → espelho Redis) ────────────────
+# Adicionados via /hub/config (aba Provedores). Só tipo `openai_compat`; os
+# 3 nativos continuam vindo dos builders acima. Lidos do espelho Redis
+# (sync, ~1ms) a cada chamada — mesma decisão de `llm_factory` (sem cache,
+# reage a mudança em runtime).
+
+def _build_openai_compat(nome: str, base_url: str, api_key_env: str, modelo_default: str):
+    def _builder(modelo: str | None) -> ILLMProvider:
+        import os
+        from src.infrastructure.adapters.openai_compatible_provider import OpenAICompatibleProvider
+        return OpenAICompatibleProvider(
+            provider_name=nome, base_url=base_url,
+            api_key=os.getenv(api_key_env, ""),
+            model=modelo or modelo_default,
+        )
+    return _builder
+
+
+def _dinamicos() -> dict[str, ProviderManifest]:
+    try:
+        from src.infrastructure.adapters.llm_provider_store import ler_espelho_redis
+        linhas = ler_espelho_redis()
+    except Exception:  # noqa: BLE001
+        return {}
+
+    out: dict[str, ProviderManifest] = {}
+    for linha in linhas:
+        if linha.get("tipo") != "openai_compat" or not linha.get("habilitado", True):
+            continue
+        nome = linha["nome"]
+        if nome in _REGISTRY:
+            continue
+        env = linha.get("api_key_env", "")
+        out[nome] = ProviderManifest(
+            nome=nome, interface_version=_INTERFACE,
+            builder=_build_openai_compat(nome, linha.get("base_url", ""), env, linha.get("modelo_default", "")),
+            health_check=_health_key(env) if env else None,
+        )
+    return out
+
+
+def _todos() -> dict[str, ProviderManifest]:
+    return {**_REGISTRY, **_dinamicos()}
+
+
 # ─── API pública ────────────────────────────────────────────────────────────
 
 def registrados() -> tuple[str, ...]:
-    return tuple(_REGISTRY)
+    return tuple(_todos())
 
 
 def manifesto(nome: str) -> ProviderManifest | None:
-    return _REGISTRY.get(nome)
+    return _todos().get(nome)
 
 
 def instanciar(provider_name: str, modelo: str | None = None) -> ILLMProvider:
-    """Instancia o provider pelo registro. `ValueError` se desconhecido —
-    fallback explícito (nunca silencioso), mesmo contrato de `parser_factory`."""
-    m = _REGISTRY.get(provider_name)
+    """Instancia o provider pelo registro (código + dinâmicos). `ValueError`
+    se desconhecido — fallback explícito, nunca silencioso."""
+    todos = _todos()
+    m = todos.get(provider_name)
     if m is None:
         raise ValueError(
-            f"Provider LLM '{provider_name}' não registrado. Disponíveis: {', '.join(_REGISTRY)}"
+            f"Provider LLM '{provider_name}' não registrado. Disponíveis: {', '.join(todos)}"
         )
     return m.builder(modelo)
 
 
 def health_check(nome: str) -> bool | None:
     """True/False do probe do manifesto; None se o provider não tem probe."""
-    m = _REGISTRY.get(nome)
+    m = _todos().get(nome)
     if m is None or m.health_check is None:
         return None
     try:
@@ -122,5 +168,5 @@ def status() -> list[dict]:
     """Visão pro Hub: cada provider com versão de interface e saúde."""
     return [
         {"nome": nome, "interface": m.interface_version, "saude": health_check(nome)}
-        for nome, m in _REGISTRY.items()
+        for nome, m in _todos().items()
     ]

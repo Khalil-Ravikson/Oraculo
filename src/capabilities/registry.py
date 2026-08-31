@@ -76,12 +76,20 @@ def _autodiscover_tools() -> None:
 
 
 async def executar_tool(tool_name: str, args: dict) -> dict:
-    """Dispatcher central de capabilities registradas."""
+    """Dispatcher central de capabilities. Primeiro o registro de código
+    (`@tool`), depois o catálogo por dado (`tools_catalogo`, migration 016,
+    Hub v2) — uma ferramenta criada pelo painel roda pelo
+    `dynamic_tool_executor` sem precisar de arquivo `tool_*.py`."""
     _autodiscover_tools()
     fn = _TOOL_REGISTRY.get(tool_name)
-    if not fn:
-        raise ValueError(f"Capability '{tool_name}' não encontrada. Disponíveis: {', '.join(_TOOL_REGISTRY)}")
-    return await fn(**args)
+    if fn:
+        return await fn(**args)
+
+    # Ferramenta por dado (painel). `executar` levanta ToolNaoEncontradaError
+    # (subclasse de ValueError) se o nome também não existe no catálogo —
+    # preserva o contrato antigo de "tool desconhecida → ValueError".
+    from src.capabilities import dynamic_tool_executor
+    return await dynamic_tool_executor.executar(tool_name, args)
 
 
 def available() -> list[str]:

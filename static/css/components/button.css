@@ -33,3 +33,13 @@
 .btn--danger:hover { background: var(--danger-weak); }
 
 .btn--sm { padding: var(--space-1) var(--space-2); font-size: var(--text-xs); }
+
+/* Só ícone — quadrado, sem texto (olho de senha, fechar, zoom do canvas) */
+.btn--icon { padding: var(--space-2); }
+.btn--icon svg { width: 16px; height: 16px; }
+
+.btn-group { display: inline-flex; }
+.btn-group .btn { border-radius: 0; margin-left: -1px; }
+.btn-group .btn:first-child { border-radius: var(--radius-ctl) 0 0 var(--radius-ctl); margin-left: 0; }
+.btn-group .btn:last-child { border-radius: 0 var(--radius-ctl) var(--radius-ctl) 0; }
+.btn-group .btn[aria-pressed="true"] { background: var(--signal-weak); border-color: var(--signal); color: var(--paper); z-index: 1; }

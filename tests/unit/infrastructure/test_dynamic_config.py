@@ -26,7 +26,11 @@ def _load_seed(nome: str):
 
 # Seed acumulado das migrations que alimentam config_dinamica.
 SEED_009 = _load_seed("009_config_dinamica.py")
-SEED_TODAS = SEED_009 + _load_seed("011_config_parser.py")
+SEED_TODAS = (
+    SEED_009
+    + _load_seed("011_config_parser.py")
+    + _load_seed("020_config_graph_executor.py")
+)
 
 
 class _FakeRedisText:

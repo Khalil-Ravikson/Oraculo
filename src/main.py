@@ -169,11 +169,29 @@ def _shutdown() -> None:
     logger.info("🛑 A encerrar Oráculo UEMA...")
 
 
+class _RevalidatingStaticFiles(StaticFiles):
+    """StaticFiles que força o browser a revalidar (Cache-Control: no-cache)
+    em vez de servir a versão em cache sem checar. Ainda devolve 304 quando o
+    arquivo não mudou (ETag/Last-Modified), então continua eficiente — mas uma
+    mudança de CSS/JS aparece no próximo reload sem hard-refresh. Sem isso, um
+    `pages/*.js` antigo em cache que referencia um id removido do HTML novo
+    quebra o módulo inteiro e a página fica "Carregando…" pra sempre."""
+
+    def is_not_modified(self, response_headers, request_headers) -> bool:  # type: ignore[override]
+        response_headers["Cache-Control"] = "no-cache"
+        return super().is_not_modified(response_headers, request_headers)
+
+    def file_response(self, *args, **kwargs):  # type: ignore[override]
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 def _montar_static(app: FastAPI) -> None:
     """Configura o diretório de ficheiros estáticos (CSS, JS, Imagens)."""
     static_path = os.path.join(os.path.dirname(__file__), "..", "static")
     os.makedirs(static_path, exist_ok=True)
-    app.mount("/static", StaticFiles(directory=static_path), name="static")
+    app.mount("/static", _RevalidatingStaticFiles(directory=static_path), name="static")
 
 
 def _registrar_routers(app: FastAPI) -> None:

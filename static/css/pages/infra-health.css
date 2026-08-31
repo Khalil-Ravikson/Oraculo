@@ -1,0 +1,17 @@
+/* infra-health.css — Saúde do Sistema (Hub v2 Sprint 7). */
+
+.health-view .health-resumo { display: flex; flex-direction: column; gap: var(--space-2); }
+.health-view .health-problemas { margin: var(--space-2) 0 0 var(--space-4); color: var(--ink-400); font-size: var(--text-sm); }
+
+.health-view .health-linha {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-sm);
+}
+.health-view .health-linha:last-child { border-bottom: 0; }
+.health-view .health-linha > span:first-child { color: var(--ink-400); }
+.health-view .card__body { padding-top: var(--space-1); }

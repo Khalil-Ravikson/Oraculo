@@ -1,184 +1,193 @@
-<!DOCTYPE html>
-<html lang="pt-BR" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Styleguide — Oráculo UEMA</title>
+{% extends "hub/_shell.html" %}
+{% import "hub/_glossario.html" as g %}
+{% block nav_active %}_styleguide{% endblock %}
+{% block page_title %}Styleguide{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/styleguide.css">{% endblock %}
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+{% block content %}
 
-  <link rel="stylesheet" href="/static/css/tokens.css">
-  <link rel="stylesheet" href="/static/css/base.css">
-  <link rel="stylesheet" href="/static/css/layout.css">
-  <link rel="stylesheet" href="/static/css/components/button.css">
-  <link rel="stylesheet" href="/static/css/components/card.css">
-  <link rel="stylesheet" href="/static/css/components/badge.css">
-  <link rel="stylesheet" href="/static/css/components/table.css">
-  <link rel="stylesheet" href="/static/css/components/form.css">
-  <link rel="stylesheet" href="/static/css/components/modal.css">
-  <link rel="stylesheet" href="/static/css/components/toast.css">
-  <link rel="stylesheet" href="/static/css/components/layer-indicator.css">
-  <link rel="stylesheet" href="/static/css/pages/styleguide.css">
-</head>
-<body>
-<div class="shell" data-sidebar="default">
+<section class="sg-section">
+  <div class="sg-hero">
+    <div class="eyebrow">Assinatura · indicador de camada</div>
+    <p style="margin:var(--space-3) 0 var(--space-4);color:var(--ink-400);max-width:56ch">
+      O Supervisor resolve cada intenção em 5 camadas, da mais barata pra mais
+      cara. A régua mostra onde a última decisão parou — dado real do sistema.
+    </p>
+    <div class="sg-row" id="sg-layers"></div>
+  </div>
+</section>
 
-  <aside class="sidebar">
-    <div class="sidebar__brand">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/></svg>
-      <div>Oráculo<small>console operacional</small></div>
-    </div>
-    <nav class="sidebar__nav">
-      <div class="sidebar__section">Operação</div>
-      <a class="navlink" aria-current="page" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>Painel</span></a>
-      <a class="navlink" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v20M2 12h20"/></svg><span>Rotas</span></a>
-      <a class="navlink" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4"/></svg><span>Configuração</span></a>
-      <div class="sidebar__section">Análise</div>
-      <a class="navlink" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg><span>Custo LLM</span></a>
-      <a class="navlink" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg><span>Auditoria</span></a>
-    </nav>
-    <div class="sidebar__foot"><span class="caption">v6.3 · dark</span></div>
-  </aside>
+<section class="sg-section">
+  <div class="section__head"><h2>Cor</h2><span class="eyebrow">estado, não decoração</span></div>
+  <div class="sg-row">
+    <div class="sg-swatch"><i style="background:var(--ink-950)"></i><code>--ink-950</code></div>
+    <div class="sg-swatch"><i style="background:var(--ink-900)"></i><code>--ink-900</code></div>
+    <div class="sg-swatch"><i style="background:var(--ink-800)"></i><code>--ink-800</code></div>
+    <div class="sg-swatch"><i style="background:var(--line)"></i><code>--line</code></div>
+    <div class="sg-swatch"><i style="background:var(--signal)"></i><code>--signal</code></div>
+    <div class="sg-swatch"><i style="background:var(--ok)"></i><code>--ok</code></div>
+    <div class="sg-swatch"><i style="background:var(--warn)"></i><code>--warn</code></div>
+    <div class="sg-swatch"><i style="background:var(--danger)"></i><code>--danger</code></div>
+  </div>
+</section>
 
-  <div class="main">
-    <header class="topbar">
-      <span class="topbar__title">Styleguide · Plano B Fase 0</span>
-      <div class="topbar__right">
-        <span class="badge badge--ok">sistema ok</span>
-        <span class="caption">admin</span>
-      </div>
-    </header>
+<section class="sg-section">
+  <div class="section__head"><h2>Tipografia</h2><span class="eyebrow">Geist · Geist Mono</span></div>
+  <p style="font-size:var(--text-xl);font-weight:var(--weight-semi)">Título de página — 24</p>
+  <p style="font-size:var(--text-lg);font-weight:var(--weight-semi)">Título de painel — 18</p>
+  <p>Corpo — 15. O operador decide rápido e com segurança.</p>
+  <p class="mono tabular">R$ 1.284,50 &nbsp; 47.991 tokens &nbsp; 312 ms &nbsp; <span class="caption">Geist Mono, tabular-nums</span></p>
+</section>
 
-    <div class="content">
+<section class="sg-section">
+  <div class="section__head"><h2>Botões</h2></div>
+  <div class="sg-row">
+    <button class="btn btn--primary">Salvar alterações</button>
+    <button class="btn">Secundário</button>
+    <button class="btn btn--ghost">Ghost</button>
+    <button class="btn btn--danger">Excluir</button>
+    <button class="btn btn--primary" disabled>Desabilitado</button>
+    <button class="btn btn--sm">pequeno</button>
+    <button class="btn btn--icon" aria-label="ícone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 5v14M5 12h14"/></svg></button>
+    <span class="btn-group">
+      <button class="btn btn--sm" aria-pressed="true">Real</button>
+      <button class="btn btn--sm" aria-pressed="false">Manual</button>
+    </span>
+  </div>
+</section>
 
-      <!-- HERO = tese: o indicador de camada (assinatura) -->
-      <section class="sg-section">
-        <div class="sg-hero">
-          <div class="eyebrow">Assinatura · indicador de camada</div>
-          <p style="margin:var(--space-3) 0 var(--space-4);color:var(--ink-400);max-width:56ch">
-            O Supervisor resolve cada intenção em 5 camadas, da mais barata pra
-            mais cara. A régua mostra onde a última decisão parou — dado real do
-            sistema, não enfeite.
-          </p>
-          <div class="sg-row" id="sg-layers"></div>
-        </div>
-      </section>
+<section class="sg-section">
+  <div class="section__head"><h2>Badges &amp; StatusPill</h2></div>
+  <div class="sg-row">
+    <span class="badge badge--ok">saudável</span>
+    <span class="badge badge--warn">degradado</span>
+    <span class="badge badge--danger">circuito aberto</span>
+    <span class="badge badge--active">ativo</span>
+    <span class="badge badge--neutral">inativo</span>
+    <span class="badge badge--unknown">desconhecido</span>
+  </div>
+</section>
 
-      <section class="sg-section">
-        <div class="section__head"><h2>Cor</h2><span class="eyebrow">estado, não decoração</span></div>
-        <div class="sg-row">
-          <div class="sg-swatch"><i style="background:var(--ink-950)"></i><code>--ink-950</code></div>
-          <div class="sg-swatch"><i style="background:var(--ink-900)"></i><code>--ink-900</code></div>
-          <div class="sg-swatch"><i style="background:var(--ink-800)"></i><code>--ink-800</code></div>
-          <div class="sg-swatch"><i style="background:var(--line)"></i><code>--line</code></div>
-          <div class="sg-swatch"><i style="background:var(--signal)"></i><code>--signal</code></div>
-          <div class="sg-swatch"><i style="background:var(--ok)"></i><code>--ok</code></div>
-          <div class="sg-swatch"><i style="background:var(--warn)"></i><code>--warn</code></div>
-          <div class="sg-swatch"><i style="background:var(--danger)"></i><code>--danger</code></div>
-        </div>
-      </section>
+<section class="sg-section">
+  <div class="section__head"><h2>Camada de tradução (glossário)</h2><span class="eyebrow">termo cru só em data-tech</span></div>
+  <p class="u-muted u-mb-3">O chip mostra o rótulo humano; o "?" abre a explicação.</p>
+  <div class="sg-row">
+    {{ g.chip('owner:langgraph') }}
+    {{ g.chip('owner:legacy') }}
+    {{ g.chip('FEATURE_LANGGRAPH_NATIVE_ROUTES') }}
+    {{ g.chip('graph_node_config') }}
+    {{ g.chip('DEV_TEST_NO_DB_WRITE') }}
+    {{ g.chip('circuito:aberto') }}
+  </div>
+</section>
 
-      <section class="sg-section">
-        <div class="section__head"><h2>Tipografia</h2><span class="eyebrow">Geist · Geist Mono</span></div>
-        <p style="font-size:var(--text-xl);font-weight:var(--weight-semi)">Título de página — 24</p>
-        <p style="font-size:var(--text-lg);font-weight:var(--weight-semi)">Título de painel — 18</p>
-        <p>Corpo — 15. O operador decide rápido e com segurança: essa config está certa, esse provider está saudável, esse log é normal.</p>
-        <p class="mono tabular">R$ 1.284,50 &nbsp; 47.991 tokens &nbsp; 312 ms &nbsp; <span class="caption">Geist Mono, tabular-nums</span></p>
-      </section>
+<section class="sg-section" x-data="tabs('visao')">
+  <div class="section__head"><h2>Tabs</h2><span class="eyebrow">x-data="tabs('visao')"</span></div>
+  <div class="tabs" role="tablist">
+    <button class="tab" data-tab="visao"  :aria-selected="isTab('visao')"  @click="select('visao')">Visão geral</button>
+    <button class="tab" data-tab="portas" :aria-selected="isTab('portas')" @click="select('portas')">Portas <span class="tab__count">3</span></button>
+    <button class="tab" data-tab="infra"  :aria-selected="isTab('infra')"  @click="select('infra')">Infraestrutura</button>
+  </div>
+  <div class="tabpanel" x-show="isTab('visao')">Conteúdo da primeira aba. O hash da URL acompanha a aba ativa.</div>
+  <div class="tabpanel" x-show="isTab('portas')" x-cloak>Conteúdo de portas.</div>
+  <div class="tabpanel" x-show="isTab('infra')" x-cloak>Conteúdo de infraestrutura.</div>
+</section>
 
-      <section class="sg-section">
-        <div class="section__head"><h2>Botões</h2></div>
-        <div class="sg-row">
-          <button class="btn btn--primary">Salvar alterações</button>
-          <button class="btn">Secundário</button>
-          <button class="btn btn--ghost">Ghost</button>
-          <button class="btn btn--danger">Excluir</button>
-          <button class="btn btn--primary" disabled>Desabilitado</button>
-          <button class="btn btn--sm">pequeno</button>
-        </div>
-      </section>
-
-      <section class="sg-section">
-        <div class="section__head"><h2>Badges</h2></div>
-        <div class="sg-row">
-          <span class="badge badge--ok">saudável</span>
-          <span class="badge badge--warn">degradado</span>
-          <span class="badge badge--danger">circuito aberto</span>
-          <span class="badge badge--active">ativo</span>
-          <span class="badge badge--neutral">inativo</span>
-        </div>
-      </section>
-
-      <section class="sg-section">
-        <div class="section__head"><h2>Cards</h2></div>
-        <div class="grid">
-          <div class="col-4"><div class="card card--stat"><div class="stat__value tabular">R$ 42,18</div><div class="stat__label">custo hoje</div><div class="stat__delta stat__delta--down">▼ 12% vs ontem</div></div></div>
-          <a class="col-4 card card--nav" href="#"><div class="card__title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v20M2 12h20"/></svg>Registro de rotas</div><div class="card__desc">Mapa rota → execução, editável sem restart.</div></a>
-          <div class="col-4"><div class="card"><div class="card__head"><span class="card__title">Painel simples</span><span class="badge badge--ok">ok</span></div><div class="card__desc">Conteúdo do card com uma descrição.</div></div></div>
-        </div>
-      </section>
-
-      <section class="sg-section">
-        <div class="section__head"><h2>Formulário</h2></div>
-        <div class="grid">
-          <div class="col-6">
-            <div class="field"><label class="field__label">Modelo Gemini</label><input class="input" value="gemini-2.5-flash"><span class="field__hint">Entra em vigor na próxima chamada, sem restart.</span></div>
-            <div class="field"><label class="field__label">Provider ativo</label><select class="select"><option>gemini</option><option>deepseek</option><option>groq</option></select></div>
-          </div>
-          <div class="col-6">
-            <div class="field field--invalid"><label class="field__label">TTL do cache (s)</label><input class="input" value="0"><span class="field__error">Precisa ser maior que zero — TTL 0 apaga a entrada na hora.</span></div>
-            <label class="toggle"><input type="checkbox" checked><span class="toggle__track"></span><span>Reranker ligado</span></label>
-          </div>
-        </div>
-      </section>
-
-      <section class="sg-section">
-        <div class="section__head"><h2>Tabela</h2></div>
-        <div class="table-wrap">
-          <table class="table">
-            <thead><tr><th>rota</th><th>node</th><th>agente</th><th class="num">k</th><th>estado</th></tr></thead>
-            <tbody>
-              <tr><td>CALENDARIO</td><td>rag</td><td>academic_knowledge</td><td class="num">8</td><td><span class="badge badge--active">ativo</span></td></tr>
-              <tr><td>SIGAA</td><td>sigaa</td><td>sigaa</td><td class="num">0</td><td><span class="badge badge--warn">condicional</span></td></tr>
-              <tr><td>MEDIA_DOWNLOAD</td><td>media_download</td><td>—</td><td class="num">0</td><td><span class="badge badge--neutral">delega</span></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="sg-section">
-        <div class="section__head"><h2>Feedback</h2></div>
-        <div class="sg-row">
-          <button class="btn" id="sg-toast-ok">Toast de sucesso</button>
-          <button class="btn" id="sg-toast-err">Toast de erro</button>
-          <button class="btn btn--danger" id="sg-modal">Abrir confirmação</button>
-        </div>
-      </section>
-
+<section class="sg-section" x-data="infoBanner('sg')">
+  <div class="section__head"><h2>InfoBanner retrátil</h2><span class="eyebrow">estado persistido por página</span></div>
+  <div class="info-banner" :data-open="aberto">
+    <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+      O que é esta página
+      <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="info-banner__body" x-show="aberto" x-cloak>
+      <p>Texto que antes era uma caixa amarela grande. Escondido por padrão; quem já sabe não precisa ver de novo.</p>
     </div>
   </div>
-</div>
+</section>
 
-<script type="module">
-  import { showToast } from '/static/js/core/toast.js';
-  import { confirmar } from '/static/js/core/modal.js';
-  import { renderLayerRule, CAMADAS } from '/static/js/components/layer-indicator.js';
+<section class="sg-section">
+  <div class="section__head"><h2>PortTag</h2><span class="eyebrow">bolinha por tipo de dado</span></div>
+  <div class="ports">
+    <div class="ports__group">
+      <span class="ports__label">entrada</span>
+      <span class="port-tag port-tag--in" data-type="text">{{ g.rotulo('port:text') }}</span>
+      <span class="port-tag port-tag--in" data-type="audio" data-opt="true">{{ g.rotulo('port:audio') }} · opcional</span>
+    </div>
+    <div class="ports__group">
+      <span class="ports__label">saída</span>
+      <span class="port-tag" data-type="llm_response">{{ g.rotulo('port:llm_response') }}</span>
+      <span class="port-tag" data-type="embeddings">{{ g.rotulo('port:embeddings') }}</span>
+    </div>
+  </div>
+</section>
 
-  const box = document.getElementById('sg-layers');
-  CAMADAS.forEach((_, i) => {
-    const el = document.createElement('div');
-    renderLayerRule(el, { camada: i + 1, rota: ['GREETING','WIKI','CALENDARIO','EDITAL','GERAL'][i] });
-    box.appendChild(el);
-  });
+<section class="sg-section">
+  <div class="section__head"><h2>EmptyState</h2></div>
+  <div class="empty">
+    <div class="empty__art"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/></svg></div>
+    <div class="empty__title">Nenhum servidor MCP conectado</div>
+    <div class="empty__desc">Conecte um servidor para expor ferramentas externas aos agentes.</div>
+    <div class="empty__actions"><button class="btn btn--primary btn--sm">Conectar Servidor MCP</button></div>
+  </div>
+</section>
 
-  document.getElementById('sg-toast-ok').onclick = () => showToast('Rota CALENDARIO salva (v3)', 'ok');
-  document.getElementById('sg-toast-err').onclick = () => showToast('Este valor mudou desde que a tela abriu — recarregue', 'error');
-  document.getElementById('sg-modal').onclick = async () => {
-    const ok = await confirmar({ titulo: 'Excluir chave', corpo: 'A chave GEMINI_MODEL volta ao default de código. Não dá pra desfazer.', acao: 'Excluir', perigo: true });
-    showToast(ok ? 'Chave excluída' : 'Cancelado', ok ? 'ok' : 'error');
-  };
-</script>
-</body>
-</html>
+<section class="sg-section">
+  <div class="section__head"><h2>Cards de recurso</h2><span class="eyebrow">ProviderCard / ChannelCard</span></div>
+  <div class="card-grid">
+    <div class="card card--resource">
+      <div class="card__head"><span class="card__title">Gemini</span><span class="badge badge--ok status-pill">Conectado</span></div>
+      <dl class="res__meta"><dt>modelo</dt><dd>gemini-2.5-flash</dd><dt>tipo</dt><dd>nativo</dd></dl>
+      <div class="res__actions"><button class="btn btn--sm">Testar Conexão</button><button class="btn btn--sm btn--ghost">Editar</button></div>
+    </div>
+    <div class="card card--resource">
+      <div class="card__head"><span class="card__title">Atendimento UEMA — 01</span><span class="badge badge--warn status-pill">Aguardando QR</span></div>
+      <dl class="res__meta"><dt>webhook</dt><dd>/webhook/evolution</dd><dt>tipo</dt><dd>WhatsApp</dd></dl>
+      <div class="res__actions"><button class="btn btn--sm">Reconectar QR Code</button><button class="btn btn--sm btn--ghost">Editar Webhook</button></div>
+    </div>
+  </div>
+</section>
+
+<section class="sg-section">
+  <div class="section__head"><h2>Formulário &amp; SecretField</h2></div>
+  <div class="grid">
+    <div class="col-6">
+      <div class="field"><label class="field__label">Modelo de linguagem ativo</label><input class="input" value="gemini-2.5-flash"><span class="field__hint">Entra em vigor na próxima chamada.</span></div>
+      <label class="toggle"><input type="checkbox" checked><span class="toggle__track"></span><span>Reordenar resultados da busca</span></label>
+    </div>
+    <div class="col-6" id="sg-secret"></div>
+  </div>
+</section>
+
+<section class="sg-section">
+  <div class="section__head"><h2>Tabela</h2></div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>rota</th><th>motor</th><th class="num">k</th><th>estado</th></tr></thead>
+      <tbody>
+        <tr><td>CALENDÁRIO</td><td>{{ g.chip('owner:langgraph') }}</td><td class="num">8</td><td><span class="badge badge--active">ativo</span></td></tr>
+        <tr><td>SIGAA</td><td>{{ g.chip('owner:langgraph_conditional') }}</td><td class="num">0</td><td><span class="badge badge--warn">condicional</span></td></tr>
+        <tr><td>GERAL</td><td>{{ g.chip('owner:legacy') }}</td><td class="num">0</td><td><span class="badge badge--neutral">delega</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="sg-section">
+  <div class="section__head"><h2>SaveBar · FormModal · ConfirmModal · Toast</h2></div>
+  <div class="sg-row">
+    <button class="btn" id="sg-dirty">Marcar alteração</button>
+    <button class="btn" id="sg-clean">Limpar alteração</button>
+    <button class="btn btn--primary" id="sg-form">Abrir FormModal</button>
+    <button class="btn btn--danger" id="sg-token">Confirmar com token</button>
+    <button class="btn" id="sg-toast-ok">Toast sucesso</button>
+    <button class="btn" id="sg-toast-err">Toast erro</button>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/styleguide.js"></script>
+{% endblock %}

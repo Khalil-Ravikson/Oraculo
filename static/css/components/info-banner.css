@@ -1,0 +1,46 @@
+/* info-banner.css — aviso compacto e retrátil (Hub v2, Sprint 0).
+   Substitui as caixas amarelas e os parágrafos densos de "como isto funciona
+   por dentro" no topo das páginas. Fechado fica só a primeira linha; o
+   estado de aberto/fechado persiste por página (localStorage via Alpine). */
+
+.info-banner {
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--signal);
+  border-radius: var(--radius-card);
+  background: var(--ink-900);
+  margin-bottom: var(--space-5);
+  overflow: hidden;
+}
+.info-banner__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: none;
+  border: 0;
+  color: var(--paper);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  cursor: pointer;
+}
+.info-banner__head svg { width: 15px; height: 15px; color: var(--signal); flex: none; }
+.info-banner__chev {
+  margin-left: auto;
+  width: 14px; height: 14px;
+  color: var(--ink-500);
+  transition: transform var(--transition);
+  flex: none;
+}
+.info-banner[data-open="true"] .info-banner__chev { transform: rotate(180deg); }
+
+.info-banner__body {
+  padding: 0 var(--space-4) var(--space-4) calc(var(--space-4) + var(--space-5));
+  font-size: var(--text-sm);
+  color: var(--ink-400);
+  line-height: var(--leading-body);
+}
+.info-banner__body[hidden] { display: none; }
+.info-banner__body p + p { margin-top: var(--space-2); }

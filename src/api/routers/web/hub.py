@@ -578,7 +578,14 @@ class AgentLLMRequest(BaseModel):
     llm_model:    str | None = None
 
 
-_PROVIDERS_VALIDOS = ("gemini", "deepseek", "groq")
+def _providers_registrados() -> tuple[str, ...]:
+    """Nomes de provedor válidos agora — builders de código + provedores
+    cadastrados pelo painel (`llm_providers` → espelho Redis)."""
+    try:
+        from src.infrastructure.adapters.llm_provider_registry import registrados
+        return registrados() or ("gemini", "deepseek", "groq")
+    except Exception:
+        return ("gemini", "deepseek", "groq")
 
 
 @router.post("/agents/{name}/llm")
@@ -592,8 +599,9 @@ async def agents_set_llm(request: Request, name: str, data: AgentLLMRequest):
     if not payload:
         return {"error": "Não autorizado"}
 
-    if data.llm_provider and data.llm_provider not in _PROVIDERS_VALIDOS:
-        return {"error": f"Provider inválido: {data.llm_provider}. Use um de {_PROVIDERS_VALIDOS}."}
+    _validos = _providers_registrados()
+    if data.llm_provider and data.llm_provider not in _validos:
+        return {"error": f"Provedor inválido: {data.llm_provider}. Use um de {_validos}."}
 
     from src.agents.registry import registry
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -654,7 +662,7 @@ async def llm_provider_get(request: Request):
         return {"error": "Não autorizado"}
 
     from src.infrastructure.adapters.llm_factory import _provider_global_ativo
-    return {"provider": _provider_global_ativo(), "opcoes": list(_PROVIDERS_VALIDOS)}
+    return {"provider": _provider_global_ativo(), "opcoes": list(_providers_registrados())}
 
 
 @router.post("/llm/provider")
@@ -664,8 +672,9 @@ async def llm_provider_set(request: Request, data: GlobalLLMProviderRequest):
     payload = _verificar_cookie(request)
     if not payload:
         return {"error": "Não autorizado"}
-    if data.provider not in _PROVIDERS_VALIDOS:
-        return {"error": f"Provider inválido: {data.provider}. Use um de {_PROVIDERS_VALIDOS}."}
+    _validos = _providers_registrados()
+    if data.provider not in _validos:
+        return {"error": f"Provedor inválido: {data.provider}. Use um de {_validos}."}
 
     from src.infrastructure.adapters.llm_factory import _CHAVE_PROVIDER_GLOBAL
     from src.infrastructure.redis_client import get_redis_text
@@ -689,6 +698,345 @@ async def llm_provider_set(request: Request, data: GlobalLLMProviderRequest):
         logger.warning("⚠️  [HUB] Falha ao registrar audit_log da troca de provider: %s", exc)
 
     return {"provider": data.provider}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Provedores de LLM (aba Provedores da Configuração) — Hub v2 Sprint 3a
+# `llm_providers` (Postgres) + espelho Redis. Chave de API fica no .env;
+# aqui só o NOME da variável de ambiente.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/providers")
+async def providers_listar(request: Request):
+    """Provedores cadastrados (código + painel), com saúde e modelo. Faz o
+    seed dos 3 nativos na primeira chamada."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.adapters import llm_provider_store, llm_provider_registry
+    from src.infrastructure.adapters.llm_factory import _provider_global_ativo
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    linhas = []
+    try:
+        async with AsyncSessionLocal() as session:
+            if await llm_provider_store.seed_inicial(session, admin=payload.sub):
+                await llm_provider_store.espelhar_redis(session)
+                await session.commit()
+            linhas = await llm_provider_store.listar(session)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao listar provedores: %s", exc)
+
+    for l in linhas:
+        l["saude"] = llm_provider_registry.health_check(l["nome"])
+
+    return {"providers": linhas, "ativo_global": _provider_global_ativo()}
+
+
+class ProviderCriarRequest(BaseModel):
+    nome:           str
+    tipo:           str = "openai_compat"
+    base_url:       str = ""
+    api_key_env:    str = ""
+    modelo_default: str = ""
+    modelos:        list[str] = []
+
+
+@router.post("/providers")
+async def providers_criar(request: Request, data: ProviderCriarRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.adapters import llm_provider_store
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            registro = await llm_provider_store.criar(
+                session, data.nome, data.tipo, base_url=data.base_url,
+                api_key_env=data.api_key_env, modelos=data.modelos,
+                modelo_default=data.modelo_default, admin=payload.sub,
+            )
+            await llm_provider_store.espelhar_redis(session)
+            await session.commit()
+    except (llm_provider_store.NomeDuplicadoError, llm_provider_store.ConfigInvalidaError) as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao criar provedor '%s': %s", data.nome, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    return {"ok": True, **registro}
+
+
+class ProviderToggleRequest(BaseModel):
+    provider_id: int
+    habilitado:  bool
+
+
+@router.post("/providers/toggle")
+async def providers_toggle(request: Request, data: ProviderToggleRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.adapters import llm_provider_store
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await llm_provider_store.set_habilitado(session, data.provider_id, data.habilitado, admin=payload.sub)
+            await llm_provider_store.espelhar_redis(session)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao togglar provedor %s: %s", data.provider_id, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    if not ok:
+        return {"error": "Provedor não encontrado."}
+    return {"ok": True, "provider_id": data.provider_id, "habilitado": data.habilitado}
+
+
+class ProviderRemoverRequest(BaseModel):
+    provider_id: int
+
+
+@router.post("/providers/remove")
+async def providers_remover(request: Request, data: ProviderRemoverRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.adapters import llm_provider_store
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await llm_provider_store.remover(session, data.provider_id)
+            await llm_provider_store.espelhar_redis(session)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao remover provedor %s: %s", data.provider_id, exc)
+        return {"error": "Falha ao remover. Tente novamente."}
+
+    if not ok:
+        return {"error": "Provedor não encontrado (ou é de código, não removível)."}
+    return {"ok": True, "provider_id": data.provider_id}
+
+
+class ProviderTestRequest(BaseModel):
+    nome:           str | None = None    # provedor já cadastrado
+    tipo:           str | None = None    # ou dados soltos p/ testar antes de salvar
+    base_url:       str | None = None
+    api_key_env:    str | None = None
+    modelo_default: str | None = None
+
+
+@router.post("/providers/test-connection")
+async def providers_test_connection(request: Request, data: ProviderTestRequest):
+    """Faz uma chamada mínima real ao provedor e devolve ok/erro. Aceita um
+    provedor já cadastrado (`nome`) ou dados soltos (para testar antes de
+    salvar)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    import os as _os
+    from src.infrastructure.adapters import llm_provider_registry
+
+    try:
+        if data.nome:
+            provider = llm_provider_registry.instanciar(data.nome)
+        elif data.tipo == "openai_compat" and data.base_url:
+            from src.infrastructure.adapters.openai_compatible_provider import OpenAICompatibleProvider
+            chave = _os.getenv(data.api_key_env or "", "")
+            if not chave:
+                return {"ok": False, "mensagem": f"Variável de ambiente '{data.api_key_env}' está vazia."}
+            provider = OpenAICompatibleProvider(
+                provider_name=data.nome or "teste", base_url=data.base_url,
+                api_key=chave, model=data.modelo_default or "gpt-3.5-turbo",
+            )
+        else:
+            return {"ok": False, "mensagem": "Informe um provedor ou os dados de conexão."}
+
+        resp = await provider.gerar_resposta_async("ping", max_tokens=1, temperatura=0.0)
+        if resp.sucesso or resp.conteudo:
+            return {"ok": True, "mensagem": f"Respondeu ({provider.model})"}
+        return {"ok": False, "mensagem": resp.erro or "Sem resposta"}
+    except ValueError as exc:
+        return {"ok": False, "mensagem": str(exc)}
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] test-connection provedor falhou: %s", exc)
+        return {"ok": False, "mensagem": str(exc)[:200]}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canais (aba Integradores da Configuração) — Hub v2 Sprint 3b
+# `canais` (Postgres) + espelho Redis. Só "conectar instância existente":
+# status / QR / webhook. O hot path de mensagem segue em `settings`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/channels")
+async def channels_listar(request: Request):
+    """Canais cadastrados + estado da conexão (via Evolution). Faz o seed da
+    instância atual na primeira chamada."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.services import channel_store
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    canais = []
+    try:
+        async with AsyncSessionLocal() as session:
+            if await channel_store.seed_inicial(session, admin=payload.sub):
+                await channel_store.espelhar_redis(session)
+                await session.commit()
+            canais = await channel_store.listar(session)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao listar canais: %s", exc)
+
+    for c in canais:
+        if c["habilitado"]:
+            c["conexao"] = await channel_store.status_evolution(c)
+        else:
+            c["conexao"] = {"estado": "desligado"}
+
+    return {"channels": canais}
+
+
+class CanalCriarRequest(BaseModel):
+    nome:        str
+    base_url:    str
+    api_key_env: str = "EVOLUTION_API_KEY"
+    instance:    str
+    webhook_url: str = ""
+
+
+@router.post("/channels")
+async def channels_criar(request: Request, data: CanalCriarRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.services import channel_store
+    from src.infrastructure.security.ssrf_validator import URLInseguraError
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            registro = await channel_store.criar(
+                session, data.nome, base_url=data.base_url, api_key_env=data.api_key_env,
+                instance=data.instance, webhook_url=data.webhook_url, admin=payload.sub,
+            )
+            await channel_store.espelhar_redis(session)
+            await session.commit()
+    except URLInseguraError as exc:
+        return {"error": f"URL rejeitada: {exc}"}
+    except (channel_store.NomeDuplicadoError, channel_store.ConfigInvalidaError) as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao criar canal '%s': %s", data.nome, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    return {"ok": True, **registro}
+
+
+class CanalToggleRequest(BaseModel):
+    canal_id:   int
+    habilitado: bool
+
+
+@router.post("/channels/toggle")
+async def channels_toggle(request: Request, data: CanalToggleRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    from src.services import channel_store
+    from src.infrastructure.database.session import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await channel_store.set_habilitado(session, data.canal_id, data.habilitado, admin=payload.sub)
+            await channel_store.espelhar_redis(session)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao togglar canal %s: %s", data.canal_id, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+    return {"ok": True, "canal_id": data.canal_id, "habilitado": data.habilitado} if ok else {"error": "Canal não encontrado."}
+
+
+class CanalRemoverRequest(BaseModel):
+    canal_id: int
+
+
+@router.post("/channels/remove")
+async def channels_remover(request: Request, data: CanalRemoverRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    from src.services import channel_store
+    from src.infrastructure.database.session import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await channel_store.remover(session, data.canal_id)
+            await channel_store.espelhar_redis(session)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao remover canal %s: %s", data.canal_id, exc)
+        return {"error": "Falha ao remover. Tente novamente."}
+    return {"ok": True, "canal_id": data.canal_id} if ok else {"error": "Canal não encontrado (ou é de código)."}
+
+
+class CanalIdRequest(BaseModel):
+    canal_id: int
+
+
+@router.post("/channels/reconnect")
+async def channels_reconnect(request: Request, data: CanalIdRequest):
+    """Dispara o QR de pareamento da instância — devolve o base64 para exibir."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    from src.services import channel_store
+    from src.infrastructure.database.session import AsyncSessionLocal
+    async with AsyncSessionLocal() as session:
+        canal = await channel_store.obter(session, data.canal_id)
+    if canal is None:
+        return {"error": "Canal não encontrado."}
+    return await channel_store.qrcode_evolution(canal)
+
+
+class CanalWebhookRequest(BaseModel):
+    canal_id:    int
+    webhook_url: str
+
+
+@router.post("/channels/webhook")
+async def channels_webhook(request: Request, data: CanalWebhookRequest):
+    """Grava o novo webhook (Postgres + espelho) e tenta aplicá-lo na Evolution."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    from src.services import channel_store
+    from src.infrastructure.security.ssrf_validator import URLInseguraError
+    from src.infrastructure.database.session import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await channel_store.set_webhook(session, data.canal_id, data.webhook_url, admin=payload.sub)
+            canal = await channel_store.obter(session, data.canal_id)
+            await channel_store.espelhar_redis(session)
+            await session.commit()
+    except URLInseguraError as exc:
+        return {"error": f"URL rejeitada: {exc}"}
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao gravar webhook do canal %s: %s", data.canal_id, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+    if not ok:
+        return {"error": "Canal não encontrado."}
+    aplicado = await channel_store.set_webhook_evolution(canal, data.webhook_url) if canal else {"ok": False}
+    return {"ok": True, "aplicado_na_evolution": aplicado.get("ok", False), "detalhe": aplicado.get("erro", "")}
 
 
 class BrlRateRequest(BaseModel):
@@ -768,6 +1116,7 @@ async def llm_custo_data(request: Request, horas: int = 24):
             resumo     = await repo.get_metricas_dashboard(horas)
             por_rota   = await repo.get_metricas_por_rota(horas)
             por_provider = await repo.get_metricas_por_provider(horas)
+            serie      = await repo.get_serie_horaria(horas)
     except Exception as exc:
         logger.warning("⚠️  [HUB] Falha ao ler telemetria de custo: %s", exc)
         return {"error": "Falha ao consultar métricas."}
@@ -795,7 +1144,9 @@ async def llm_custo_data(request: Request, horas: int = 24):
 
     return {
         "provider_global_ativo": _provider_global_ativo(),
+        "provedores_opcoes": list(_providers_registrados()),
         "resumo": resumo,
+        "serie": serie,
         "por_rota": por_rota,
         "por_provider": por_provider,
         "cache": cache,
@@ -806,6 +1157,25 @@ async def llm_custo_data(request: Request, horas: int = 24):
         "provider_registry": provider_registry,
         "circuit_breaker": circuit_breaker,
     }
+
+
+class CircuitResetRequest(BaseModel):
+    provider: str
+
+
+@router.post("/llm/circuit/reset")
+async def llm_circuit_reset(request: Request, data: CircuitResetRequest):
+    """Zera o disjuntor de falhas de um provedor (fecha o circuito)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    try:
+        from src.infrastructure.adapters import llm_circuit_breaker
+        llm_circuit_breaker.registrar_sucesso(data.provider)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao resetar circuito de '%s': %s", data.provider, exc)
+        return {"error": "Falha ao resetar."}
+    return {"ok": True, "provider": data.provider}
 
 
 @router.get("/llm-pricing/data")
@@ -1006,36 +1376,157 @@ async def capabilities_page(request: Request):
 
 @router.get("/capabilities/data")
 async def capabilities_data(request: Request):
-    """Capabilities registradas (manifesto §S) + vínculo agente↔capability
-    (`agente_tools`, Fase 5)."""
+    """Ferramentas disponíveis (código + painel) + vínculo agente↔ferramenta
+    (`agente_tools`) + servidores MCP cadastrados (para o modal de criação)."""
     payload = _verificar_cookie(request)
     if not payload:
         return {"error": "Não autorizado"}
 
     from src.capabilities.registry import manifestos
-    from src.capabilities import agent_tools
+    from src.capabilities import agent_tools, tool_catalog
+    from src.graph import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
 
-    bindings = []
+    bindings, painel_tools, mcp_servers_lista = [], [], []
     try:
         async with AsyncSessionLocal() as session:
             bindings = await agent_tools.listar(session)
+            painel_tools = await tool_catalog.listar(session)
+            mcp_servers_lista = [
+                s["name"] for s in await mcp_server_registry.listar(session) if s["habilitado"]
+            ]
     except Exception as exc:
-        logger.warning("⚠️  [HUB] Falha ao ler agente_tools: %s", exc)
+        logger.warning("⚠️  [HUB] Falha ao ler catálogo de capabilities: %s", exc)
 
     return {
-        "capabilities": [
-            {
-                "nome": m.nome, "descricao": m.descricao, "interface": m.interface,
-                "permissoes": list(m.permissoes), "confirmacao": m.confirmacao,
-            }
-            for m in manifestos()
-        ],
+        "capabilities": tool_catalog.mesclar_com_codigo(manifestos(), painel_tools),
         "bindings": [
             {**b, "atualizado_em": b["atualizado_em"].isoformat() if b["atualizado_em"] else None}
             for b in bindings
         ],
+        "mcp_servers": mcp_servers_lista,
     }
+
+
+class ToolCriarRequest(BaseModel):
+    nome:        str
+    tipo:        str                       # "http" | "mcp"
+    descricao:   str = ""
+    config:      Dict[str, Any] = {}
+    permissoes:  list[str] = []
+    confirmacao: bool = False
+
+
+@router.post("/tools")
+async def tools_criar(request: Request, data: ToolCriarRequest):
+    """Cadastra uma ferramenta pelo painel (`tools_catalogo`, migration 016).
+    URL de ferramenta HTTP passa por validação SSRF antes de gravar."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.capabilities import tool_catalog
+    from src.infrastructure.security.ssrf_validator import URLInseguraError
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            registro = await tool_catalog.criar(
+                session, data.nome, data.tipo, data.config,
+                descricao=data.descricao, permissoes=data.permissoes,
+                confirmacao=data.confirmacao, admin=payload.sub,
+            )
+            await session.commit()
+    except URLInseguraError as exc:
+        return {"error": f"URL rejeitada: {exc}"}
+    except (tool_catalog.NomeDuplicadoError, tool_catalog.ConfigInvalidaError) as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao criar ferramenta '%s': %s", data.nome, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    return {"ok": True, **registro}
+
+
+class ToolToggleRequest(BaseModel):
+    tool_id:    int
+    habilitado: bool
+
+
+@router.post("/tools/toggle")
+async def tools_toggle(request: Request, data: ToolToggleRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.capabilities import tool_catalog
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await tool_catalog.set_habilitado(session, data.tool_id, data.habilitado, admin=payload.sub)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao togglar ferramenta %s: %s", data.tool_id, exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    if not ok:
+        return {"error": "Ferramenta não encontrada."}
+    return {"ok": True, "tool_id": data.tool_id, "habilitado": data.habilitado}
+
+
+class ToolRemoverRequest(BaseModel):
+    tool_id: int
+
+
+@router.post("/tools/remove")
+async def tools_remover(request: Request, data: ToolRemoverRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.capabilities import tool_catalog
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await tool_catalog.remover(session, data.tool_id)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao remover ferramenta %s: %s", data.tool_id, exc)
+        return {"error": "Falha ao remover. Tente novamente."}
+
+    if not ok:
+        return {"error": "Ferramenta não encontrada."}
+    return {"ok": True, "tool_id": data.tool_id}
+
+
+class ToolTestRequest(BaseModel):
+    tool_id: int
+    args:    Dict[str, Any] = {}
+
+
+@router.post("/tools/test")
+async def tools_test(request: Request, data: ToolTestRequest):
+    """Executa a ferramenta uma vez com `args` de teste e devolve o resultado
+    cru — nunca lança (o executor sempre retorna `{ok: bool}`)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.capabilities import tool_catalog, dynamic_tool_executor
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        tool = await tool_catalog.obter(session, data.tool_id)
+    if tool is None:
+        return {"error": "Ferramenta não encontrada."}
+
+    try:
+        resultado = await dynamic_tool_executor.executar(tool["nome"], data.args)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return {"ok": bool(resultado.get("ok")), "resultado": resultado}
 
 
 class CapabilityToggleRequest(BaseModel):
@@ -1092,10 +1583,21 @@ async def graph_nodes_data(request: Request):
         return {"error": "Não autorizado"}
 
     from src.graph.node_registry import get_registry
-    from src.graph import node_config
+    from src.graph import node_config, node_health
     from src.infrastructure.database.session import AsyncSessionLocal
 
     nos = get_registry().list_nodes()
+
+    # Saúde barata (sem chamada de rede) — preenche o `health` que o registry
+    # deixa `null` por padrão. Só `llm_provider` tem probe real hoje.
+    for no in nos:
+        saude = node_health.resolver(no["type"])
+        if saude is not None:
+            no["health"] = {
+                "is_healthy": saude["is_healthy"],
+                "error": saude.get("error"),
+                "detail": saude.get("detail"),
+            }
 
     config_rows = []
     try:
@@ -1180,14 +1682,15 @@ class McpServerRegisterRequest(BaseModel):
     name:        str
     url:         str
     description: str = ""
+    auth_tipo:   str = "none"     # none | bearer | api_key
+    auth_env:    str = ""         # nome da variável de ambiente com o segredo
 
 
 @router.post("/mcp-servers/register")
 async def mcp_servers_register(request: Request, data: McpServerRegisterRequest):
     """Cadastra um novo servidor MCP — a URL passa por validação SSRF
-    obrigatória (`ssrf_validator.validar_url_publica`) antes de qualquer
-    escrita. Ainda não conecta de verdade (só cadastro, ver docstring de
-    `mcp_server_registry.py`)."""
+    obrigatória antes de qualquer escrita. A autenticação guarda só o NOME
+    da variável de ambiente do segredo (nunca o valor)."""
     payload = _verificar_cookie(request)
     if not payload:
         return {"error": "Não autorizado"}
@@ -1199,18 +1702,66 @@ async def mcp_servers_register(request: Request, data: McpServerRegisterRequest)
     try:
         async with AsyncSessionLocal() as session:
             registro = await mcp_server_registry.registrar(
-                session, data.name, data.url, data.description, admin=payload.sub,
+                session, data.name, data.url, data.description,
+                auth_tipo=data.auth_tipo, auth_env=data.auth_env, admin=payload.sub,
             )
             await session.commit()
     except URLInseguraError as exc:
         return {"error": f"URL rejeitada: {exc}"}
     except mcp_server_registry.NomeDuplicadoError as exc:
         return {"error": str(exc)}
+    except ValueError as exc:
+        return {"error": str(exc)}
     except Exception as exc:
         logger.warning("⚠️  [HUB] Falha ao registrar servidor MCP '%s': %s", data.name, exc)
         return {"error": "Falha ao gravar. Tente novamente."}
 
-    return {"ok": True, **registro}
+    return {"ok": True, **{k: v for k, v in registro.items() if k != "atualizado_em"}}
+
+
+class McpServerNameRequest(BaseModel):
+    name: str
+
+
+@router.post("/mcp-servers/test")
+async def mcp_servers_test(request: Request, data: McpServerNameRequest):
+    """Conecta no servidor, mede latência e lista as ferramentas expostas."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph import mcp_server_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            resultado = await mcp_server_registry.testar_conexao(session, data.name)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao testar servidor MCP '%s': %s", data.name, exc)
+        return {"ok": False, "erro": "Falha ao testar."}
+    return resultado
+
+
+@router.post("/mcp-servers/sync")
+async def mcp_servers_sync(request: Request, data: McpServerNameRequest):
+    """Sincroniza as ferramentas do servidor para `tools_catalogo` (tipo mcp)
+    — ficam disponíveis para vincular a um agente em /hub/capabilities."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph import mcp_server_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            resultado = await mcp_server_registry.sincronizar_ferramentas(session, data.name)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao sincronizar ferramentas de '%s': %s", data.name, exc)
+        return {"ok": False, "erro": "Falha ao sincronizar."}
+    return resultado
 
 
 class McpServerToggleRequest(BaseModel):
@@ -1379,6 +1930,147 @@ async def graph_studio_remove(request: Request, data: GraphTopologyRemoveRequest
     if not ok:
         return {"error": f"Topologia '{data.name}' não existe."}
     return {"ok": True, "name": data.name}
+
+
+class GraphTestRequest(BaseModel):
+    name:    str
+    dry_run: bool = True
+
+
+@router.post("/graph-studio/test")
+async def graph_studio_test(request: Request, data: GraphTestRequest):
+    """Executa uma topologia salva. `dry_run=True` (padrão) só calcula o
+    caminho e emite os eventos — não chama nenhum componente de verdade.
+    Execução real (`dry_run=False`) exige `FEATURE_GRAPH_EXECUTOR_PILOTO`."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.graph.graph_executor import executar_topologia_salva
+
+    dry = data.dry_run
+    if not dry:
+        from src.infrastructure import dynamic_config
+        if not dynamic_config.get_bool("FEATURE_GRAPH_EXECUTOR_PILOTO"):
+            return {"error": "Execução real está desligada (chave de laboratório 'Executor de grafo piloto')."}
+
+    try:
+        resultado = await executar_topologia_salva(data.name, dry_run=dry)
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] Falha ao executar topologia '%s': %s", data.name, exc)
+        return {"error": "Falha na execução."}
+    return resultado.to_dict()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Infraestrutura — Armazenamento & Cache (Hub v2 Sprint 5)
+# "RedisInsight light": só o que o Oráculo usa. Ações destrutivas com dry-run.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/infra/storage", response_class=HTMLResponse)
+async def infra_storage_page(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/infra-storage.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/infra/storage/data")
+async def infra_storage_data(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.observability import storage_health
+
+    return {
+        "redis": storage_health.redis_overview(),
+        "modulos": storage_health.redis_modules(),
+        "persistencia": storage_health.redis_persistencia(),
+        "config": storage_health.redis_config(),
+        "slowlog": storage_health.redis_slowlog(15),
+        "postgres": await storage_health.postgres_overview(),
+    }
+
+
+@router.get("/infra/health", response_class=HTMLResponse)
+async def infra_health_page(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/infra-health.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/health")
+async def infra_health_data(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    from src.infrastructure.observability import system_health
+    return await system_health.coletar()
+
+
+@router.post("/infra/redis/recriar-indices")
+async def infra_redis_recriar_indices(request: Request):
+    """Recria a estrutura dos índices de busca (idempotente) — útil se algum
+    sumiu. NÃO apaga nem restaura dados. Ação segura."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+
+    from src.infrastructure.observability import storage_health
+
+    try:
+        indices = await storage_health.recriar_indices()
+    except Exception as exc:
+        logger.warning("⚠️  [HUB] recriar índices falhou: %s", exc)
+        return {"error": "Falha ao recriar índices."}
+    return {"ok": True, "indices": indices}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Infraestrutura — Busca & Índices (Hub v2 Sprint 6a)
+# Leitura dos índices RediSearch + teste de busca híbrida. Não muda índice.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/infra/search", response_class=HTMLResponse)
+async def infra_search_page(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/infra-search.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/infra/search/data")
+async def infra_search_data(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    from src.infrastructure.observability import search_health
+    return {"indices": search_health.listar_indices()}
+
+
+class BuscaTesteRequest(BaseModel):
+    query: str
+    k:     int = 6
+
+
+@router.post("/infra/search/test")
+async def infra_search_test(request: Request, data: BuscaTesteRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    from src.infrastructure.observability import search_health
+    return await search_health.testar_busca(data.query, min(max(data.k, 1), 20))
 
 
 @router.get("/eval", response_class=HTMLResponse)

@@ -56,6 +56,7 @@ ALLOWED_DYNAMIC_KEYS: dict[str, str] = {
     "RAG_RERANKER_ENABLED":              "bool",
     "PARSER_PDF_PRIORIDADE":             "str",   # Fase 4
     "PARSER_DESABILITADOS":              "str",   # Fase 4
+    "FEATURE_GRAPH_EXECUTOR_PILOTO":     "bool",  # Hub v2 Sprint 8 — nada lê no hot path ainda
 }
 
 _VERDADEIROS = {"1", "true", "t", "yes", "on", "sim"}

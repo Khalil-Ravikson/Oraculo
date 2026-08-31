@@ -36,14 +36,19 @@ logger = logging.getLogger(__name__)
 
 _CHAVE_PROVIDER_GLOBAL = "admin:llm_provider"
 
-# Plano A / Fase 3: os providers válidos e a instanciação vêm do
-# `llm_provider_registry` (dict de builders + manifesto §S). Fallback fixo
-# se o import falhar (o registro é código, não deveria falhar).
-try:
-    from src.infrastructure.adapters.llm_provider_registry import registrados as _registrados
-    _PROVIDERS_VALIDOS = _registrados()
-except Exception:  # pragma: no cover
-    _PROVIDERS_VALIDOS = ("gemini", "deepseek", "groq")
+# Plano A / Fase 3 + Hub v2: os providers válidos vêm do
+# `llm_provider_registry` (builders de código + provedores dinâmicos do
+# painel, lidos do espelho Redis). É FUNÇÃO, não constante — um provedor
+# cadastrado depois do boot precisa ser selecionável sem restart.
+_PROVIDERS_FALLBACK = ("gemini", "deepseek", "groq")
+
+
+def _providers_validos() -> tuple[str, ...]:
+    try:
+        from src.infrastructure.adapters.llm_provider_registry import registrados
+        return registrados() or _PROVIDERS_FALLBACK
+    except Exception:  # pragma: no cover
+        return _PROVIDERS_FALLBACK
 
 
 def _instanciar(provider_name: str, modelo: str | None = None) -> ILLMProvider:
@@ -53,16 +58,17 @@ def _instanciar(provider_name: str, modelo: str | None = None) -> ILLMProvider:
 
 def _provider_global_ativo() -> str:
     from src.infrastructure.settings import settings
+    validos = _providers_validos()
     try:
         from src.infrastructure.redis_client import get_redis_text
         raw = get_redis_text().get(_CHAVE_PROVIDER_GLOBAL)
         if raw:
             valor = raw if isinstance(raw, str) else raw.decode()
-            if valor in _PROVIDERS_VALIDOS:
+            if valor in validos:
                 return valor
     except Exception as exc:
         logger.warning("⚠️ [LLM_FACTORY] Falha ao ler provider global no Redis: %s", exc)
-    return settings.LLM_PROVIDER if settings.LLM_PROVIDER in _PROVIDERS_VALIDOS else "gemini"
+    return settings.LLM_PROVIDER if settings.LLM_PROVIDER in validos else "gemini"
 
 
 def _override_do_agente(agente: str) -> tuple[str | None, str | None]:
@@ -92,7 +98,7 @@ def get_llm_provider(agente: str | None = None, rota: str = "") -> "MonitoredLLM
 
     if agente:
         override_provider, override_modelo = _override_do_agente(agente)
-        if override_provider and override_provider in _PROVIDERS_VALIDOS:
+        if override_provider and override_provider in _providers_validos():
             provider_name = override_provider
         if override_modelo:
             modelo = override_modelo

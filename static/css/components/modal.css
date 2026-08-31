@@ -29,3 +29,9 @@
 
 .modal--wide { max-width: 720px; }
 .modal__body--scroll { max-height: 60vh; overflow-y: auto; }
+
+/* Erro de submit num formModal — fica à esquerda, empurra os botões */
+.modal__foot .field__status { margin-right: auto; align-self: center; }
+
+/* Campos dentro de um formModal herdam o espaçamento de form.css; último sem margem */
+.modal__body .field:last-child { margin-bottom: 0; }

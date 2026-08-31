@@ -1,0 +1,27 @@
+/* llm-custo.css — Custo & Provedores (Hub v2 Sprint 7). */
+
+.custo-view #resumo .metric__value { font-size: var(--text-lg); }
+.custo-view .metric__foot .spark { width: 100%; }
+
+.custo-view .rota-barras {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.custo-view .rota-barra {
+  display: grid;
+  grid-template-columns: 160px 1fr 90px;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+.custo-view .rota-barra__label { color: var(--ink-400); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.custo-view .rota-barra__track { height: 10px; background: var(--ink-800); border-radius: var(--radius-full); overflow: hidden; }
+.custo-view .rota-barra__fill { display: block; height: 100%; background: var(--signal); border-radius: var(--radius-full); }
+.custo-view .rota-barra__val { text-align: right; color: var(--ink-400); font-size: var(--text-xs); }
+
+@media (max-width: 720px) {
+  .custo-view .rota-barra { grid-template-columns: 1fr; }
+  .custo-view .rota-barra__track { grid-column: 1; }
+}

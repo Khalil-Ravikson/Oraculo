@@ -1,36 +1,38 @@
 {% extends "hub/_shell.html" %}
 {% block nav_active %}nodes{% endblock %}
-{% block page_title %}Graph Nodes{% endblock %}
+{% block page_title %}Componentes{% endblock %}
 
 {% block extra_css %}<link rel="stylesheet" href="/static/css/pages/graph-nodes.css">{% endblock %}
 
 {% block content %}
-<div class="node-view">
-<div class="card" style="border-left:2px solid var(--warn);margin-bottom:var(--space-5)">
-  <div class="card__desc" style="margin:0">
-    Habilitar/desabilitar aqui é só a Configuration Layer (tabela
-    <code>graph_node_config</code>) — o nó continua existindo em código.
-    Ainda não há consumidor de produção que respeite esse toggle na hora de
-    executar um grafo (infra pronta, sem efeito em runtime ainda — mesmo
-    estágio de <a href="/hub/capabilities">Capabilities</a>).
+<div class="node-view" x-data="tabs('todos')">
+
+<div class="info-banner" x-data="infoBanner('nodes')" :data-open="aberto">
+  <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+    O que é o catálogo de componentes
+    <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div class="info-banner__body" x-show="aberto" x-cloak>
+    <p>Toda peça que processa uma mensagem — modelos de linguagem, leitura de
+      áudio, leitores de PDF, ferramentas — exposta sob uma interface comum,
+      com o tipo de dado que cada uma recebe e devolve.</p>
+    <p>Ligar/desligar aqui marca o componente como disponível ou não. O
+      componente continua existindo; um fluxo que ainda esteja usando ele
+      não é interrompido no meio.</p>
   </div>
 </div>
 
-<section class="section">
-  <div class="section__head">
-    <span class="eyebrow">registry de nós · Camada 1 (BaseNode)</span>
-    <a class="btn btn--ghost btn--sm" href="/hub/routes">Rotas →</a>
-  </div>
+<div class="tabs" role="tablist">
+  <button class="tab" data-tab="todos"     :aria-selected="isTab('todos')"     @click="select('todos')">Todos</button>
+  <button class="tab" data-tab="canais"    :aria-selected="isTab('canais')"    @click="select('canais')">Canais</button>
+  <button class="tab" data-tab="providers" :aria-selected="isTab('providers')" @click="select('providers')">Modelos &amp; IA</button>
+  <button class="tab" data-tab="parsers"   :aria-selected="isTab('parsers')"   @click="select('parsers')">Leitura &amp; Busca</button>
+  <button class="tab" data-tab="mcp"       :aria-selected="isTab('mcp')"       @click="select('mcp')">Ferramentas</button>
+</div>
 
-  <p class="node-view__lead">
-    Todo provider (LLM, STT, TTS, Embeddings, Parser, Tool, Channel, MCP,
-    REST) exposto sob uma interface comum tipada — este registry valida se
-    dois nós podem se conectar (tipo de porta de saída == tipo de porta de
-    entrada) antes de um grafo declarativo (adendo de nós) poder usá-los.
-  </p>
+<div id="nodes" class="card-grid"><span class="caption">Carregando…</span></div>
 
-  <div id="nodes" class="node-grid"><span class="caption">Carregando…</span></div>
-</section>
 </div>
 {% endblock %}
 

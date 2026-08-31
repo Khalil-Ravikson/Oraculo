@@ -1,57 +1,73 @@
 {% extends "hub/_shell.html" %}
 {% block nav_active %}cost{% endblock %}
-{% block page_title %}Custo & Providers LLM{% endblock %}
+{% block page_title %}Custo & Provedores{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/llm-custo.css">{% endblock %}
 
 {% block content %}
+<div class="custo-view">
+
 <div class="grid" style="margin-bottom:var(--space-5)">
   <div class="col-6"><div class="card">
-    <div class="card__title">Provider global ativo</div>
-    <div class="stat__value mono" id="prov-atual" style="font-size:var(--text-lg);margin:var(--space-2) 0">—</div>
-    <div style="display:flex;gap:var(--space-2)">
-      <select class="select" id="prov-select" style="max-width:160px"><option>gemini</option><option>deepseek</option><option>groq</option></select>
+    <div class="card__title">Provedor de IA ativo</div>
+    <div class="metric__value mono" id="prov-atual" style="margin:var(--space-2) 0">—</div>
+    <div class="u-flex u-gap-2">
+      <select class="select" id="prov-select" style="max-width:180px"></select>
       <button class="btn btn--primary btn--sm" id="prov-troca">Trocar agora</button>
     </div>
   </div></div>
   <div class="col-6"><div class="card">
-    <div class="card__title">Taxa USD → BRL</div>
-    <div class="stat__value mono" id="brl-atual" style="font-size:var(--text-lg);margin:var(--space-2) 0">—</div>
-    <div style="display:flex;gap:var(--space-2)">
-      <input class="input" type="number" step="0.01" id="brl-input" placeholder="5.40" style="max-width:110px">
-      <button class="btn btn--primary btn--sm" id="brl-save">Salvar</button>
-      <button class="btn btn--sm" id="brl-auto">Usar ao vivo</button>
+    <div class="card__title">Cotação do dólar (USD → BRL)</div>
+    <div class="metric__value mono" id="brl-atual" style="margin:var(--space-2) 0">—</div>
+    <div class="u-flex u-gap-2 u-items-center">
+      <span class="btn-group">
+        <button class="btn btn--sm" id="brl-modo-auto" aria-pressed="false">Cotação real</button>
+        <button class="btn btn--sm" id="brl-modo-manual" aria-pressed="false">Fixar manual</button>
+      </span>
+      <span id="brl-manual-box" class="u-flex u-gap-2" hidden>
+        <input class="input" type="number" step="0.01" id="brl-input" placeholder="5.40" style="max-width:100px">
+        <button class="btn btn--primary btn--sm" id="brl-save">Salvar</button>
+      </span>
     </div>
   </div></div>
 </div>
 
 <section class="section">
-  <div class="section__head"><span class="eyebrow">registry de providers + circuit breaker</span></div>
-  <div class="table-wrap"><table class="table"><thead><tr><th>provider</th><th>interface</th><th>saúde</th><th>circuito</th><th class="num">falhas</th></tr></thead><tbody id="prov-registry"></tbody></table></div>
-</section>
-
-<section class="section">
-  <div class="section__head"><span class="eyebrow">últimas 24h</span></div>
+  <div class="section__head"><span class="eyebrow">últimas 24h · tendência</span></div>
   <div class="grid" id="resumo"></div>
 </section>
 
 <section class="section">
-  <div class="section__head"><span class="eyebrow">custo por provider</span></div>
-  <div class="table-wrap"><table class="table"><thead><tr><th>provider</th><th class="num">chamadas</th><th class="num">tokens</th><th class="num">USD</th><th class="num">BRL</th></tr></thead><tbody id="por-provider"></tbody></table></div>
+  <div class="section__head">
+    <span class="eyebrow">provedores &amp; disjuntor de falhas</span>
+    <a class="btn btn--ghost btn--sm" href="/hub/infra/health">Saúde do sistema →</a>
+  </div>
+  <div class="table-wrap"><table class="table"><thead><tr>
+    <th>provedor</th><th>credencial</th><th>status do circuito</th><th class="num">falhas</th><th></th>
+  </tr></thead><tbody id="prov-registry"></tbody></table></div>
 </section>
 
 <section class="section">
-  <div class="section__head"><span class="eyebrow">custo por rota (inclui stt/tts)</span></div>
-  <div class="table-wrap"><table class="table"><thead><tr><th>rota</th><th class="num">chamadas</th><th class="num">USD</th><th class="num">BRL</th><th class="num">latência ms</th></tr></thead><tbody id="por-rota"></tbody></table></div>
+  <div class="section__head"><span class="eyebrow">custo por provedor</span></div>
+  <div class="table-wrap"><table class="table"><thead><tr><th>provedor</th><th class="num">chamadas</th><th class="num">tokens</th><th class="num">USD</th><th class="num">BRL</th></tr></thead><tbody id="por-provider"></tbody></table></div>
 </section>
 
 <section class="section">
-  <div class="section__head"><span class="eyebrow">cache semântico por rota</span></div>
-  <div class="table-wrap"><table class="table"><thead><tr><th>rota</th><th class="num">entradas</th><th class="num">TTL</th><th class="num">threshold</th><th></th></tr></thead><tbody id="cache-rota"></tbody></table></div>
+  <div class="section__head"><span class="eyebrow">custo por assunto (inclui áudio)</span></div>
+  <div id="rota-barras" class="rota-barras"></div>
+  <div class="table-wrap"><table class="table"><thead><tr><th>assunto</th><th class="num">chamadas</th><th class="num">USD</th><th class="num">BRL</th><th class="num">latência ms</th></tr></thead><tbody id="por-rota"></tbody></table></div>
 </section>
 
 <section class="section">
-  <div class="section__head"><span class="eyebrow">tabela de preços (editável, sem rebuild)</span></div>
-  <div class="table-wrap"><table class="table"><thead><tr><th>provider</th><th>modelo</th><th class="num">in/1M</th><th class="num">out/1M</th><th class="num">cache/1M</th><th></th></tr></thead><tbody id="pricing"></tbody></table></div>
+  <div class="section__head"><span class="eyebrow">cache de respostas por assunto</span></div>
+  <div class="table-wrap"><table class="table"><thead><tr><th>assunto</th><th class="num">entradas</th><th class="num">validade</th><th class="num">limiar</th><th></th></tr></thead><tbody id="cache-rota"></tbody></table></div>
 </section>
+
+<section class="section">
+  <div class="section__head"><span class="eyebrow">tabela de preços (editável, sem reiniciar)</span></div>
+  <div class="table-wrap"><table class="table"><thead><tr><th>provedor</th><th>modelo</th><th class="num">in/1M</th><th class="num">out/1M</th><th class="num">cache/1M</th><th></th></tr></thead><tbody id="pricing"></tbody></table></div>
+</section>
+
+</div>
 {% endblock %}
 
 {% block scripts %}

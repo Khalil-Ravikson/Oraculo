@@ -450,6 +450,98 @@ class McpServer(Base):
     tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
     atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     atualizado_por = Column(String(100), nullable=True)
+    # Colunas de conexão (migration 019, Hub v2 Sprint 4)
+    auth_tipo      = Column(String(20), server_default="none", nullable=False)
+    auth_env       = Column(String(100), server_default="", nullable=False)
+    latency_ms     = Column(Integer, nullable=True)
+    last_checked   = Column(DateTime(timezone=True), nullable=True)
+    tools_expostas = Column(JSONB, server_default="[]", nullable=False)
+
+
+class Canal(Base):
+    """Instância de comunicação cadastrada pelo painel (migration 018, Hub
+    v2). Hoje só `whatsapp_evolution`. `config` = {base_url, api_key_env,
+    instance}; a chave da Evolution segue no .env (`api_key_env` = nome da
+    variável). O hot path de mensagem ainda lê de `settings` nesta fase —
+    a tabela seeda com os mesmos valores. `tenant_id` sempre NULL."""
+    __tablename__ = "canais"
+    __table_args__ = (
+        Index(
+            "ux_canais_tenant_nome", "tenant_id", "nome",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id             = Column(Integer, primary_key=True)
+    nome           = Column(String(80), nullable=False)
+    tipo           = Column(String(30), server_default="whatsapp_evolution", nullable=False)
+    config         = Column(JSONB, server_default="{}", nullable=False)
+    webhook_url    = Column(String(500), server_default="", nullable=False)
+    habilitado     = Column(Boolean, server_default="true", nullable=False)
+    origem         = Column(String(10), server_default="painel", nullable=False)
+    versao         = Column(Integer, server_default="1", nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por = Column(String(100), nullable=True)
+
+
+class LlmProvider(Base):
+    """Provedor de LLM cadastrado pelo painel (migration 017, Hub v2). A
+    chave de API NUNCA fica aqui — `api_key_env` guarda só o nome da
+    variável de ambiente (decisão do dono; §P). `tipo` gemini/deepseek/groq
+    são seeds dos builders de código; `openai_compat` é provedor novo
+    instanciado por `OpenAICompatibleProvider`. `tenant_id` sempre NULL."""
+    __tablename__ = "llm_providers"
+    __table_args__ = (
+        Index(
+            "ux_llm_providers_tenant_nome", "tenant_id", "nome",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id             = Column(Integer, primary_key=True)
+    nome           = Column(String(40), nullable=False)
+    tipo           = Column(String(20), nullable=False)
+    base_url       = Column(String(300), server_default="", nullable=False)
+    api_key_env    = Column(String(100), server_default="", nullable=False)
+    modelos        = Column(JSONB, server_default="[]", nullable=False)
+    modelo_default = Column(String(100), server_default="", nullable=False)
+    habilitado     = Column(Boolean, server_default="true", nullable=False)
+    origem         = Column(String(10), server_default="painel", nullable=False)
+    versao         = Column(Integer, server_default="1", nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por = Column(String(100), nullable=True)
+
+
+class ToolCatalogo(Base):
+    """Ferramenta criada pelo painel (migration 016, Hub v2). O admin
+    cadastra via /hub/capabilities uma ferramenta `http` (chamada REST
+    definida por dado, URL validada por SSRF no cadastro) ou `mcp`
+    (ferramenta exposta por um servidor de `mcp_servers`). Fica disponível
+    para vincular a um agente via `agente_tools`. Ferramenta com lógica
+    Python arbitrária continua vindo de código (`capabilities/registry.py`).
+    `config` guarda o shape do tipo. `tenant_id` sempre NULL hoje (§M)."""
+    __tablename__ = "tools_catalogo"
+    __table_args__ = (
+        Index(
+            "ux_tools_catalogo_tenant_nome", "tenant_id", "nome",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id             = Column(Integer, primary_key=True)
+    nome           = Column(String(60), nullable=False)
+    tipo           = Column(String(20), nullable=False)   # "http" | "mcp"
+    descricao      = Column(String(500), server_default="", nullable=False)
+    config         = Column(JSONB, server_default="{}", nullable=False)
+    permissoes     = Column(JSONB, server_default="[]", nullable=False)
+    confirmacao    = Column(Boolean, server_default="false", nullable=False)
+    habilitado     = Column(Boolean, server_default="true", nullable=False)
+    versao         = Column(Integer, server_default="1", nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por = Column(String(100), nullable=True)
 
 
 class GraphTopology(Base):

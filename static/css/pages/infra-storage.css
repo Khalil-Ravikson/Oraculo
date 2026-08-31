@@ -1,0 +1,5 @@
+/* infra-storage.css — Armazenamento & Cache (Hub v2 Sprint 5).
+   Reusa card / metric / kv / table dos componentes. */
+
+.storage-view .card-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.storage-view .kv dd { word-break: break-all; }

@@ -1,11 +1,14 @@
-/* graph-studio.js — canvas de composição visual (Camada 3, Konva.js vendorado).
-   Interação: clique num nó da paleta pra adicionar; clique numa porta de saída
-   e depois numa porta de entrada compatível pra conectar; arrastar reposiciona;
-   duplo-clique num nó ou aresta remove. Validação real (tipos + DAG) roda no
-   servidor ao salvar — o client só bloqueia output->output/input->input. */
+/* graph-studio.js — área de desenho do fluxo (Hub v2, Konva.js vendorado).
+   Clique num componente da paleta pra adicionar; clique numa porta de saída e
+   depois numa de entrada pra ligar; arraste pra reposicionar; duplo-clique
+   remove. Undo/redo, minimapa, exportar/importar. Validação real (tipos + sem
+   ciclos) roda no servidor ao salvar. */
 import { fmt } from '/static/js/core/format.js';
 import { showToast } from '/static/js/core/toast.js';
 import { confirmar } from '/static/js/core/modal.js';
+import { Glossario } from '/static/js/core/glossario.js';
+
+const nodeLabel = (id) => Glossario.rotulo('node:' + id, (nodesById[id]?.metadata?.name) || id);
 
 const NODE_WIDTH = 180;
 const NODE_HEADER = 28;
@@ -22,9 +25,96 @@ let armedPort = null;    // { node_id, port_name, direction, circle }
 
 function initStage() {
   const container = document.getElementById('canvas');
-  stage = new Konva.Stage({ container: 'canvas', width: container.clientWidth || 900, height: 640 });
+  stage = new Konva.Stage({ container: 'canvas', width: container.clientWidth || 900, height: 640, draggable: true });
   layer = new Konva.Layer();
   stage.add(layer);
+  stage.on('wheel', (e) => {
+    e.evt.preventDefault();
+    zoom(e.evt.deltaY > 0 ? 0.9 : 1.1);
+  });
+}
+
+function zoom(fator) {
+  const novo = Math.max(0.3, Math.min(2.5, stage.scaleX() * fator));
+  stage.scale({ x: novo, y: novo });
+  stage.batchDraw();
+}
+
+function zoomFit() {
+  stage.scale({ x: 1, y: 1 });
+  stage.position({ x: 0, y: 0 });
+  stage.batchDraw();
+}
+
+function atualizarValidade() {
+  const el = document.getElementById('validity');
+  const nn = Object.keys(canvasNodes).length;
+  const ne = canvasEdges.length;
+  if (nn === 0) { el.className = 'badge badge--unknown'; el.textContent = 'vazio'; return; }
+  const soltos = Object.keys(canvasNodes).filter((id) =>
+    !canvasEdges.some((e) => e.source_node === id || e.target_node === id));
+  if (nn > 1 && soltos.length) {
+    el.className = 'badge badge--warn';
+    el.textContent = `${soltos.length} componente(s) sem ligação`;
+    return;
+  }
+  el.className = 'badge badge--neutral';
+  el.textContent = `${nn} componente${nn > 1 ? 's' : ''} · ${ne} ligaç${ne === 1 ? 'ão' : 'ões'}`;
+}
+
+// ── Undo / redo ───────────────────────────────────────────────────────────
+let historico = [];
+let historicoPos = -1;
+let restaurando = false;
+
+function pushHistory() {
+  if (restaurando) return;
+  historico = historico.slice(0, historicoPos + 1);
+  historico.push(JSON.stringify(exportTopology()));
+  if (historico.length > 50) historico.shift();
+  historicoPos = historico.length - 1;
+  sincronizarBotoesHistorico();
+}
+
+function restaurar(pos) {
+  if (pos < 0 || pos >= historico.length) return;
+  historicoPos = pos;
+  restaurando = true;
+  loadTopology(JSON.parse(historico[pos]));
+  restaurando = false;
+  atualizarValidade();
+  sincronizarBotoesHistorico();
+}
+
+function sincronizarBotoesHistorico() {
+  const u = document.getElementById('btn-undo');
+  const r = document.getElementById('btn-redo');
+  if (u) u.disabled = historicoPos <= 0;
+  if (r) r.disabled = historicoPos >= historico.length - 1;
+}
+
+// ── Minimapa ──────────────────────────────────────────────────────────────
+function renderMinimap() {
+  const svg = document.getElementById('minimap');
+  if (!svg) return;
+  const ids = Object.keys(canvasNodes);
+  if (!ids.length) { svg.innerHTML = ''; return; }
+  const pts = ids.map((id) => ({ id, x: canvasNodes[id].group.x(), y: canvasNodes[id].group.y() }));
+  const minX = Math.min(...pts.map((p) => p.x)) - 20;
+  const minY = Math.min(...pts.map((p) => p.y)) - 20;
+  const maxX = Math.max(...pts.map((p) => p.x)) + NODE_WIDTH + 20;
+  const maxY = Math.max(...pts.map((p) => p.y)) + 120;
+  const sx = 160 / Math.max(maxX - minX, 1);
+  const sy = 100 / Math.max(maxY - minY, 1);
+  const s = Math.min(sx, sy);
+  const edges = canvasEdges.map((e) => {
+    const a = canvasNodes[e.source_node]?.group, b = canvasNodes[e.target_node]?.group;
+    if (!a || !b) return '';
+    return `<line x1="${(a.x() - minX) * s + NODE_WIDTH * s}" y1="${(a.y() - minY) * s + 10}" x2="${(b.x() - minX) * s}" y2="${(b.y() - minY) * s + 10}" stroke="#d97a3f" stroke-width="0.7"/>`;
+  }).join('');
+  const rects = pts.map((p) =>
+    `<rect x="${(p.x - minX) * s}" y="${(p.y - minY) * s}" width="${NODE_WIDTH * s}" height="${Math.max(6, 40 * s)}" rx="1.5" fill="#1b1f26" stroke="#333a44" stroke-width="0.5"/>`).join('');
+  svg.innerHTML = edges + rects;
 }
 
 function portMetaOf(circle) {
@@ -44,7 +134,8 @@ function buildNodeGroup(nodeId, x, y) {
   }));
 
   group.add(new Konva.Text({
-    text: nodeId, x: 8, y: 8, fontSize: 12, fontFamily: 'monospace', fill: '#e8eaed',
+    text: nodeLabel(nodeId), x: 8, y: 8, fontSize: 12,
+    fontFamily: 'Geist, system-ui, sans-serif', fontStyle: '500', fill: '#e8eaed',
     width: NODE_WIDTH - 16, ellipsis: true, wrap: 'none',
   }));
 
@@ -72,10 +163,12 @@ function buildNodeGroup(nodeId, x, y) {
   meta.output_ports.forEach((p, i) => addPort(p, i, 'output'));
 
   group.on('dragmove', redrawEdges);
+  group.on('dragend', () => { pushHistory(); renderMinimap(); });
   group.on('dblclick dbltap', (evt) => {
     // só remove se o alvo do duplo-clique for o retângulo/fundo, não uma porta
     if (evt.target.getAttr('portMeta')) return;
     removeNode(nodeId);
+    pushHistory();
   });
 
   layer.add(group);
@@ -83,12 +176,13 @@ function buildNodeGroup(nodeId, x, y) {
 }
 
 function addNodeToCanvas(nodeId) {
-  if (canvasNodes[nodeId]) { showToast(`'${nodeId}' já está no canvas`, 'error'); return; }
+  if (canvasNodes[nodeId]) { showToast(`"${nodeLabel(nodeId)}" já está na área`, 'error'); return; }
   const n = Object.keys(canvasNodes).length;
   const x = 40 + (n % 3) * 220;
   const y = 40 + Math.floor(n / 3) * 160;
   canvasNodes[nodeId] = { group: buildNodeGroup(nodeId, x, y) };
   layer.draw();
+  if (!restaurando) { pushHistory(); renderMinimap(); }
 }
 
 function removeNode(nodeId) {
@@ -101,6 +195,7 @@ function removeNode(nodeId) {
     return !toca;
   });
   layer.draw();
+  if (!restaurando) { atualizarValidade(); renderMinimap(); }
 }
 
 function findPortCircle(nodeId, portName, direction) {
@@ -138,6 +233,9 @@ function addEdge(edge) {
     line.destroy();
     canvasEdges = canvasEdges.filter(x => x !== entry);
     layer.draw();
+    pushHistory();
+    atualizarValidade();
+    renderMinimap();
   });
   line.moveToBottom();
   layer.add(line);
@@ -181,6 +279,9 @@ function onPortClick(evt) {
   });
   desarmar();
   layer.draw();
+  pushHistory();
+  atualizarValidade();
+  renderMinimap();
 }
 
 function clearCanvas() {
@@ -190,6 +291,7 @@ function clearCanvas() {
   canvasEdges = [];
   desarmar();
   layer.draw();
+  renderMinimap();
 }
 
 function exportTopology() {
@@ -206,35 +308,63 @@ function exportTopology() {
 function loadTopology(topologyJson) {
   clearCanvas();
   (topologyJson.nodes || []).forEach(n => {
-    if (!nodesById[n.node_id]) return;  // nó não existe mais no registry — pula
+    if (!nodesById[n.node_id]) return;  // componente não existe mais no registry — pula
     canvasNodes[n.node_id] = { group: buildNodeGroup(n.node_id, n.x || 40, n.y || 40) };
   });
   layer.draw();
   (topologyJson.edges || []).forEach(addEdge);
   layer.draw();
+  renderMinimap();
 }
+
+const CAT_PALETTE = {
+  channel: 'Entrada / Saída', lab_router: 'Entrada / Saída',
+  llm_provider: 'Modelos & IA', stt_provider: 'Modelos & IA', tts_provider: 'Modelos & IA', embeddings_provider: 'Modelos & IA',
+  parser: 'Processamento', tool: 'Processamento',
+};
 
 async function loadPalette() {
   const el = document.getElementById('palette');
   try {
-    const r = await fetch('/hub/graph-studio/nodes');
+    const r = await fetch('/hub/graph-studio/nodes', { credentials: 'same-origin' });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     nodesById = Object.fromEntries(d.nodes.map(n => [n.id, n]));
-    el.innerHTML = '';
+
+    const grupos = {};
     d.nodes.forEach(n => {
-      const btn = document.createElement('button');
-      btn.className = 'studio-palette__item';
-      btn.type = 'button';
-      btn.textContent = n.id;
-      btn.title = n.metadata.description || '';
-      btn.onclick = () => addNodeToCanvas(n.id);
-      el.appendChild(btn);
+      const g = CAT_PALETTE[n.type] || 'Outros';
+      (grupos[g] = grupos[g] || []).push(n);
+    });
+
+    el.innerHTML = '';
+    Object.entries(grupos).forEach(([nome, nodes]) => {
+      const lbl = document.createElement('div');
+      lbl.className = 'studio-palette__group-label';
+      lbl.textContent = nome;
+      el.appendChild(lbl);
+      nodes.forEach(n => {
+        const btn = document.createElement('button');
+        btn.className = 'studio-palette__item';
+        btn.type = 'button';
+        btn.textContent = n.metadata.name || n.id;
+        btn.dataset.search = `${n.id} ${n.type} ${n.metadata.description || ''}`.toLowerCase();
+        btn.title = n.metadata.description || '';
+        btn.onclick = () => { addNodeToCanvas(n.id); atualizarValidade(); };
+        el.appendChild(btn);
+      });
     });
   } catch (e) {
     el.innerHTML = `<span class="badge badge--danger">${fmt.esc(e.message)}</span>`;
   }
 }
+
+document.getElementById('palette-search').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll('.studio-palette__item').forEach(b => {
+    b.hidden = q && !(b.dataset.search || '').includes(q);
+  });
+});
 
 async function loadTopologiesDropdown() {
   const sel = document.getElementById('topo-load');
@@ -281,6 +411,8 @@ document.getElementById('btn-new').addEventListener('click', () => {
   clearCanvas();
   document.getElementById('topo-name').value = '';
   showErrors([]);
+  atualizarValidade();
+  pushHistory();
 });
 
 document.getElementById('btn-delete').addEventListener('click', async () => {
@@ -313,10 +445,99 @@ document.getElementById('topo-load').addEventListener('change', (ev) => {
   document.getElementById('topo-name').value = topo.name;
   loadTopology(topo.topology_json);
   showErrors([]);
+  atualizarValidade();
+  historico = []; historicoPos = -1; pushHistory();
 });
+
+// ── Toolbar do canvas ─────────────────────────────────────────────────────
+document.getElementById('zoom-in').onclick = () => zoom(1.15);
+document.getElementById('zoom-out').onclick = () => zoom(0.87);
+document.getElementById('zoom-fit').onclick = zoomFit;
+document.getElementById('btn-undo').onclick = () => restaurar(historicoPos - 1);
+document.getElementById('btn-redo').onclick = () => restaurar(historicoPos + 1);
+document.getElementById('canvas-clear').onclick = async () => {
+  if (!Object.keys(canvasNodes).length) return;
+  if (!await confirmar({ titulo: 'Limpar área', corpo: 'Remove todos os componentes e ligações do desenho atual.', acao: 'Limpar', perigo: true })) return;
+  clearCanvas();
+  atualizarValidade();
+  pushHistory();
+};
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); restaurar(historicoPos - 1); }
+  else if ((e.key === 'y') || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); restaurar(historicoPos + 1); }
+});
+
+// ── Exportar / importar ───────────────────────────────────────────────────
+document.getElementById('btn-export').onclick = () => {
+  const nome = document.getElementById('topo-name').value.trim() || 'desenho';
+  const blob = new Blob([JSON.stringify(exportTopology(), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${nome}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+// ── Testar (executa a topologia salva em dry-run e destaca o caminho) ──────
+document.getElementById('btn-test').addEventListener('click', async () => {
+  const name = document.getElementById('topo-name').value.trim();
+  if (!name) { showToast('Salve o desenho antes de testar', 'error'); return; }
+  showErrors([]);
+  try {
+    const res = await fetch('/hub/graph-studio/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ name, dry_run: true }),
+    });
+    const j = await res.json();
+    if (j.error) { showToast(j.error, 'error'); return; }
+    if (j.erros && j.erros.length) { showErrors(j.erros); showToast('Topologia inválida', 'error'); return; }
+    await destacarCaminho(j.ordem || [], j.eventos || []);
+  } catch (e) { showToast(e.message, 'error'); }
+});
+
+async function destacarCaminho(ordem, eventos) {
+  const pulados = new Set(eventos.filter(e => e.tipo === 'pulado').map(e => e.node));
+  for (const nodeId of ordem) {
+    const g = canvasNodes[nodeId]?.group;
+    if (!g) continue;
+    const rect = g.findOne('Rect');
+    rect.stroke(pulados.has(nodeId) ? '#7b8394' : '#3ba55c');
+    rect.strokeWidth(pulados.has(nodeId) ? 1 : 2.5);
+    layer.batchDraw();
+    await new Promise(r => setTimeout(r, 320));
+  }
+  const n = ordem.length - pulados.size;
+  showToast(`Caminho: ${n} componente(s)${pulados.size ? `, ${pulados.size} pulado(s)` : ''}`);
+  setTimeout(() => {
+    Object.values(canvasNodes).forEach(({ group }) => {
+      const rect = group.findOne('Rect');
+      rect.stroke('#262b33'); rect.strokeWidth(1);
+    });
+    layer.batchDraw();
+  }, 2500);
+}
+
+document.getElementById('btn-import').onclick = () => document.getElementById('import-file').click();
+document.getElementById('import-file').onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      loadTopology(JSON.parse(reader.result));
+      atualizarValidade();
+      showToast('Desenho importado');
+    } catch { showToast('Arquivo inválido', 'error'); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+};
 
 (async function init() {
   initStage();
   await loadPalette();
   await loadTopologiesDropdown();
+  atualizarValidade();
+  renderMinimap();
+  pushHistory();
 })();

@@ -1,0 +1,8 @@
+/* capabilities.css — ferramentas + vínculo agente↔ferramenta (Hub v2 Sprint 2).
+   Só o que os componentes compartilhados não cobrem. */
+
+.caps-view .card--resource .card__title svg { width: 16px; height: 16px; color: var(--signal); vertical-align: middle; }
+.caps-view .badge svg { width: 11px; height: 11px; }
+
+/* Card de ferramenta de código: sem ações, tom mais neutro */
+.caps-view .card--resource:not([data-cap]) { opacity: 0.9; }

@@ -1,0 +1,48 @@
+{% extends "hub/_shell.html" %}
+{% block nav_active %}search{% endblock %}
+{% block page_title %}Busca & Índices{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/infra-search.css">{% endblock %}
+
+{% block content %}
+<div class="search-view">
+
+<div class="info-banner" x-data="infoBanner('search')" :data-open="aberto">
+  <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+    O que são os índices de busca
+    <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div class="info-banner__body" x-show="aberto" x-cloak>
+    <p>Quando o Oráculo precisa responder algo dos documentos, ele combina duas
+      buscas: por <strong>palavra-chave</strong> e por <strong>significado</strong>
+      (comparando vetores). Aqui você vê o tamanho e a saúde de cada índice e
+      pode testar uma pergunta para ver o que a busca traz.</p>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__head">
+    <span class="eyebrow">índices</span>
+    <button class="btn btn--ghost btn--sm" id="btn-refresh">Atualizar</button>
+  </div>
+  <div id="indices" class="card-grid"><span class="caption">Carregando…</span></div>
+</div>
+
+<div class="section">
+  <div class="section__head"><span class="eyebrow">testar uma busca</span></div>
+  <div class="card">
+    <div class="u-flex u-gap-2 u-wrap u-items-center">
+      <input class="input" id="q" placeholder="ex: quando começa o período de matrícula?" style="flex:1;min-width:240px">
+      <input class="input" id="k" type="number" value="6" min="1" max="20" style="max-width:80px" title="quantos resultados">
+      <button class="btn btn--primary" id="btn-search">Buscar</button>
+    </div>
+    <div id="resultados" class="u-mt-4"></div>
+  </div>
+</div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/infra-search.js"></script>
+{% endblock %}

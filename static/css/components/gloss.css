@@ -1,0 +1,24 @@
+/* gloss.css — chip da camada de tradução (Hub v2, Sprint 0).
+   Rótulo humano visível; termo cru só em data-tech (debug). O "?" abre o
+   tooltip nativo (title=) com a explicação curta. */
+
+.gloss {
+  border-bottom: 1px dotted var(--line-strong);
+  cursor: help;
+}
+.gloss__q {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  margin-left: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: var(--weight-semi);
+  color: var(--ink-500);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-full);
+  vertical-align: middle;
+}
+.gloss:hover .gloss__q { color: var(--signal); border-color: var(--signal); }

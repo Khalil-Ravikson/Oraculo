@@ -6,22 +6,29 @@
 
 {% block content %}
 <div class="routes-view">
+
+<div class="info-banner" x-data="infoBanner('routes')" :data-open="aberto">
+  <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+    O que é o mapa de rotas
+    <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div class="info-banner__body" x-show="aberto" x-cloak>
+    <p>Depois que o Oráculo entende o assunto de uma mensagem (calendário, edital,
+      SIGAA…), esta é a lista do que ele faz em seguida — qual agente responde, se
+      a resposta pode vir do cache, quantos trechos de documento buscar.</p>
+    <p><strong>Isto não é</strong> a etapa que descobre o assunto (essa é
+      automática). É só o "e depois?".</p>
+    <p>Editar aqui vale já na próxima mensagem, sem reiniciar nada. Toda mudança
+      fica no histórico e dá para voltar atrás.</p>
+  </div>
+</div>
+
 <section class="section">
   <div class="section__head">
-    <span class="eyebrow">rota → execução · route_registry (migration 010)</span>
-    <a class="btn btn--ghost btn--sm" href="/hub/config">Configuração dinâmica →</a>
+    <span class="eyebrow">rotas · vale sem reiniciar</span>
+    <a class="btn btn--ghost btn--sm" href="/hub/config">Configuração →</a>
   </div>
-
-  <p class="routes-lead">
-    Editar aqui entra em vigor na próxima leitura, sem restart. Isto <strong>não</strong> é
-    a classificação de intenção (regex / embeddings) — é o que cada rota executa depois de
-    classificada. <code>owner</code>:
-    <span class="badge badge--ok">langgraph</span> grafo nativo ·
-    <span class="badge badge--warn">langgraph_conditional</span> grafo só com
-    <code>FEATURE_LANGGRAPH_NATIVE_ROUTES</code> ·
-    <span class="badge badge--neutral">legacy</span> dispatcher.py.
-  </p>
-
   <div id="tbl"><span class="caption">Carregando…</span></div>
 </section>
 

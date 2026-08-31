@@ -1,24 +1,46 @@
 {% extends "hub/_shell.html" %}
 {% block nav_active %}caps{% endblock %}
 {% block page_title %}Capabilities{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/capabilities.css">{% endblock %}
 
 {% block content %}
-<div class="card" style="border-left:2px solid var(--warn);margin-bottom:var(--space-5)">
-  <div class="card__desc" style="margin:0">
-    Catálogo de <code>capabilities/registry.py</code> com manifesto (§S) + vínculo
-    agente↔capability (<code>agente_tools</code>). A infra estrutural está pronta;
-    ainda não há consumidor de produção que dispare as capabilities.
+<div class="caps-view">
+
+<div class="info-banner" x-data="infoBanner('caps')" :data-open="aberto">
+  <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+    O que são ferramentas
+    <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div class="info-banner__body" x-show="aberto" x-cloak>
+    <p>Ações que um agente pode executar além de responder texto — consultar um
+      sistema, enviar um e-mail, chamar uma API externa.</p>
+    <p>Você pode criar ferramentas aqui: uma chamada HTTP a uma API, ou uma
+      ferramenta exposta por um servidor MCP conectado. A ligação
+      agente ↔ ferramenta ainda não dispara em produção (o motor que
+      executa ferramentas está em construção).</p>
   </div>
 </div>
 
-<div class="section">
-  <div class="section__head"><span class="eyebrow">capabilities registradas</span></div>
-  <div id="caps" class="grid" style="grid-template-columns:1fr;gap:var(--space-3)"><span class="caption">Carregando…</span></div>
-</div>
+<section class="section">
+  <div class="section__head">
+    <span class="eyebrow">ferramentas</span>
+    <button class="btn btn--primary btn--sm" id="btn-nova">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      Nova Ferramenta
+    </button>
+  </div>
+  <div id="caps" class="card-grid"><span class="caption">Carregando…</span></div>
+</section>
 
-<div class="section">
-  <div class="section__head"><span class="eyebrow">vínculo agente ↔ capability</span></div>
-  <div id="bindings" class="table-wrap"></div>
+<section class="section">
+  <div class="section__head">
+    <span class="eyebrow">quais agentes usam cada ferramenta</span>
+    <select class="select" id="filtro-agente" style="max-width:220px"><option value="">Todos os agentes</option></select>
+  </div>
+  <div id="bindings" class="table-wrap"><span class="caption">Carregando…</span></div>
+</section>
+
 </div>
 {% endblock %}
 

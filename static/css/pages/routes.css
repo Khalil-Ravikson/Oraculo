@@ -1,24 +1,7 @@
-/* routes.css — Registro de rotas (Plano A / Fase 2 · Plano B §G).
-   Tabela densa e editável: cada linha é uma rota, cada célula um campo do
-   route_registry. Tudo sob `.routes-view` para não vazar nomes genéricos.
-   Só o que os componentes não cobrem: campos compactos na célula, checkbox
-   com acento, item de histórico. */
-
-.routes-view .routes-lead {
-  color: var(--ink-400);
-  font-size: var(--text-sm);
-  line-height: var(--leading-body);
-  margin-bottom: var(--space-4);
-  max-width: 78ch;
-}
-.routes-view .routes-lead code {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  background: var(--ink-800);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-ctl);
-  padding: 0 var(--space-1);
-}
+/* routes.css — Mapa de rotas (Hub v2 · Plano B §G).
+   Tabela densa e editável: cada linha é uma rota, cada célula um campo.
+   Tudo sob `.routes-view`. Só o que os componentes não cobrem: campos
+   compactos na célula, checkbox com acento, item de histórico. */
 
 /* Tabela: permitir quebrar largura da célula e não forçar nowrap nos inputs */
 .routes-view .table--routes td { white-space: normal; vertical-align: middle; }
@@ -59,15 +42,17 @@
 }
 .routes-view .hist-item__head .btn { margin-left: auto; }
 .routes-view .hist-item__snap {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--ink-400);
   background: var(--ink-950);
   border: 1px solid var(--line);
   border-radius: var(--radius-ctl);
   padding: var(--space-2) var(--space-3);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 200px;
-  overflow-y: auto;
 }
+.routes-view .hist-campo {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 2px 0;
+  font-size: var(--text-xs);
+}
+.routes-view .hist-campo > span:first-child { color: var(--ink-500); }
+.routes-view .hist-campo > span:last-child { color: var(--ink-400); text-align: right; }

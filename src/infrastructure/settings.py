@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     # nodes nativos do grafo, em vez de dispatcher_langgraph.py delegar
     # pra dispatcher.py nessas rotas.
     FEATURE_LANGGRAPH_NATIVE_ROUTES: bool = False
+    # Hub v2 Sprint 8: GraphExecutor executa uma topologia de graph_studio
+    # ligada ao pipeline real. Nada lê no hot path ainda — a flag existe
+    # para o dia em que um trecho piloto (busca/embeddings) for conectado.
+    FEATURE_GRAPH_EXECUTOR_PILOTO: bool = False
     # Fase 3: rest_lab passa a rodar atrás de uma camada de Application
     # própria em vez de continuar como lab isolado.
     FEATURE_REST_PRODUCT: bool = False

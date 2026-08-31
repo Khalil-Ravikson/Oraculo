@@ -1,0 +1,45 @@
+{% extends "hub/_shell.html" %}
+{% block nav_active %}health{% endblock %}
+{% block page_title %}Saúde do Sistema{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/infra-health.css">{% endblock %}
+
+{% block content %}
+<div class="health-view">
+
+<div class="section">
+  <div class="section__head">
+    <span class="eyebrow">visão geral</span>
+    <button class="btn btn--ghost btn--sm" id="btn-refresh">Atualizar</button>
+  </div>
+  <div id="resumo" class="health-resumo"><span class="caption">Carregando…</span></div>
+</div>
+
+<div class="grid">
+  <div class="col-6"><div class="card card--panel">
+    <div class="card__head"><span class="card__title">Provedores de IA</span></div>
+    <div class="card__body" id="b-provedores"></div>
+  </div></div>
+  <div class="col-6"><div class="card card--panel">
+    <div class="card__head"><span class="card__title">Bancos & Filas</span></div>
+    <div class="card__body" id="b-infra"></div>
+  </div></div>
+  <div class="col-6"><div class="card card--panel">
+    <div class="card__head"><span class="card__title">Componentes</span></div>
+    <div class="card__body" id="b-componentes"></div>
+  </div></div>
+  <div class="col-6"><div class="card card--panel">
+    <div class="card__head"><span class="card__title">Servidores MCP</span></div>
+    <div class="card__body" id="b-mcp"></div>
+  </div></div>
+  <div class="col-12"><div class="card card--panel">
+    <div class="card__head"><span class="card__title">Chaves de laboratório ativas</span></div>
+    <div class="card__body" id="b-flags"></div>
+  </div></div>
+</div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/infra-health.js"></script>
+{% endblock %}

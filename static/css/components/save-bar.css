@@ -1,0 +1,38 @@
+/* save-bar.css — barra de salvar flutuante (Hub v2, Sprint 0).
+   Aparece só quando há alteração pendente na tela. Substitui os N botões
+   "Salvar" por linha. Dirigida por js/components/save-bar.js. */
+
+.save-bar {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-5);
+  transform: translate(-50%, calc(100% + var(--space-6)));
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+  background: var(--ink-800);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-pop);
+  transition: transform var(--transition);
+  max-width: calc(100vw - var(--space-6));
+}
+.save-bar[data-open="true"] { transform: translate(-50%, 0); }
+
+.save-bar__msg {
+  font-size: var(--text-sm);
+  color: var(--ink-400);
+}
+.save-bar__count {
+  font-family: var(--font-mono);
+  color: var(--paper);
+  font-weight: var(--weight-medium);
+}
+.save-bar__actions { display: flex; gap: var(--space-2); flex: none; }
+
+@media (max-width: 640px) {
+  .save-bar { left: var(--space-3); right: var(--space-3); transform: translateY(calc(100% + var(--space-6))); max-width: none; }
+  .save-bar[data-open="true"] { transform: translateY(0); }
+}

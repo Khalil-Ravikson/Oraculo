@@ -1,0 +1,62 @@
+/* ============================================================================
+   utilities.css — ponte de utilitários (Hub v2, Sprint 0)
+   ----------------------------------------------------------------------------
+   Substituto curto e deliberado do Tailwind: ~30 utilitários derivados só dos
+   tokens. Existe para (a) parar de espalhar `style="..."` inline nas páginas e
+   (b) já ter o vocabulário de classe caso um dia se adote Tailwind de verdade
+   (decisão: NÃO adotar agora — ver plano Sprint 0).
+
+   Regra: nada aqui inventa valor. Todo número vem de tokens.css.
+   ========================================================================== */
+
+/* ── Fluxo ──────────────────────────────────────────────────────────────── */
+.u-flex     { display: flex; }
+.u-grid     { display: grid; }
+.u-block    { display: block; }
+.u-none     { display: none; }
+.u-col      { flex-direction: column; }
+.u-wrap     { flex-wrap: wrap; }
+.u-items-center  { align-items: center; }
+.u-items-start   { align-items: flex-start; }
+.u-items-baseline{ align-items: baseline; }
+.u-justify-between { justify-content: space-between; }
+.u-justify-end    { justify-content: flex-end; }
+.u-grow     { flex: 1 1 auto; min-width: 0; }
+.u-none-shrink { flex: none; }
+
+/* ── Gap / espaço (grade de 8px) ────────────────────────────────────────── */
+.u-gap-1 { gap: var(--space-1); }
+.u-gap-2 { gap: var(--space-2); }
+.u-gap-3 { gap: var(--space-3); }
+.u-gap-4 { gap: var(--space-4); }
+.u-gap-5 { gap: var(--space-5); }
+
+.u-mt-1 { margin-top: var(--space-1); }
+.u-mt-2 { margin-top: var(--space-2); }
+.u-mt-3 { margin-top: var(--space-3); }
+.u-mt-4 { margin-top: var(--space-4); }
+.u-mt-5 { margin-top: var(--space-5); }
+.u-mb-2 { margin-bottom: var(--space-2); }
+.u-mb-3 { margin-bottom: var(--space-3); }
+.u-mb-4 { margin-bottom: var(--space-4); }
+.u-mb-5 { margin-bottom: var(--space-5); }
+.u-mb-0 { margin-bottom: 0; }
+
+/* ── Texto ──────────────────────────────────────────────────────────────── */
+.u-muted   { color: var(--ink-400); }
+.u-dim     { color: var(--ink-500); }
+.u-mono    { font-family: var(--font-mono); }
+.u-sm      { font-size: var(--text-sm); }
+.u-xs      { font-size: var(--text-xs); }
+.u-right   { text-align: right; }
+.u-nowrap  { white-space: nowrap; }
+.u-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Largura ────────────────────────────────────────────────────────────── */
+.u-full    { width: 100%; }
+.u-w-sm    { max-width: 220px; }
+.u-w-md    { max-width: 360px; }
+
+/* ── Estado ─────────────────────────────────────────────────────────────── */
+.u-hidden  { display: none !important; }
+[x-cloak]  { display: none !important; }

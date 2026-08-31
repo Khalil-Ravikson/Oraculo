@@ -1,0 +1,43 @@
+/* empty-state.css — tela vazia como convite à ação (Hub v2, Sprint 0).
+   Nunca só "nenhum resultado" solto: ilustração minimalista + uma frase +
+   um botão. */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-3);
+  padding: var(--space-7) var(--space-4);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--ink-950);
+}
+.empty__art {
+  width: 56px;
+  height: 56px;
+  color: var(--ink-500);
+}
+.empty__art svg { width: 100%; height: 100%; }
+.empty__title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semi);
+}
+.empty__desc {
+  font-size: var(--text-sm);
+  color: var(--ink-400);
+  max-width: 42ch;
+}
+.empty__actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* Variante compacta dentro de um card/painel */
+.empty--inline {
+  padding: var(--space-5) var(--space-4);
+  border: 0;
+  background: none;
+}
+.empty--inline .empty__art { width: 40px; height: 40px; }

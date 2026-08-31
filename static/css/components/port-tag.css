@@ -1,0 +1,55 @@
+/* port-tag.css — porta conectora tipada (Hub v2, Sprint 0).
+   Substitui a tabela crua de ENTRADA/SAÍDA nos cards de componente. Bolinha
+   colorida por tipo de dado + rótulo humano (via glossário). */
+
+.ports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.ports__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.ports__label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.port-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-2);
+  font-size: var(--text-xs);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-ctl);
+  background: var(--ink-950);
+  white-space: nowrap;
+}
+.port-tag::before {
+  content: "";
+  width: 7px; height: 7px; border-radius: var(--radius-full);
+  background: var(--dot, var(--ink-500));
+  flex: none;
+}
+.port-tag--in  { border-style: dashed; }
+.port-tag[data-opt="true"] { opacity: 0.65; }
+
+/* Cor por tipo de porta — cor comunica "que dado é este", não decora */
+.port-tag[data-type="text"]         { --dot: #6ea8fe; }
+.port-tag[data-type="llm_response"] { --dot: var(--signal); }
+.port-tag[data-type="embeddings"]   { --dot: #b98ce0; }
+.port-tag[data-type="audio"]        { --dot: #4bc0c0; }
+.port-tag[data-type="file"]         { --dot: #c9982e; }
+.port-tag[data-type="structured"]   { --dot: #3ba55c; }
+.port-tag[data-type="boolean"]      { --dot: #9aa2b1; }
+.port-tag[data-type="number"]       { --dot: #e0c341; }
+.port-tag[data-type="array"]        { --dot: #7b8394; }
+.port-tag[data-type="tokens"]       { --dot: #d98cae; }

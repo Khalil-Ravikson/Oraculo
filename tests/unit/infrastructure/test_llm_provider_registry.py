@@ -45,4 +45,7 @@ def test_instanciar_gemini_devolve_provider(monkeypatch):
 
 def test_llm_factory_usa_o_registry():
     from src.infrastructure.adapters import llm_factory
-    assert set(llm_factory._PROVIDERS_VALIDOS) == {"gemini", "deepseek", "groq"}
+    # `_providers_validos()` é função (não constante) desde o Hub v2 —
+    # um provedor cadastrado pelo painel precisa ser selecionável sem restart.
+    # Sem espelho Redis (ambiente de teste), volta aos 3 nativos.
+    assert set(llm_factory._providers_validos()) == {"gemini", "deepseek", "groq"}

@@ -47,3 +47,42 @@ export const api = {
   patch:(path, body) => request('PATCH', path, body ?? {}),
   del:  (path)       => request('DELETE', path),
 };
+
+/* ── Cliente do portal (/hub/*) ──────────────────────────────────────────────
+   As páginas do Hub têm endpoints próprios sob /hub (não /api/admin). Mesmo
+   tratamento de 401 e de erro; devolve o JSON já parseado. */
+async function hubRequest(method, path, body) {
+  const opts = { method, credentials: 'same-origin', headers: {} };
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch('/hub' + path, opts);
+  if (res.status === 401) { window.location.href = '/hub/login'; throw new ApiError(401, { error: 'Sessão expirada.' }); }
+  let payload = null;
+  const text = await res.text();
+  try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
+  if (!res.ok) throw new ApiError(res.status, payload);
+  if (payload && payload.error) throw new ApiError(res.status, payload);
+  return payload;
+}
+
+export const hub = {
+  get:  (path)       => hubRequest('GET', path),
+  post: (path, body) => hubRequest('POST', path, body ?? {}),
+  del:  (path, body) => hubRequest('POST', path, body ?? {}),
+};
+
+/* testConnection — probe reutilizável (LLM provider, servidor MCP, canal).
+   `kind` só documenta a intenção; o endpoint é passado explicitamente.
+   Retorna { ok: boolean, mensagem?, latency_ms? } — nunca lança por "conexão
+   falhou", só por erro de transporte/permissão. */
+export async function testConnection(kind, endpoint, payload = {}) {
+  try {
+    const r = await hub.post(endpoint, { ...payload, _kind: kind });
+    return { ok: r?.ok !== false && !r?.error, ...r };
+  } catch (e) {
+    if (e instanceof ApiError && e.status !== 401) return { ok: false, mensagem: e.message };
+    throw e;
+  }
+}

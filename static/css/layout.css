@@ -32,7 +32,9 @@
   border-bottom: 1px solid var(--line);
   font-weight: var(--weight-semi);
   font-size: var(--text-sm);
+  color: inherit;
 }
+.sidebar__brand:hover { text-decoration: none; }
 .sidebar__brand svg { width: 20px; height: 20px; color: var(--signal); flex: none; }
 .sidebar__brand small { display: block; color: var(--ink-500); font-weight: var(--weight-regular); }
 
@@ -64,6 +66,9 @@
   color: var(--paper);
   box-shadow: inset 2px 0 0 var(--signal);
 }
+/* Sub-item: vive dentro da página anterior (aba). Recuo + ícone menor. */
+.navlink--sub { padding-left: var(--space-6); font-size: var(--text-xs); }
+.navlink--sub svg { width: 13px; height: 13px; }
 
 .sidebar__foot { margin-top: auto; padding: var(--space-3); border-top: 1px solid var(--line); }
 

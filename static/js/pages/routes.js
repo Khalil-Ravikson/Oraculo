@@ -1,9 +1,10 @@
-/* routes.js — Registro de rotas (Plano A / Fase 2). Mapa rota→execução,
-   editável sem restart. Concorrência otimista por `versao` (409 → recarrega). */
+/* routes.js — Mapa de rotas (o "e depois?" de cada assunto). Vale sem
+   reiniciar. Concorrência otimista por versão (409 → recarrega). */
 import { api, ApiError } from '/static/js/core/api-client.js';
 import { showToast } from '/static/js/core/toast.js';
 import { confirmar } from '/static/js/core/modal.js';
 import { fmt } from '/static/js/core/format.js';
+import { Glossario } from '/static/js/core/glossario.js';
 
 const $ = (id) => document.getElementById(id);
 const VER = {};
@@ -13,11 +14,34 @@ const OWNER_BADGE = {
   langgraph_conditional: 'badge--warn',
   legacy: 'badge--neutral',
 };
+const motorLabel = (o) => Glossario.rotulo('owner:' + o, o);
+const rotaLabel = (r) => Glossario.rotulo('rota:' + r, r);
+const noLabel = (n) => Glossario.rotulo('no:' + n, n);
+const stepLabel = (s) => Glossario.rotulo('step:' + s, s);
+const agenteLabel = (a) => Glossario.rotulo('agente:' + a, a || '—');
 
-function sel(id, val, opts) {
+// <select> onde o value continua sendo o termo real, mas o texto é traduzido
+function sel(id, val, opts, labelFn) {
+  const label = labelFn || ((o) => o);
   return `<select class="select select--cell" id="${id}">` +
-    opts.map((o) => `<option ${o === val ? 'selected' : ''}>${fmt.esc(o)}</option>`).join('') +
+    opts.map((o) => `<option value="${fmt.esc(o)}" ${o === val ? 'selected' : ''}>${fmt.esc(label(o))}</option>`).join('') +
     '</select>';
+}
+
+// rótulos legíveis dos campos, para o histórico
+const CAMPO_LABEL = {
+  entrypoint_node: 'Ponto de entrada', owner: 'Motor', agente: 'Agente',
+  cacheavel: 'Cache', permite_detour: 'Desvio', doc_type: 'Tipo de documento',
+  k: 'Trechos', planner_steps: 'Passos do planejador',
+};
+function valorLegivel(campo, v) {
+  if (v === null || v === undefined || v === '') return '—';
+  if (typeof v === 'boolean') return v ? 'sim' : 'não';
+  if (campo === 'entrypoint_node') return noLabel(v);
+  if (campo === 'owner') return motorLabel(v);
+  if (campo === 'agente') return agenteLabel(v);
+  if (campo === 'planner_steps') return (Array.isArray(v) ? v : [v]).map(stepLabel).join(', ');
+  return String(v);
 }
 
 async function load() {
@@ -29,12 +53,12 @@ async function load() {
       const p = (campo) => `f-${r.rota}-${campo}`;
       return `<tr>
         <td>
-          <span class="rota-nome">${fmt.esc(r.rota)}</span>
-          <span class="badge ${OWNER_BADGE[r.owner] || 'badge--neutral'}" style="margin-left:var(--space-2)">v${r.versao}</span>
+          <span class="rota-nome" data-tech="${fmt.esc(r.rota)}">${fmt.esc(rotaLabel(r.rota))}</span>
+          <span class="badge ${OWNER_BADGE[r.owner] || 'badge--neutral'}" data-tech="owner:${fmt.esc(r.owner)}" title="versão ${r.versao}">${fmt.esc(motorLabel(r.owner))}</span>
         </td>
-        <td>${sel(p('entrypoint_node'), r.entrypoint_node, d.nodes_validos)}</td>
-        <td>${sel(p('owner'), r.owner, d.owners_validos)}</td>
-        <td><input class="input input--cell" id="${p('agente')}" value="${fmt.esc(r.agente || '')}" placeholder="—"></td>
+        <td>${sel(p('entrypoint_node'), r.entrypoint_node, d.nodes_validos, noLabel)}</td>
+        <td>${sel(p('owner'), r.owner, d.owners_validos, motorLabel)}</td>
+        <td><input class="input input--cell" id="${p('agente')}" value="${fmt.esc(r.agente || '')}" placeholder="—" title="nome interno do agente"></td>
         <td class="col-center"><input type="checkbox" class="chk" id="${p('cacheavel')}" ${r.cacheavel ? 'checked' : ''}></td>
         <td class="col-center"><input type="checkbox" class="chk" id="${p('permite_detour')}" ${r.permite_detour ? 'checked' : ''}></td>
         <td><input class="input input--cell" id="${p('doc_type')}" value="${fmt.esc(r.doc_type || '')}" placeholder="—"></td>
@@ -49,8 +73,16 @@ async function load() {
 
     box.innerHTML = `<div class="table-wrap"><table class="table table--routes">
       <thead><tr>
-        <th>rota</th><th>entrypoint_node</th><th>owner</th><th>agente</th>
-        <th>cache</th><th>detour</th><th>doc_type</th><th>k</th><th>planner_steps</th><th></th>
+        <th>Rota</th>
+        <th>Ponto de entrada</th>
+        <th>Motor</th>
+        <th>Agente</th>
+        <th title="A resposta pode ser reaproveitada do cache?">Cache</th>
+        <th title="Pode desviar para outra rota no meio?">Desvio</th>
+        <th>Tipo de documento</th>
+        <th title="Quantos trechos de documento buscar">Trechos</th>
+        <th>Passos do planejador</th>
+        <th></th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
@@ -81,20 +113,28 @@ function coletar(rota) {
 async function salvar(rota) {
   try {
     const d = await api.post(`/routes/${rota}`, { campos: coletar(rota), versao: VER[rota] });
-    showToast(`${rota} salvo (v${d.versao})`);
+    showToast(`${rotaLabel(rota)} salvo (v${d.versao})`);
     load();
   } catch (e) {
     if (e instanceof ApiError && e.isConflict) {
-      showToast(`${rota} mudou noutro lugar — recarregado`, 'error');
+      showToast(`${rotaLabel(rota)} mudou noutro lugar — recarregado`, 'error');
     } else {
-      showToast(`${rota}: ${e.message}`, 'error');
+      showToast(`${rotaLabel(rota)}: ${e.message}`, 'error');
     }
     load();
   }
 }
 
+function snapshotLegivel(snap) {
+  if (!snap || typeof snap !== 'object') return '<span class="caption">—</span>';
+  const linhas = Object.entries(CAMPO_LABEL)
+    .filter(([campo]) => campo in snap)
+    .map(([campo, label]) => `<div class="hist-campo"><span>${label}</span><span class="mono">${fmt.esc(valorLegivel(campo, snap[campo]))}</span></div>`);
+  return linhas.join('') || '<span class="caption">—</span>';
+}
+
 async function abrirHistorico(rota) {
-  $('hist-title').textContent = `Histórico — ${rota}`;
+  $('hist-title').textContent = `Histórico — ${rotaLabel(rota)}`;
   $('hist-body').innerHTML = '<span class="caption">Carregando…</span>';
   $('hist').hidden = false;
   try {
@@ -102,11 +142,11 @@ async function abrirHistorico(rota) {
     $('hist-body').innerHTML = d.historico.map((h) => `
       <div class="hist-item">
         <div class="hist-item__head">
-          <span class="badge badge--neutral">v${h.versao}</span>
+          <span class="badge badge--neutral">versão ${h.versao}</span>
           <span class="caption">${fmt.esc(h.atualizado_por || '?')} · ${fmt.dateTime(h.atualizado_em)}</span>
-          <button class="btn btn--sm" data-rev="${h.versao}">Reverter para v${h.versao}</button>
+          <button class="btn btn--sm" data-rev="${h.versao}">Voltar para esta</button>
         </div>
-        <pre class="hist-item__snap">${fmt.esc(JSON.stringify(h.snapshot, null, 2))}</pre>
+        <div class="hist-item__snap">${snapshotLegivel(h.snapshot)}</div>
       </div>`).join('') || '<span class="caption">Sem histórico.</span>';
     $('hist-body').querySelectorAll('[data-rev]').forEach((b) => (b.onclick = () => reverter(rota, Number(b.dataset.rev))));
   } catch (e) {
@@ -116,13 +156,13 @@ async function abrirHistorico(rota) {
 
 async function reverter(rota, para) {
   if (!(await confirmar({
-    titulo: `Reverter ${rota}`,
-    corpo: `A rota volta ao estado da versão ${para}. Isso cria uma nova versão no histórico.`,
-    acao: `Reverter para v${para}`,
+    titulo: `Reverter ${rotaLabel(rota)}`,
+    corpo: `Volta ao estado da versão ${para}. Isso cria uma nova versão no histórico.`,
+    acao: `Voltar para a versão ${para}`,
   }))) return;
   try {
     const d = await api.post(`/routes/${rota}/reverter`, { para_versao: para, versao: VER[rota] });
-    showToast(`${rota} revertido (v${d.versao})`);
+    showToast(`${rotaLabel(rota)} revertido (v${d.versao})`);
     $('hist').hidden = true;
     load();
   } catch (e) {

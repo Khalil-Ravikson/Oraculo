@@ -1,0 +1,83 @@
+{% extends "hub/_shell.html" %}
+{% block nav_active %}storage{% endblock %}
+{% block page_title %}Armazenamento & Cache{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/infra-storage.css">{% endblock %}
+
+{% block content %}
+<div class="storage-view">
+
+<div class="info-banner" x-data="infoBanner('storage')" :data-open="aberto">
+  <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+    O que é este painel
+    <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div class="info-banner__body" x-show="aberto" x-cloak>
+    <p>Estado ao vivo dos dois bancos que sustentam o Oráculo: o <strong>cache
+      em memória</strong> (respostas rápidas, sessões, filas) e o <strong>banco
+      principal</strong> (pessoas, configurações, histórico). Use para ver se
+      há pressão de memória, comandos lentos, ou conexões demais.</p>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__head">
+    <span class="eyebrow">cache em memória</span>
+    <button class="btn btn--ghost btn--sm" id="btn-refresh">Atualizar</button>
+  </div>
+  <div id="redis-kpis" class="card-grid"><span class="caption">Carregando…</span></div>
+</div>
+
+<div class="grid">
+  <div class="col-6">
+    <div class="card card--panel">
+      <div class="card__head"><span class="card__title">Módulos & persistência</span></div>
+      <div class="card__body" id="redis-mods"><span class="caption">Carregando…</span></div>
+    </div>
+  </div>
+  <div class="col-6">
+    <div class="card card--panel">
+      <div class="card__head"><span class="card__title">Parâmetros</span></div>
+      <div class="card__body" id="redis-config"><span class="caption">Carregando…</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__head"><span class="eyebrow">comandos mais lentos (recentes)</span></div>
+  <div id="slowlog" class="table-wrap"><span class="caption">Carregando…</span></div>
+</div>
+
+<div class="section">
+  <div class="section__head"><span class="eyebrow">banco principal</span></div>
+  <div id="pg-kpis" class="card-grid"><span class="caption">Carregando…</span></div>
+  <div id="pg-slow" class="table-wrap u-mt-3"></div>
+</div>
+
+<div class="section">
+  <div class="section__head"><span class="eyebrow">manutenção</span></div>
+  <div class="grid">
+    <div class="col-6">
+      <div class="card">
+        <div class="card__title">Recriar índices de busca</div>
+        <div class="card__desc">Recria a estrutura dos índices (se algum sumiu). Não apaga nem altera documentos — só garante que o índice existe.</div>
+        <button class="btn u-mt-3" id="btn-reindex">Recriar índices</button>
+        <div class="caption u-mt-2" id="reindex-status"></div>
+      </div>
+    </div>
+    <div class="col-6">
+      <div class="card">
+        <div class="card__title">Limpar cache de respostas</div>
+        <div class="card__desc">Apaga só as respostas guardadas para acelerar perguntas repetidas. Seguro — reconstrói sozinho. (Fica em <a href="/hub/config">Configuração → Geral</a>.)</div>
+        <a class="btn u-mt-3" href="/hub/config">Ir para Configuração</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/infra-storage.js"></script>
+{% endblock %}

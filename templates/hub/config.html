@@ -1,71 +1,168 @@
 {% extends "hub/_shell.html" %}
 {% block nav_active %}config{% endblock %}
 {% block page_title %}Configuração{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/config.css">{% endblock %}
 
 {% block content %}
-<section class="section">
-  <div class="section__head"><span class="eyebrow">configuração dinâmica — sem restart</span>
-    <a class="btn btn--ghost btn--sm" href="/hub/routes">Registro de rotas →</a></div>
-  <div class="card card--panel">
-    <div class="card__head"><span class="card__title">Chaves</span></div>
-    <div class="card__body"><div id="dyn-list" class="table-wrap"><span class="caption">Carregando…</span></div></div>
-  </div>
-</section>
+<div class="config-view" x-data="tabs('geral')">
 
-<section class="section">
-  <div class="section__head"><span class="eyebrow">sistema</span></div>
-  <div class="grid">
-    <div class="col-12">
-      <div class="card">
-        <div class="card__title">System prompt global</div>
-        <div class="card__desc">Sobrescreve o prompt padrão. Vazio restaura o padrão interno.</div>
-        <textarea class="textarea" id="sys-prompt" rows="4"></textarea>
-        <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
-          <button class="btn btn--primary" id="save-prompt">Salvar prompt</button>
-          <button class="btn" id="reset-prompt">Restaurar padrão</button>
+  <div class="tabs" role="tablist">
+    <button class="tab" data-tab="geral"      :aria-selected="isTab('geral')"      @click="select('geral')">Geral &amp; Sistema</button>
+    <button class="tab" data-tab="provedores" :aria-selected="isTab('provedores')" @click="select('provedores')">Provedores &amp; Modelos</button>
+    <button class="tab" data-tab="canais"     :aria-selected="isTab('canais')"     @click="select('canais')">Integradores</button>
+    <button class="tab" data-tab="avancado"   :aria-selected="isTab('avancado')"   @click="select('avancado')">Avançado</button>
+  </div>
+
+  {# ── Geral & Sistema ───────────────────────────────────────────────────── #}
+  <div class="tabpanel" x-show="isTab('geral')">
+    <div class="grid">
+      <div class="col-12">
+        <div class="card">
+          <div class="card__title">System prompt global</div>
+          <div class="card__desc">Sobrescreve o prompt padrão. Vazio restaura o padrão interno.</div>
+          <textarea class="textarea" id="sys-prompt" rows="5"></textarea>
+          <div class="u-flex u-justify-between u-items-center u-mt-3">
+            <div class="u-flex u-gap-2">
+              <button class="btn btn--primary" id="save-prompt">Salvar prompt</button>
+              <button class="btn" id="reset-prompt">Restaurar padrão</button>
+            </div>
+            <span class="field__count" id="prompt-count">0</span>
+          </div>
+        </div>
+      </div>
+      <div class="col-6">
+        <div class="card">
+          <div class="card__title">Modo manutenção</div>
+          <div class="card__desc">Bloqueia respostas para todos. Use em deploy/incidente.</div>
+          <div class="u-flex u-gap-2 u-mt-3">
+            <button class="btn btn--danger" id="maint-on">Ativar</button>
+            <button class="btn" id="maint-off">Desativar</button>
+          </div>
+          <div class="caption u-mt-3" id="maint-status"></div>
+        </div>
+      </div>
+      <div class="col-6">
+        <div class="card">
+          <div class="card__title">Cache de respostas</div>
+          <div class="card__desc">Limpa respostas guardadas. Use após atualizar documentos.</div>
+          <button class="btn btn--danger u-mt-3" id="clear-cache">Limpar cache</button>
+          <div class="caption u-mt-3" id="cache-status"></div>
         </div>
       </div>
     </div>
-    <div class="col-6">
-      <div class="card">
-        <div class="card__title">Modo manutenção</div>
-        <div class="card__desc">Bloqueia respostas LLM para todos. Use em deploy/incidente.</div>
-        <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3)">
-          <button class="btn btn--danger" id="maint-on">Ativar</button>
-          <button class="btn" id="maint-off">Desativar</button>
-        </div>
-        <div class="caption" id="maint-status" style="margin-top:var(--space-3)"></div>
-      </div>
-    </div>
-    <div class="col-6">
-      <div class="card">
-        <div class="card__title">Cache semântico</div>
-        <div class="card__desc">Limpa respostas cacheadas no Redis. Use após atualizar documentos.</div>
-        <button class="btn btn--danger" id="clear-cache" style="margin-top:var(--space-3)">Limpar cache</button>
-        <div class="caption" id="cache-status" style="margin-top:var(--space-3)"></div>
-      </div>
-    </div>
   </div>
-</section>
 
-<section class="section">
-  <div class="section__head"><span class="eyebrow">credenciais (.env — exige restart)</span>
-    <button class="btn btn--primary btn--sm" id="save-keys">Salvar credenciais</button></div>
-  <div class="card"><div id="keys" class="grid"></div>
-    <div class="caption" style="margin-top:var(--space-3)">GEMINI_MODEL agora é chave dinâmica (acima) — sem restart.</div></div>
-</section>
+  {# ── Provedores & Modelos ──────────────────────────────────────────────── #}
+  <div class="tabpanel" x-show="isTab('provedores')" x-cloak>
+    <div class="info-banner" x-data="infoBanner('config-prov')" :data-open="aberto">
+      <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+        Como funcionam os provedores
+        <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="info-banner__body" x-show="aberto" x-cloak>
+        <p>Cada provedor é um serviço de modelo de linguagem (Gemini, DeepSeek, Groq…).
+          Você pode adicionar um provedor compatível com OpenAI informando a URL base
+          e o nome da variável de ambiente onde a chave está guardada — a chave nunca
+          fica salva aqui.</p>
+      </div>
+    </div>
 
-<section class="section">
-  <div class="section__head"><span class="eyebrow">workers celery</span>
-    <button class="btn btn--sm" id="check-workers">Verificar</button></div>
-  <div class="card"><div id="workers" class="caption">Clique em verificar.</div></div>
-</section>
+    <section class="section">
+      <div class="section__head">
+        <span class="eyebrow">provedor ativo · <span id="prov-ativo" class="mono">—</span></span>
+        <button class="btn btn--primary btn--sm" id="btn-add-provider">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Adicionar Provedor de LLM
+        </button>
+      </div>
+      <div id="providers" class="card-grid"><span class="caption">Carregando…</span></div>
+    </section>
+  </div>
 
-<div class="modal-overlay" id="hist" hidden><div class="modal modal--wide">
-  <div class="modal__head"><span class="modal__title" id="hist-title">Histórico</span>
-    <button class="btn btn--ghost btn--sm" id="hist-x" aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
-  <div class="modal__body modal__body--scroll" id="hist-body"></div>
-</div></div>
+  {# ── Integradores (Canais) ─────────────────────────────────────────────── #}
+  <div class="tabpanel" x-show="isTab('canais')" x-cloak>
+    <div class="info-banner" x-data="infoBanner('config-canais')" :data-open="aberto">
+      <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+        Canais de comunicação
+        <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="info-banner__body" x-show="aberto" x-cloak>
+        <p>Cada canal é uma instância do WhatsApp por onde o Oráculo conversa. Aqui
+          você vê o status da conexão, gera o QR Code para reconectar e ajusta o
+          endereço de webhook. A chave da Evolution fica no .env do servidor.</p>
+      </div>
+    </div>
+
+    <section class="section">
+      <div class="section__head">
+        <span class="eyebrow">canais</span>
+        <button class="btn btn--primary btn--sm" id="btn-add-channel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Adicionar Canal
+        </button>
+      </div>
+      <div id="channels" class="card-grid"><span class="caption">Carregando…</span></div>
+    </section>
+  </div>
+
+  {# ── Avançado / Developer ──────────────────────────────────────────────── #}
+  <div class="tabpanel" x-show="isTab('avancado')" x-cloak>
+    <div class="info-banner" x-data="infoBanner('config-adv', false)" :data-open="aberto">
+      <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m21 12-6-3v6zM3 12l6-3v6z"/><circle cx="12" cy="12" r="9"/></svg>
+        Área técnica — mexa com cuidado
+        <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="info-banner__body" x-show="aberto" x-cloak>
+        <p>Chaves de comportamento interno e credenciais de infraestrutura. Algumas
+          só têm efeito depois de reiniciar os serviços — a etiqueta indica.</p>
+      </div>
+    </div>
+
+    <section class="section" x-data="reveal(true)">
+      <button class="btn btn--ghost u-mb-3" @click="toggle()" :aria-expanded="aberto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" :style="aberto ? 'transform:rotate(90deg)' : ''"><path d="m9 18 6-6-6-6"/></svg>
+        Chaves de comportamento
+      </button>
+      <div x-show="aberto" x-cloak>
+        <div id="dyn-list" class="table-wrap"><span class="caption">Carregando…</span></div>
+      </div>
+    </section>
+
+    <section class="section" x-data="reveal(false)">
+      <button class="btn btn--ghost u-mb-3" @click="toggle()" :aria-expanded="aberto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" :style="aberto ? 'transform:rotate(90deg)' : ''"><path d="m9 18 6-6-6-6"/></svg>
+        Credenciais de infraestrutura — mudança exige reiniciar
+      </button>
+      <div x-show="aberto" x-cloak>
+        <div class="card"><div id="keys" class="grid"></div>
+          <button class="btn btn--primary u-mt-3" id="save-keys">Salvar credenciais</button></div>
+      </div>
+    </section>
+
+    <section class="section" x-data="reveal(false)">
+      <button class="btn btn--ghost u-mb-3" @click="toggle()" :aria-expanded="aberto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" :style="aberto ? 'transform:rotate(90deg)' : ''"><path d="m9 18 6-6-6-6"/></svg>
+        Filas de processamento
+      </button>
+      <div x-show="aberto" x-cloak>
+        <div class="card"><div class="u-flex u-justify-between u-items-center">
+          <span id="workers" class="caption">Clique em verificar.</span>
+          <button class="btn btn--sm" id="check-workers">Verificar</button>
+        </div></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-overlay" id="hist" hidden><div class="modal modal--wide">
+    <div class="modal__head"><span class="modal__title" id="hist-title">Histórico</span>
+      <button class="btn btn--ghost btn--sm" id="hist-x" aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <div class="modal__body modal__body--scroll" id="hist-body"></div>
+  </div></div>
+
+</div>
 {% endblock %}
 
 {% block scripts %}

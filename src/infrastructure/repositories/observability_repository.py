@@ -120,6 +120,42 @@ class ObservabilityRepository:
             logger.error("❌ [OBS] get_metricas_dashboard falhou: %s", e)
         return {}
 
+    async def get_serie_horaria(self, horas: int = 24) -> list[dict]:
+        """Série por hora (para sparklines da página de custo). Buckets sem
+        dado não aparecem — o front interpola visualmente."""
+        try:
+            result = await self._db.execute(
+                text("""
+                    SELECT
+                        date_trunc('hour', ts)                       AS hora,
+                        COUNT(*)                                     AS msgs,
+                        COALESCE(SUM(tokens_total), 0)               AS tokens,
+                        ROUND(COALESCE(SUM(custo_usd), 0)::numeric, 4) AS custo_usd,
+                        ROUND(AVG(latencia_ms))                       AS latencia_ms,
+                        ROUND(
+                          100.0 * SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1
+                        )                                            AS cache_hit_pct
+                    FROM metricas_llm
+                    WHERE ts >= NOW() - make_interval(hours => :horas)
+                    GROUP BY 1 ORDER BY 1
+                """),
+                {"horas": horas},
+            )
+            return [
+                {
+                    "hora": r._mapping["hora"].isoformat() if r._mapping["hora"] else None,
+                    "msgs": int(r._mapping["msgs"] or 0),
+                    "tokens": int(r._mapping["tokens"] or 0),
+                    "custo_usd": float(r._mapping["custo_usd"] or 0),
+                    "latencia_ms": int(r._mapping["latencia_ms"] or 0),
+                    "cache_hit_pct": float(r._mapping["cache_hit_pct"] or 0),
+                }
+                for r in result.fetchall()
+            ]
+        except Exception as e:
+            logger.error("❌ [OBS] get_serie_horaria falhou: %s", e)
+            return []
+
     async def get_metricas_por_rota(self, horas: int = 24) -> list[dict]:
         """Distribuição de chamadas por rota nas últimas N horas."""
         try:

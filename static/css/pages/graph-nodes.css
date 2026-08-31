@@ -1,70 +1,7 @@
-/* graph-nodes.css — Registry de nós (Camada 1 / Fase 6, ver
-   docs/decision_camada1_nodes.md). Somente leitura: grid de cartões, um por
-   nó registrado, com portas de entrada/saída e saúde. Reusa .card/.badge
-   dos componentes globais — só o que eles não cobrem fica aqui. */
+/* graph-nodes.css — catálogo de componentes (Hub v2 Sprint 4).
+   Reusa card--resource / ports / port-tag / toggle dos componentes globais.
+   Só os ajustes que eles não cobrem. */
 
-.node-view .node-view__lead {
-  color: var(--ink-400);
-  font-size: var(--text-sm);
-  line-height: var(--leading-body);
-  margin-bottom: var(--space-4);
-  max-width: 78ch;
-}
-
-.node-view .node-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: var(--space-4);
-}
-
-.node-view .node-card__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
-}
-
-.node-view .node-card__type {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--ink-400);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.node-view .node-ports {
-  margin-top: var(--space-3);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.node-view .node-ports__group-label {
-  font-size: var(--text-xs);
-  color: var(--ink-400);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: var(--space-1);
-}
-
-.node-view .node-port {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  padding: var(--space-1) var(--space-2);
-  background: var(--ink-950);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-ctl);
-}
-
-.node-view .node-port__type {
-  color: var(--signal);
-  margin-left: auto;
-}
-
-.node-view .node-port--optional {
-  opacity: 0.65;
-}
+.node-view .card--resource { gap: var(--space-2); }
+.node-view .card--resource .ports { margin-top: var(--space-2); }
+.node-view .card--resource .card__desc { margin-top: 0; }

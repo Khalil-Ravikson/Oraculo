@@ -1,0 +1,88 @@
+{# ============================================================================
+   _glossario.html — camada de tradução para server-render (Hub v2, Sprint 0)
+   ----------------------------------------------------------------------------
+   Fonte de tradução termo-de-backend → rótulo humano no lado do servidor.
+   Espelho de `static/js/core/glossario.js` (fonte para conteúdo montado no
+   cliente). Mantenha os dois em sincronia — o mapa é pequeno de propósito.
+
+   Uso numa página:
+     {% import "hub/_glossario.html" as g %}
+     {{ g.rotulo('owner:langgraph') }}          -> Motor novo
+     {{ g.chip('FEATURE_LANGGRAPH_NATIVE_ROUTES') }}  -> <span data-tech=...>...</span> (?)
+
+   Regra dura: nenhuma página imprime identificador de código, nome de tabela,
+   migration ou arquivo .py fora de `data-tech`/tooltip.
+   ========================================================================= #}
+
+{%- set TERMOS = {
+  'owner:langgraph':             {'rotulo': 'Motor novo',            'tooltip': 'Rota executada pelo mecanismo nativo'},
+  'owner:langgraph_conditional': {'rotulo': 'Motor novo (em teste)', 'tooltip': 'Só ativa com "Rotas pelo motor novo" ligado'},
+  'owner:legacy':                {'rotulo': 'Motor clássico',        'tooltip': 'Rota ainda no orquestrador anterior'},
+  'FEATURE_LANGGRAPH_NATIVE_ROUTES':   {'rotulo': 'Rotas pelo motor novo', 'tooltip': 'Chave de laboratório — desligada por padrão'},
+  'FEATURE_LANGGRAPH_CELERY_DISPATCH': {'rotulo': 'Processamento em fila pelo motor novo', 'tooltip': 'Chave de laboratório — desligada por padrão'},
+  'dispatcher.py':               {'rotulo': 'orquestrador clássico'},
+  'dispatcher_langgraph.py':     {'rotulo': 'orquestrador novo'},
+  'route_registry':              {'rotulo': 'Mapa de rotas'},
+  'graph_node_config':           {'rotulo': 'Estado do componente', 'tooltip': 'Ligado/desligado — o componente continua existindo'},
+  'NodeRegistry':                {'rotulo': 'Catálogo de componentes'},
+  'BaseNode':                    {'rotulo': 'Catálogo de componentes'},
+  'DEV_TEST_NO_DB_WRITE':        {'rotulo': 'Modo simulação (não grava no banco)', 'tooltip': 'Uso em teste — nenhuma escrita é persistida'},
+  'DEV_TEST_SKIP_REGISTRATION':  {'rotulo': 'Pular cadastro automático', 'tooltip': 'Uso em teste'},
+  'RAG_CACHE_TTL_SECONDS':       {'rotulo': 'Validade do cache de respostas (s)'},
+  'RAG_RERANKER_ENABLED':        {'rotulo': 'Reordenar resultados da busca'},
+  'GEMINI_MODEL':                {'rotulo': 'Modelo de linguagem ativo'},
+  'PARSER_PDF_PRIORIDADE':       {'rotulo': 'Ordem dos leitores de PDF'},
+  'PARSER_DESABILITADOS':        {'rotulo': 'Leitores de PDF desligados'},
+  'circuito:fechado':            {'rotulo': 'Operante'},
+  'circuito:aberto':             {'rotulo': 'Bloqueado por falhas', 'tooltip': 'Muitas falhas seguidas — pausado até esfriar'},
+  'circuito:half_open':          {'rotulo': 'Testando recuperação'},
+  'port:text':          {'rotulo': 'texto'},
+  'port:llm_response':  {'rotulo': 'resposta de IA'},
+  'port:embeddings':    {'rotulo': 'vetor semântico'},
+  'port:audio':         {'rotulo': 'áudio'},
+  'port:file':          {'rotulo': 'arquivo'},
+  'port:structured':    {'rotulo': 'dados estruturados'},
+  'port:boolean':       {'rotulo': 'sim/não'},
+  'port:number':        {'rotulo': 'número'},
+  'port:array':         {'rotulo': 'lista'},
+  'port:tokens':        {'rotulo': 'tokens'},
+  'rota:GERAL':           {'rotulo': 'Pergunta geral'},
+  'rota:CALENDARIO':      {'rotulo': 'Calendário acadêmico'},
+  'rota:EDITAL':          {'rotulo': 'Editais'},
+  'rota:CONTATOS':        {'rotulo': 'Contatos e setores'},
+  'rota:WIKI':            {'rotulo': 'Base de conhecimento (wiki)'},
+  'rota:SIGAA':           {'rotulo': 'Consulta ao SIGAA'},
+  'rota:CHECK_STATUS':    {'rotulo': 'Status de solicitação'},
+  'rota:GREETING':        {'rotulo': 'Saudação'},
+  'rota:MEDIA_DOWNLOAD':  {'rotulo': 'Baixar mídia enviada'},
+  'rota:CRUD':            {'rotulo': 'Atualizar cadastro'},
+  'rota:TICKET_ABERTURA': {'rotulo': 'Abrir chamado'},
+  'no:rag':            {'rotulo': 'Busca em documentos'},
+  'no:sigaa':          {'rotulo': 'Integração SIGAA'},
+  'no:greeting':       {'rotulo': 'Resposta de saudação'},
+  'no:media_download': {'rotulo': 'Download de mídia'},
+  'no:check_status':   {'rotulo': 'Verificação de status'},
+  'no:crud':           {'rotulo': 'Edição de cadastro'},
+  'no:ticket':         {'rotulo': 'Abertura de chamado'},
+  'step:rag_search':   {'rotulo': 'buscar nos documentos'},
+  'step:synthesis':    {'rotulo': 'redigir resposta'},
+  'step:rerank':       {'rotulo': 'reordenar resultados'},
+  'agente:academic_knowledge': {'rotulo': 'Conhecimento acadêmico'},
+  'agente:sigaa':              {'rotulo': 'SIGAA'},
+  'agente:tickets':            {'rotulo': 'Chamados'},
+  'agente:registration':       {'rotulo': 'Cadastro'},
+} -%}
+
+{%- macro rotulo(chave, fallback='') -%}
+{{- TERMOS.get(chave|string, {}).get('rotulo') or (fallback if fallback else chave) -}}
+{%- endmacro -%}
+
+{%- macro ajuda(chave) -%}
+{{- TERMOS.get(chave|string, {}).get('tooltip', '') -}}
+{%- endmacro -%}
+
+{#- <span> com rótulo visível, termo cru em data-tech e ajuda opcional como (?) -#}
+{%- macro chip(chave, fallback='') -%}
+{%- set _aj = TERMOS.get(chave|string, {}).get('tooltip', '') -%}
+<span class="gloss" data-tech="{{ chave }}"{% if _aj %} title="{{ _aj }}"{% endif %}>{{ rotulo(chave, fallback) }}{% if _aj %} <span class="gloss__q" aria-hidden="true">?</span>{% endif %}</span>
+{%- endmacro -%}

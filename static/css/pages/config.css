@@ -1,0 +1,17 @@
+/* config.css — Configuração em abas (Hub v2 Sprint 3a).
+   Só o que os componentes compartilhados não cobrem. */
+
+.config-view .tabpanel { min-height: 200px; }
+
+.config-view .config-hist {
+  border-bottom: 1px solid var(--line);
+  padding: var(--space-2) 0;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.config-view .config-hist:last-child { border-bottom: 0; }
+
+/* Seta do accordion (reveal) gira suave */
+.config-view [x-data] > button svg { transition: transform var(--transition); }
