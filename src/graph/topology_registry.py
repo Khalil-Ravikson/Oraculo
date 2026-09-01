@@ -26,6 +26,9 @@ from src.graph.topology_validator import validar_topologia
 logger = logging.getLogger(__name__)
 
 
+STATUS_VALIDOS = ("draft", "testado", "publicado")
+
+
 class TopologiaInvalidaError(ValueError):
     """Topologia não passou na validação — `erros` tem a lista completa."""
 
@@ -37,6 +40,7 @@ class TopologiaInvalidaError(ValueError):
 async def salvar(
     session, name: str, topology_json: Dict[str, Any],
     description: str = "", status: str = "draft", admin: str | None = None,
+    gatilho: str | None = None,
 ) -> dict:
     """
     Valida e persiste (cria ou atualiza, por `name`). Levanta
@@ -47,9 +51,13 @@ async def salvar(
     if erros:
         raise TopologiaInvalidaError(erros)
 
+    if status not in STATUS_VALIDOS:
+        status = "draft"
+    gatilho = (gatilho or "").strip()[:200] or None
+
     stmt = pg_insert(GraphTopology).values(
         name=name, description=description, topology_json=topology_json,
-        status=status, atualizado_por=admin,
+        status=status, gatilho=gatilho, atualizado_por=admin,
     )
     stmt = stmt.on_conflict_do_update(
         index_elements=["tenant_id", "name"],
@@ -57,6 +65,7 @@ async def salvar(
             "description": description,
             "topology_json": topology_json,
             "status": status,
+            "gatilho": gatilho,
             "atualizado_por": admin,
             "atualizado_em": datetime.now(timezone.utc),
             "versao": GraphTopology.versao + 1,
@@ -105,6 +114,7 @@ def _serializar(r: GraphTopology) -> dict:
     return {
         "name": r.name, "description": r.description,
         "topology_json": r.topology_json, "status": r.status,
+        "gatilho": r.gatilho,
         "versao": r.versao, "atualizado_em": r.atualizado_em,
         "atualizado_por": r.atualizado_por,
     }

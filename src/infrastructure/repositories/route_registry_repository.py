@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -142,6 +142,20 @@ class RouteRegistryRepository:
         persistido = await self.obter(rota)
         await self._historico(rota, nova_versao, to_dict(persistido), atualizado_por, agora)
         return persistido
+
+    async def remover(self, rota: str) -> bool:
+        """Apaga a linha e o histórico. Só faz sentido para rota personalizada
+        (a checagem `route_registry.pode_apagar` é do endpoint)."""
+        res = await self._session.execute(
+            delete(RouteRegistry).where(
+                RouteRegistry.rota == rota, RouteRegistry.tenant_id.is_(None),
+            )
+        )
+        await self._session.execute(
+            delete(RouteRegistryHistorico).where(RouteRegistryHistorico.rota == rota)
+        )
+        await self._session.flush()
+        return res.rowcount > 0
 
     async def _historico(
         self, rota: str, versao: int, snapshot: dict, atualizado_por: str | None, agora: datetime,

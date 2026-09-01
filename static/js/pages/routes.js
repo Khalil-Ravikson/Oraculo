@@ -2,12 +2,14 @@
    reiniciar. Concorrência otimista por versão (409 → recarrega). */
 import { api, ApiError } from '/static/js/core/api-client.js';
 import { showToast } from '/static/js/core/toast.js';
-import { confirmar } from '/static/js/core/modal.js';
+import { confirmar, confirmarComToken, formModal } from '/static/js/core/modal.js';
 import { fmt } from '/static/js/core/format.js';
 import { Glossario } from '/static/js/core/glossario.js';
 
 const $ = (id) => document.getElementById(id);
 const VER = {};
+let NODES_VALIDOS = [];
+let OWNERS_VALIDOS = [];
 
 const OWNER_BADGE = {
   langgraph: 'badge--ok',
@@ -48,13 +50,16 @@ async function load() {
   const box = $('tbl');
   try {
     const d = await api.get('/routes');
+    NODES_VALIDOS = d.nodes_validos || [];
+    OWNERS_VALIDOS = d.owners_validos || [];
     const rows = d.rotas.map((r) => {
       VER[r.rota] = r.versao;
       const p = (campo) => `f-${r.rota}-${campo}`;
+      const selo = r.fixa === false ? ' <span class="badge badge--neutral">personalizada</span>' : '';
       return `<tr>
         <td>
           <span class="rota-nome" data-tech="${fmt.esc(r.rota)}">${fmt.esc(rotaLabel(r.rota))}</span>
-          <span class="badge ${OWNER_BADGE[r.owner] || 'badge--neutral'}" data-tech="owner:${fmt.esc(r.owner)}" title="versão ${r.versao}">${fmt.esc(motorLabel(r.owner))}</span>
+          <span class="badge ${OWNER_BADGE[r.owner] || 'badge--neutral'}" data-tech="owner:${fmt.esc(r.owner)}" title="versão ${r.versao}">${fmt.esc(motorLabel(r.owner))}</span>${selo}
         </td>
         <td>${sel(p('entrypoint_node'), r.entrypoint_node, d.nodes_validos, noLabel)}</td>
         <td>${sel(p('owner'), r.owner, d.owners_validos, motorLabel)}</td>
@@ -67,6 +72,7 @@ async function load() {
         <td class="col-actions">
           <button class="btn btn--primary btn--sm" data-save="${fmt.esc(r.rota)}">Salvar</button>
           <button class="btn btn--sm" data-hist="${fmt.esc(r.rota)}">Histórico</button>
+          ${r.fixa === false ? `<button class="btn btn--sm btn--danger" data-del="${fmt.esc(r.rota)}">Apagar</button>` : ''}
         </td>
       </tr>`;
     }).join('');
@@ -89,6 +95,7 @@ async function load() {
 
     box.querySelectorAll('[data-save]').forEach((b) => (b.onclick = () => salvar(b.dataset.save)));
     box.querySelectorAll('[data-hist]').forEach((b) => (b.onclick = () => abrirHistorico(b.dataset.hist)));
+    box.querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => apagarRota(b.dataset.del)));
   } catch (e) {
     box.innerHTML = `<div class="table__empty" style="color:var(--danger)">Erro ao carregar: ${fmt.esc(e.message)}</div>`;
   }
@@ -170,6 +177,68 @@ async function reverter(rota, para) {
     load();
   }
 }
+
+// ── Criar / apagar rota personalizada ─────────────────────────────────────
+async function apagarRota(rota) {
+  const ok = await confirmarComToken({
+    titulo: `Apagar ${rota}`,
+    corpo: 'A rota e o gatilho de classificação são removidos. Mensagens que iam para ela voltam a ser classificadas normalmente.',
+    token: rota, acao: 'Apagar',
+  });
+  if (!ok) return;
+  try {
+    await api.del(`/routes/${rota}`);
+    showToast(`${rota} apagada`);
+    load();
+  } catch (e) { showToast(`Erro ao apagar: ${e.message}`, 'error'); }
+}
+
+function opt(lista, sel) {
+  return lista.map((o) => `<option value="${fmt.esc(o)}"${o === sel ? ' selected' : ''}>${fmt.esc(o)}</option>`).join('');
+}
+
+$('btn-nova-rota').onclick = async () => {
+  const corpo = document.createElement('div');
+  corpo.innerHTML = `
+    <div class="field"><label class="field__label">Nome da rota</label>
+      <input class="input" name="nome" placeholder="TESTE_GUI" required>
+      <span class="field__hint">MAIÚSCULAS, dígitos ou "_", 3–24 caracteres.</span></div>
+    <div class="field"><label class="field__label">Gatilho — expressão que ativa a rota</label>
+      <input class="input" name="regex" placeholder="teste de gui">
+      <span class="field__hint">Deixe em branco para uma rota sem classificação automática.</span></div>
+    <div class="field"><label class="field__label">Frases de exemplo (uma por linha)</label>
+      <textarea class="input" name="exemplos" rows="2" placeholder="quero fazer um teste de GUI"></textarea></div>
+    <div class="field"><label class="field__label">Ponto de entrada</label>
+      <select class="select" name="entrypoint_node">${opt(NODES_VALIDOS, 'rag')}</select></div>
+    <div class="field"><label class="field__label">Motor</label>
+      <select class="select" name="owner">${opt(OWNERS_VALIDOS, 'legacy')}</select></div>
+    <div class="field"><label class="field__label">Agente (opcional)</label>
+      <input class="input" name="agente" placeholder="academic_knowledge"></div>
+    <div class="field"><label class="field__label">Trechos de documento (k)</label>
+      <input class="input input--num" name="k" type="number" value="0"></div>`;
+  const r = await formModal({
+    titulo: 'Nova rota', corpo, acao: 'Criar',
+    onSubmit: (form) => {
+      const f = Object.fromEntries(new FormData(form));
+      if (!f.nome) throw new Error('Informe o nome');
+      const campos = {
+        entrypoint_node: f.entrypoint_node,
+        owner: f.owner,
+        agente: f.agente.trim() || null,
+        k: f.k === '' ? null : Number(f.k),
+      };
+      const body = { nome: f.nome, campos };
+      if (f.regex.trim()) {
+        body.gatilho = {
+          regex: f.regex.trim(),
+          exemplos: f.exemplos.split('\n').map((s) => s.trim()).filter(Boolean),
+        };
+      }
+      return api.post('/routes', body);
+    },
+  });
+  if (r) { showToast(`Rota '${r.rota}' criada`); load(); }
+};
 
 $('hist-x').onclick = () => ($('hist').hidden = true);
 $('hist').onclick = (e) => { if (e.target === $('hist')) $('hist').hidden = true; };

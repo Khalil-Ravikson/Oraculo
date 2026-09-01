@@ -130,3 +130,57 @@ async def test_falha_de_no_interrompe_e_reporta():
     assert res.ok is False
     assert any("falhou de propósito" in e for e in res.erros)
     assert any(e["tipo"] == "erro" and e["node"] == "quebra" for e in res.eventos)
+
+
+# ── Modo sandbox (teste manual do Graph Studio) ──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_sandbox_usa_contexto_isolado_e_preenche_resposta():
+    class _EspiaContexto(_Fonte):
+        def __init__(self):
+            super().__init__(node_id="espia", valor="oi")
+            self.ctx = None
+
+        async def execute(self, inputs, context):
+            self.ctx = context
+            return {"texto": "oi", "response": "resposta final"}
+
+    espia = _EspiaContexto()
+    ex = GraphExecutor(registry=_reg(espia))
+    res = await ex.executar(_topo("espia"), dry_run=False, sandbox=True)
+    assert res.ok
+    assert espia.ctx.tenant_id is None
+    assert espia.ctx.metadata.get("sandbox") is True
+    assert res.resposta == "resposta final"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_recusa_topologia_grande():
+    nodes = [_Fonte(node_id=f"n{i}") for i in range(9)]
+    ex = GraphExecutor(registry=_reg(*nodes))
+    res = await ex.executar(_topo(*[f"n{i}" for i in range(9)]), dry_run=False, sandbox=True)
+    assert res.ok is False
+    assert any("no máximo" in e for e in res.erros)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_aplica_config_por_no():
+    class _LeConfig(_Fonte):
+        def __init__(self):
+            super().__init__(node_id="lc")
+            self.recebeu = None
+
+        @property
+        def config_schema(self):
+            return {"type": "object", "properties": {"modelo": {"type": "string"}}}
+
+        async def execute(self, inputs, context):
+            self.recebeu = inputs.get("modelo")
+            return {"texto": "ok"}
+
+    lc = _LeConfig()
+    ex = GraphExecutor(registry=_reg(lc))
+    topo = {"nodes": [{"node_id": "lc", "x": 0, "y": 0, "config": {"modelo": "flash"}}], "edges": []}
+    res = await ex.executar(topo, dry_run=False, sandbox=True)
+    assert res.ok
+    assert lc.recebeu == "flash"

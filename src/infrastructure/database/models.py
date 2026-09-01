@@ -563,6 +563,7 @@ class GraphTopology(Base):
     description    = Column(String(500), server_default="", nullable=False)
     topology_json  = Column(JSONB, nullable=False)
     status         = Column(String(20), server_default="draft", nullable=False)
+    gatilho        = Column(String(200), nullable=True)
     versao         = Column(Integer, server_default="1", nullable=False)
     tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
     atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

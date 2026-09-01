@@ -19,9 +19,10 @@ const COLOR_EDGE = '#d97a3f';
 
 let stage, layer;
 let nodesById = {};      // node_id -> metadata do registry (portas, tipos)
-let canvasNodes = {};    // node_id -> { group }
+let canvasNodes = {};    // node_id -> { group, config }
 let canvasEdges = [];    // [{ source_node, source_port, target_node, target_port, line }]
 let armedPort = null;    // { node_id, port_name, direction, circle }
+let nodeStatus = {};     // node_id -> 'running'|'ok'|'error'|'skip' (último teste)
 
 function initStage() {
   const container = document.getElementById('canvas');
@@ -170,17 +171,21 @@ function buildNodeGroup(nodeId, x, y) {
     removeNode(nodeId);
     pushHistory();
   });
+  group.on('click tap', (evt) => {
+    if (evt.target.getAttr('portMeta')) return;   // clique numa porta = ligação
+    abrirPropsNo(nodeId);
+  });
 
   layer.add(group);
   return group;
 }
 
-function addNodeToCanvas(nodeId) {
+function addNodeToCanvas(nodeId, config = {}) {
   if (canvasNodes[nodeId]) { showToast(`"${nodeLabel(nodeId)}" já está na área`, 'error'); return; }
   const n = Object.keys(canvasNodes).length;
   const x = 40 + (n % 3) * 220;
   const y = 40 + Math.floor(n / 3) * 160;
-  canvasNodes[nodeId] = { group: buildNodeGroup(nodeId, x, y) };
+  canvasNodes[nodeId] = { group: buildNodeGroup(nodeId, x, y), config: config || {} };
   layer.draw();
   if (!restaurando) { pushHistory(); renderMinimap(); }
 }
@@ -289,6 +294,7 @@ function clearCanvas() {
   canvasEdges.forEach(e => e.line.destroy());
   canvasNodes = {};
   canvasEdges = [];
+  nodeStatus = {};
   desarmar();
   layer.draw();
   renderMinimap();
@@ -296,9 +302,11 @@ function clearCanvas() {
 
 function exportTopology() {
   return {
-    nodes: Object.entries(canvasNodes).map(([node_id, n]) => ({
-      node_id, x: n.group.x(), y: n.group.y(),
-    })),
+    nodes: Object.entries(canvasNodes).map(([node_id, n]) => {
+      const node = { node_id, x: n.group.x(), y: n.group.y() };
+      if (n.config && Object.keys(n.config).length) node.config = n.config;
+      return node;
+    }),
     edges: canvasEdges.map(({ source_node, source_port, target_node, target_port }) => ({
       source_node, source_port, target_node, target_port,
     })),
@@ -309,7 +317,10 @@ function loadTopology(topologyJson) {
   clearCanvas();
   (topologyJson.nodes || []).forEach(n => {
     if (!nodesById[n.node_id]) return;  // componente não existe mais no registry — pula
-    canvasNodes[n.node_id] = { group: buildNodeGroup(n.node_id, n.x || 40, n.y || 40) };
+    canvasNodes[n.node_id] = {
+      group: buildNodeGroup(n.node_id, n.x || 40, n.y || 40),
+      config: n.config || {},
+    };
   });
   layer.draw();
   (topologyJson.edges || []).forEach(addEdge);
@@ -318,10 +329,56 @@ function loadTopology(topologyJson) {
 }
 
 const CAT_PALETTE = {
-  channel: 'Entrada / Saída', lab_router: 'Entrada / Saída',
+  trigger: 'Entrada / Saída', channel: 'Entrada / Saída', lab_router: 'Entrada / Saída',
   llm_provider: 'Modelos & IA', stt_provider: 'Modelos & IA', tts_provider: 'Modelos & IA', embeddings_provider: 'Modelos & IA',
   parser: 'Processamento', tool: 'Processamento',
 };
+
+// ── Painel de propriedades do nó (config_schema → formulário) ──────────────
+let propsNoAtual = null;
+
+function abrirPropsNo(nodeId) {
+  const meta = nodesById[nodeId];
+  const schema = meta?.config_schema;
+  const props = schema && schema.properties;
+  const painel = document.getElementById('node-props');
+  if (!props || !Object.keys(props).length) { fecharPropsNo(); return; }
+
+  propsNoAtual = nodeId;
+  document.getElementById('node-props-title').textContent = nodeLabel(nodeId);
+  const cfg = canvasNodes[nodeId]?.config || {};
+  document.getElementById('node-props-body').innerHTML = Object.entries(props).map(([chave, spec]) => {
+    const val = cfg[chave] ?? spec.default ?? '';
+    const tipo = spec.type === 'number' ? 'number' : 'text';
+    const step = spec.type === 'number' ? ' step="0.1"' : '';
+    return `<div class="field">
+      <label class="field__label" for="np-${chave}">${fmt.esc(spec.title || chave)}</label>
+      <input class="input" id="np-${chave}" type="${tipo}"${step} value="${fmt.esc(val)}"
+        data-key="${fmt.esc(chave)}" data-type="${spec.type || 'string'}">
+      ${spec.description ? `<span class="field__hint">${fmt.esc(spec.description)}</span>` : ''}
+    </div>`;
+  }).join('') + '<button type="button" class="btn btn--primary btn--sm" id="np-apply">Aplicar</button>';
+
+  document.getElementById('np-apply').onclick = () => {
+    const novo = {};
+    document.querySelectorAll('#node-props-body [data-key]').forEach((inp) => {
+      const v = inp.value.trim();
+      if (v === '') return;
+      novo[inp.dataset.key] = inp.dataset.type === 'number' ? Number(v) : v;
+    });
+    if (canvasNodes[nodeId]) canvasNodes[nodeId].config = novo;
+    pushHistory();
+    showToast('Configuração aplicada');
+    fecharPropsNo();
+  };
+  painel.hidden = false;
+}
+
+function fecharPropsNo() {
+  propsNoAtual = null;
+  document.getElementById('node-props').hidden = true;
+}
+document.getElementById('node-props-x').onclick = fecharPropsNo;
 
 async function loadPalette() {
   const el = document.getElementById('palette');
@@ -367,20 +424,6 @@ document.getElementById('palette-search').addEventListener('input', (e) => {
   });
 });
 
-async function loadTopologiesDropdown() {
-  const sel = document.getElementById('topo-load');
-  try {
-    const r = await fetch('/hub/graph-studio/topologies');
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    sel.innerHTML = '<option value="">Carregar topologia salva…</option>' +
-      d.topologies.map(t => `<option value="${fmt.esc(t.name)}">${fmt.esc(t.name)}</option>`).join('');
-    sel.dataset.cache = JSON.stringify(d.topologies);
-  } catch (e) {
-    showToast(e.message, 'error');
-  }
-}
-
 function showErrors(msgs) {
   const el = document.getElementById('errors');
   if (!msgs || !msgs.length) { el.hidden = true; el.innerHTML = ''; return; }
@@ -388,66 +431,147 @@ function showErrors(msgs) {
   el.innerHTML = `<strong>Topologia inválida:</strong><ul>${msgs.map(m => `<li>${fmt.esc(m)}</li>`).join('')}</ul>`;
 }
 
-document.getElementById('btn-save').addEventListener('click', async () => {
-  const name = document.getElementById('topo-name').value.trim();
-  if (!name) { showToast('Dê um nome pra topologia', 'error'); return; }
+// ── Lista lateral de fluxos salvos, com miniatura do DAG ───────────────────
+const STATUS_BADGE = { testado: 'badge--ok', publicado: 'badge--ok' };
+let topoCache = [];
+
+function miniDag(topologyJson, w = 56, h = 34) {
+  const nodes = (topologyJson.nodes || []).filter(n => Number.isFinite(n.x) && Number.isFinite(n.y));
+  if (!nodes.length) return `<svg class="topo-card__dag" viewBox="0 0 ${w} ${h}"></svg>`;
+  const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+  const minX = Math.min(...xs) - 20, minY = Math.min(...ys) - 20;
+  const maxX = Math.max(...xs) + NODE_WIDTH + 20, maxY = Math.max(...ys) + 120;
+  const s = Math.min((w - 4) / Math.max(maxX - minX, 1), (h - 4) / Math.max(maxY - minY, 1));
+  const edges = (topologyJson.edges || []).map(e => {
+    const a = nodes.find(n => n.node_id === e.source_node), b = nodes.find(n => n.node_id === e.target_node);
+    if (!a || !b) return '';
+    return `<line x1="${(a.x - minX) * s + NODE_WIDTH * s}" y1="${(a.y - minY) * s + 4}" x2="${(b.x - minX) * s}" y2="${(b.y - minY) * s + 4}" stroke="#d97a3f" stroke-width="0.7"/>`;
+  }).join('');
+  const rects = nodes.map(n =>
+    `<rect x="${(n.x - minX) * s + 2}" y="${(n.y - minY) * s + 2}" width="${Math.max(6, NODE_WIDTH * s)}" height="6" rx="1.5" fill="#1b1f26" stroke="#333a44" stroke-width="0.5"/>`).join('');
+  return `<svg class="topo-card__dag" viewBox="0 0 ${w} ${h}">${edges}${rects}</svg>`;
+}
+
+async function loadTopologiesList() {
+  const box = document.getElementById('topo-list');
   try {
-    const res = await fetch('/hub/graph-studio/save', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, topology_json: exportTopology() }),
-    });
-    const j = await res.json();
-    if (j.error) {
-      showErrors(j.detalhes || [j.error]);
-      showToast(j.error, 'error');
+    const r = await fetch('/hub/graph-studio/topologies', { credentials: 'same-origin' });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    topoCache = d.topologies || [];
+    const atual = document.getElementById('topo-name').value.trim();
+    if (!topoCache.length) {
+      box.innerHTML = '<span class="caption">Nenhum fluxo salvo. Arraste componentes e clique em Salvar.</span>';
       return;
     }
-    showErrors([]);
-    showToast(`Topologia '${j.name}' salva (v${j.versao})`);
-    loadTopologiesDropdown();
-  } catch (e) { showToast(e.message, 'error'); }
-});
+    box.innerHTML = topoCache.map(t => `
+      <div class="topo-card" data-name="${fmt.esc(t.name)}" data-atual="${t.name === atual}">
+        ${miniDag(t.topology_json || {})}
+        <div class="topo-card__body">
+          <div class="topo-card__name" title="${fmt.esc(t.name)}">${fmt.esc(t.name)}</div>
+          <span class="badge ${STATUS_BADGE[t.status] || 'badge--neutral'}">${fmt.esc(t.status || 'rascunho')}</span>
+        </div>
+        <button class="btn btn--ghost btn--sm topo-card__del" data-del="${fmt.esc(t.name)}" aria-label="Remover">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      </div>`).join('');
+    box.querySelectorAll('.topo-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('[data-del]')) return;
+        abrirTopologia(card.dataset.name);
+      });
+    });
+    box.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => removerTopologia(b.dataset.del)));
+  } catch (e) {
+    box.innerHTML = `<span style="color:var(--danger)">${fmt.esc(e.message)}</span>`;
+  }
+}
 
-document.getElementById('btn-new').addEventListener('click', () => {
-  clearCanvas();
-  document.getElementById('topo-name').value = '';
+function abrirTopologia(name) {
+  const topo = topoCache.find(t => t.name === name);
+  if (!topo) return;
+  document.getElementById('topo-name').value = topo.name;
+  document.getElementById('topo-gatilho').value = topo.gatilho || '';
+  document.getElementById('test-msg').value = topo.gatilho || '';
+  fecharPropsNo();
+  loadTopology(topo.topology_json || { nodes: [], edges: [] });
   showErrors([]);
   atualizarValidade();
-  pushHistory();
-});
+  historico = []; historicoPos = -1; pushHistory();
+  loadTopologiesList();
+}
 
-document.getElementById('btn-delete').addEventListener('click', async () => {
-  const name = document.getElementById('topo-load').value;
-  if (!name) { showToast('Selecione uma topologia salva pra remover', 'error'); return; }
+async function removerTopologia(name) {
   const ok = await confirmar({
-    titulo: 'Remover topologia',
+    titulo: 'Remover fluxo',
     corpo: `Remover "${name}"? Esta ação não pode ser desfeita.`,
     acao: 'Remover', perigo: true,
   });
   if (!ok) return;
   try {
     const res = await fetch('/hub/graph-studio/remove', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
       body: JSON.stringify({ name }),
     });
     const j = await res.json();
     if (j.error) throw new Error(j.error);
-    showToast(`'${name}' removida`);
-    loadTopologiesDropdown();
+    showToast(`'${name}' removido`);
+    if (document.getElementById('topo-name').value.trim() === name) {
+      document.getElementById('topo-name').value = '';
+      document.getElementById('topo-gatilho').value = '';
+    }
+    loadTopologiesList();
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function salvarTopologia(status) {
+  const name = document.getElementById('topo-name').value.trim();
+  if (!name) { showToast('Dê um nome ao fluxo', 'error'); return null; }
+  const body = {
+    name, topology_json: exportTopology(),
+    gatilho: document.getElementById('topo-gatilho').value.trim() || null,
+  };
+  if (status) body.status = status;
+  const res = await fetch('/hub/graph-studio/save', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+document.getElementById('btn-save').addEventListener('click', async () => {
+  try {
+    const j = await salvarTopologia();
+    if (!j) return;
+    if (j.error) { showErrors(j.detalhes || [j.error]); showToast(j.error, 'error'); return; }
+    showErrors([]);
+    showToast(`Fluxo '${j.name}' salvo (v${j.versao})`);
+    loadTopologiesList();
   } catch (e) { showToast(e.message, 'error'); }
 });
 
-document.getElementById('topo-load').addEventListener('change', (ev) => {
-  const name = ev.target.value;
-  if (!name) return;
-  const cache = JSON.parse(document.getElementById('topo-load').dataset.cache || '[]');
-  const topo = cache.find(t => t.name === name);
-  if (!topo) return;
-  document.getElementById('topo-name').value = topo.name;
-  loadTopology(topo.topology_json);
+document.getElementById('btn-new').addEventListener('click', () => {
+  clearCanvas();
+  document.getElementById('topo-name').value = '';
+  document.getElementById('topo-gatilho').value = '';
+  fecharPropsNo();
   showErrors([]);
   atualizarValidade();
-  historico = []; historicoPos = -1; pushHistory();
+  pushHistory();
+  loadTopologiesList();
+});
+
+document.getElementById('btn-dup').addEventListener('click', async () => {
+  const name = document.getElementById('topo-name').value.trim();
+  if (!name) { showToast('Abra ou salve um fluxo antes de duplicar', 'error'); return; }
+  const novo = `${name} (cópia)`;
+  document.getElementById('topo-name').value = novo;
+  try {
+    const j = await salvarTopologia();
+    if (j && j.error) { showToast(j.error, 'error'); document.getElementById('topo-name').value = name; return; }
+    showToast(`Duplicado como '${novo}'`);
+    loadTopologiesList();
+  } catch (e) { showToast(e.message, 'error'); }
 });
 
 // ── Toolbar do canvas ─────────────────────────────────────────────────────
@@ -479,7 +603,7 @@ document.getElementById('btn-export').onclick = () => {
   a.click();
   URL.revokeObjectURL(a.href);
 };
-// ── Testar (executa a topologia salva em dry-run e destaca o caminho) ──────
+// ── Ver caminho (dry-run — destaca a ordem, não chama componente) ──────────
 document.getElementById('btn-test').addEventListener('click', async () => {
   const name = document.getElementById('topo-name').value.trim();
   if (!name) { showToast('Salve o desenho antes de testar', 'error'); return; }
@@ -487,12 +611,129 @@ document.getElementById('btn-test').addEventListener('click', async () => {
   try {
     const res = await fetch('/hub/graph-studio/test', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-      body: JSON.stringify({ name, dry_run: true }),
+      body: JSON.stringify({ name, modo: 'caminho' }),
     });
     const j = await res.json();
     if (j.error) { showToast(j.error, 'error'); return; }
     if (j.erros && j.erros.length) { showErrors(j.erros); showToast('Topologia inválida', 'error'); return; }
     await destacarCaminho(j.ordem || [], j.eventos || []);
+  } catch (e) { showToast(e.message, 'error'); }
+});
+
+// ── Rodar teste real (sandbox — executa os componentes de verdade) ─────────
+const STEP_ICON = {
+  running: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.5"/></svg>',
+  ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>',
+  error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  skip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>',
+};
+const CANVAS_COR = { running: '#c9982e', ok: '#3ba55c', error: '#e05d44', skip: '#7b8394' };
+let ultimoTestePassou = false;
+
+function pintarStatusNos() {
+  Object.entries(canvasNodes).forEach(([id, { group }]) => {
+    const rect = group.findOne('Rect');
+    const st = nodeStatus[id];
+    if (st) { rect.stroke(CANVAS_COR[st] || '#262b33'); rect.strokeWidth(st === 'ok' ? 2.5 : 2); }
+    else { rect.stroke('#262b33'); rect.strokeWidth(1); }
+  });
+  layer.batchDraw();
+}
+
+function resumoEventosPorNo(eventos) {
+  const porNo = {};
+  for (const e of eventos) {
+    if (!e.node || e.node === '-') continue;
+    const cur = porNo[e.node] || (porNo[e.node] = {});
+    if (e.tipo === 'iniciando') cur.status = cur.status || 'running';
+    if (e.tipo === 'concluido') { cur.status = 'ok'; cur.ms = e.ms; cur.tokens = e.tokens; }
+    if (e.tipo === 'pulado') cur.status = 'skip';
+    if (e.tipo === 'erro') { cur.status = 'error'; cur.erro = e.erro; }
+  }
+  return porNo;
+}
+
+function renderSteps(ordem, porNo) {
+  const box = document.getElementById('test-steps');
+  box.innerHTML = ordem.map((id) => {
+    const s = porNo[id] || { status: 'skip' };
+    const meta = [
+      s.ms != null ? `${s.ms} ms` : '',
+      s.tokens ? `${s.tokens[0] + s.tokens[1]} tokens` : '',
+      s.erro ? s.erro : '',
+    ].filter(Boolean).join(' · ');
+    return `<div class="studio-step ${s.status}">
+      <span class="studio-step__icon">${STEP_ICON[s.status] || STEP_ICON.running}</span>
+      <div class="studio-step__body">
+        <div class="studio-step__name">${fmt.esc(nodeLabel(id))}</div>
+        ${meta ? `<div class="studio-step__meta">${fmt.esc(meta)}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('btn-run-test').addEventListener('click', async () => {
+  const name = document.getElementById('topo-name').value.trim();
+  if (!name) { showToast('Salve o fluxo antes de testar', 'error'); return; }
+  const msg = document.getElementById('test-msg').value.trim();
+  if (!msg) { showToast('Escreva uma mensagem de teste', 'error'); return; }
+
+  const btn = document.getElementById('btn-run-test');
+  const verdictEl = document.getElementById('test-verdict');
+  const answerEl = document.getElementById('test-answer');
+  const markBtn = document.getElementById('btn-mark-tested');
+  btn.disabled = true;
+  verdictEl.hidden = true; answerEl.hidden = true; markBtn.hidden = true;
+  document.getElementById('test-steps').innerHTML = '<span class="caption">Rodando…</span>';
+  showErrors([]);
+
+  try {
+    const res = await fetch('/hub/graph-studio/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ name, modo: 'sandbox', mensagem_teste: msg }),
+    });
+    const j = await res.json();
+    if (j.error) { document.getElementById('test-steps').innerHTML = ''; showToast(j.error, 'error'); return; }
+
+    if (j.erros && j.erros.length) {
+      showErrors(j.erros);
+      document.getElementById('test-steps').innerHTML = '';
+    }
+
+    const ordem = j.ordem || [];
+    const porNo = resumoEventosPorNo(j.eventos || []);
+    renderSteps(ordem, porNo);
+    nodeStatus = Object.fromEntries(Object.entries(porNo).map(([id, s]) => [id, s.status || 'ok']));
+    pintarStatusNos();
+
+    const passou = j.ok && !(j.erros || []).length;
+    ultimoTestePassou = passou;
+    verdictEl.hidden = false;
+    verdictEl.className = `studio-test__verdict ${passou ? 'studio-test__verdict--ok' : 'studio-test__verdict--err'}`;
+    verdictEl.textContent = passou ? `Passou · ${j.duracao_ms} ms` : 'Falhou';
+
+    if (j.resposta) {
+      answerEl.hidden = false;
+      answerEl.textContent = j.resposta;
+    }
+    markBtn.hidden = !passou;
+  } catch (e) {
+    document.getElementById('test-steps').innerHTML = '';
+    showToast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('btn-mark-tested').addEventListener('click', async () => {
+  if (!ultimoTestePassou) return;
+  try {
+    const j = await salvarTopologia('testado');
+    if (!j) return;
+    if (j.error) { showToast(j.error, 'error'); return; }
+    showToast('Fluxo marcado como testado');
+    document.getElementById('btn-mark-tested').hidden = true;
+    loadTopologiesList();
   } catch (e) { showToast(e.message, 'error'); }
 });
 
@@ -534,10 +775,67 @@ document.getElementById('import-file').onchange = (e) => {
   e.target.value = '';
 };
 
+// ── Aba "Fluxos de produção" (somente leitura) ────────────────────────────
+const REF_NODE_W = 150, REF_NODE_H = 34;
+let refCarregado = false;
+
+function svgFluxo(f) {
+  const maxX = Math.max(...f.nodes.map(n => n.x)) + REF_NODE_W + 20;
+  const maxY = Math.max(...f.nodes.map(n => n.y)) + REF_NODE_H + 20;
+  const pos = Object.fromEntries(f.nodes.map(n => [n.id, n]));
+  const arestas = f.edges.map(e => {
+    const a = pos[e.de], b = pos[e.para];
+    const x1 = a.x + REF_NODE_W, y1 = a.y + REF_NODE_H / 2;
+    const x2 = b.x, y2 = b.y + REF_NODE_H / 2;
+    const mx = (x1 + x2) / 2;
+    const label = e.rotulo
+      ? `<text x="${mx}" y="${(y1 + y2) / 2 - 4}" fill="#7b8394" font-size="9" text-anchor="middle">${fmt.esc(e.rotulo)}</text>` : '';
+    return `<path d="M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" fill="none" stroke="#d97a3f" stroke-width="1.4" marker-end="url(#ref-arrow)"/>${label}`;
+  }).join('');
+  const caixas = f.nodes.map(n => `
+    <g transform="translate(${n.x} ${n.y})">
+      <rect width="${REF_NODE_W}" height="${REF_NODE_H}" rx="6" fill="#12151a" stroke="#262b33"/>
+      <text x="${REF_NODE_W / 2}" y="${REF_NODE_H / 2 + 3}" fill="#e8eaed" font-size="10" text-anchor="middle">${fmt.esc(n.label)}</text>
+    </g>`).join('');
+  return `<div class="ref-flow">
+    <div class="ref-flow__head">
+      <strong>${fmt.esc(f.nome)}</strong>
+      <span class="caption" data-tech="${fmt.esc(f.fonte)}">${fmt.esc(f.descricao)}</span>
+    </div>
+    <div class="ref-flow__canvas">
+      <svg viewBox="0 0 ${maxX} ${maxY}" width="${maxX}" height="${maxY}">
+        <defs><marker id="ref-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#d97a3f"/></marker></defs>
+        ${arestas}${caixas}
+      </svg>
+    </div>
+  </div>`;
+}
+
+async function carregarReferencia() {
+  if (refCarregado) return;
+  const box = document.getElementById('ref-flows');
+  try {
+    const r = await fetch('/hub/graph-studio/reference', { credentials: 'same-origin' });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    box.innerHTML = (d.fluxos || []).map(svgFluxo).join('');
+    refCarregado = true;
+  } catch (e) {
+    box.innerHTML = `<span style="color:var(--danger)">${fmt.esc(e.message)}</span>`;
+  }
+}
+
+window.studioPane = function (pane) {
+  document.getElementById('pane-editor').hidden = pane !== 'editor';
+  document.getElementById('pane-ref').hidden = pane !== 'ref';
+  if (pane === 'ref') carregarReferencia();
+};
+
 (async function init() {
   initStage();
   await loadPalette();
-  await loadTopologiesDropdown();
+  await loadTopologiesList();
   atualizarValidade();
   renderMinimap();
   pushHistory();

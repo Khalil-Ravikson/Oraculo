@@ -9,6 +9,7 @@ from src.graph.nodes.tool_node import ToolNode
 from src.graph.nodes.channel_node import ChannelNode
 from src.graph.nodes.mcp_lab_node import MCPLabNode
 from src.graph.nodes.rest_lab_node import RestLabNode
+from src.graph.nodes.trigger_node import TriggerNode
 
 __all__ = [
     "STTNode",
@@ -20,4 +21,5 @@ __all__ = [
     "ChannelNode",
     "MCPLabNode",
     "RestLabNode",
+    "TriggerNode",
 ]

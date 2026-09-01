@@ -10,13 +10,13 @@ import { Glossario } from '/static/js/core/glossario.js';
 const box = document.getElementById('nodes');
 
 const CATEGORIA = {
-  channel: 'canais',
+  trigger: 'canais', channel: 'canais',
   llm_provider: 'providers', stt_provider: 'providers', tts_provider: 'providers', embeddings_provider: 'providers',
   parser: 'parsers',
   tool: 'mcp', lab_router: 'mcp',
 };
 const CAT_LABEL = {
-  channel: 'Canal', llm_provider: 'Modelo de linguagem', stt_provider: 'Áudio → texto',
+  trigger: 'Mensagem de teste', channel: 'Canal', llm_provider: 'Modelo de linguagem', stt_provider: 'Áudio → texto',
   tts_provider: 'Texto → áudio', embeddings_provider: 'Vetor semântico', parser: 'Leitor de documento',
   tool: 'Ferramenta', lab_router: 'Laboratório',
 };

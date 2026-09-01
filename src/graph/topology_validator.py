@@ -43,8 +43,23 @@ def validar_topologia(topology: Dict[str, Any], registry: NodeRegistry) -> List[
         if not node_id:
             erros.append("Nó no canvas sem 'node_id'.")
             continue
-        if registry.get(node_id) is None:
+        node = registry.get(node_id)
+        if node is None:
             erros.append(f"Nó '{node_id}' não existe no NodeRegistry.")
+            continue
+
+        cfg = n.get("config")
+        if isinstance(cfg, dict) and cfg:
+            props = (node.config_schema or {}).get("properties", {})
+            if props:
+                desconhecidas = set(cfg) - set(props)
+                if desconhecidas:
+                    erros.append(
+                        f"Nó '{node_id}': configuração desconhecida "
+                        f"{sorted(desconhecidas)} (aceita: {sorted(props)})."
+                    )
+            elif cfg:
+                erros.append(f"Nó '{node_id}' não aceita configuração.")
 
     grafo_adjacencia: Dict[str, List[str]] = {nid: [] for nid in node_ids_no_canvas}
 

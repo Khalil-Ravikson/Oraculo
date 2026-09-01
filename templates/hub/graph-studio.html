@@ -22,31 +22,48 @@
   </div>
 </div>
 
+<div class="tabs" role="tablist" x-data="{ t: 'editor' }">
+  <button class="tab" role="tab" :aria-selected="t === 'editor'" @click="t = 'editor'; window.studioPane && window.studioPane('editor')">Editor</button>
+  <button class="tab" role="tab" :aria-selected="t === 'ref'" @click="t = 'ref'; window.studioPane && window.studioPane('ref')">Fluxos de produção</button>
+</div>
+
+<div id="pane-editor">
 <div class="studio-toolbar">
-  <input class="input" id="topo-name" placeholder="nome do desenho" style="max-width:220px">
-  <select class="select" id="topo-load" style="max-width:200px">
-    <option value="">Abrir desenho salvo…</option>
-  </select>
+  <input class="input" id="topo-name" placeholder="nome do fluxo" style="max-width:180px">
+  <input class="input" id="topo-gatilho" placeholder="gatilho — frase de teste" style="max-width:220px">
   <button class="btn btn--ghost btn--sm" id="btn-new">Novo</button>
-  <button class="btn btn--ghost btn--sm" id="btn-delete">Remover</button>
+  <button class="btn btn--ghost btn--sm" id="btn-dup">Duplicar</button>
   <button class="btn btn--ghost btn--sm" id="btn-export">Exportar JSON</button>
   <button class="btn btn--ghost btn--sm" id="btn-import">Importar</button>
   <input type="file" id="import-file" accept="application/json" hidden>
   <span class="studio-toolbar__spacer"></span>
   <span id="validity" class="badge badge--unknown">vazio</span>
-  <button class="btn btn--sm" id="btn-test">Testar</button>
+  <button class="btn btn--sm" id="btn-test">Ver caminho</button>
   <button class="btn btn--primary btn--sm" id="btn-save">Salvar</button>
 </div>
 
 <div class="studio-layout">
-  <aside class="studio-palette">
-    <div class="studio-palette__label">Componentes</div>
-    <input class="input" id="palette-search" placeholder="Buscar…" style="margin-bottom:var(--space-2)">
-    <div id="palette" class="studio-palette__list"><span class="caption">Carregando…</span></div>
-    <div class="studio-palette__hint">Clique num componente para adicionar.</div>
+  <aside class="studio-side">
+    <div class="studio-topologies">
+      <div class="studio-palette__label">Fluxos salvos</div>
+      <div id="topo-list" class="studio-topologies__list"><span class="caption">Carregando…</span></div>
+    </div>
+    <div class="studio-palette">
+      <div class="studio-palette__label">Componentes</div>
+      <input class="input" id="palette-search" placeholder="Buscar…" style="margin-bottom:var(--space-2)">
+      <div id="palette" class="studio-palette__list"><span class="caption">Carregando…</span></div>
+      <div class="studio-palette__hint">Clique num componente para adicionar. Clique num nó no canvas para configurar.</div>
+    </div>
   </aside>
 
   <div class="studio-canvas-wrap">
+    <div id="node-props" class="studio-props" hidden>
+      <div class="studio-props__head">
+        <span id="node-props-title">Componente</span>
+        <button type="button" class="btn btn--ghost btn--sm" id="node-props-x" aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div id="node-props-body"></div>
+    </div>
     <div class="studio-canvas-tools">
       <button class="btn btn--icon btn--sm" id="btn-undo" aria-label="Desfazer" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg></button>
       <button class="btn btn--icon btn--sm" id="btn-redo" aria-label="Refazer" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h1"/></svg></button>
@@ -62,6 +79,35 @@
 </div>
 
 <div id="errors" class="studio-errors" hidden></div>
+
+<section class="studio-test" x-data="{ aberto: true }" :data-open="aberto">
+  <button type="button" class="studio-test__head" @click="aberto = !aberto" :aria-expanded="aberto">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m5 3 14 9-14 9V3z"/></svg>
+    Testar fluxo
+    <span class="caption">executa os componentes de verdade · consome tokens do provedor ativo</span>
+    <svg class="studio-test__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div class="studio-test__body" x-show="aberto" x-cloak>
+    <div class="studio-test__row">
+      <input class="input" id="test-msg" placeholder="Mensagem de teste (ex: teste de GUI)">
+      <button class="btn btn--primary btn--sm" id="btn-run-test">Rodar teste real</button>
+    </div>
+    <div id="test-verdict" class="studio-test__verdict" hidden></div>
+    <div id="test-steps" class="studio-steps"></div>
+    <div id="test-answer" class="studio-test__answer" hidden></div>
+    <button class="btn btn--sm" id="btn-mark-tested" hidden>Marcar como testado</button>
+  </div>
+</section>
+</div><!-- /pane-editor -->
+
+<div id="pane-ref" hidden>
+  <p class="caption" style="margin-bottom:var(--space-4)">
+    Diagramas de como o roteamento funciona hoje — reflete
+    <span data-tech="src/router/supervisor.py">o classificador</span> e
+    <span data-tech="route_registry">o mapa de rotas</span>. Somente leitura, não é executável.
+  </p>
+  <div id="ref-flows" class="ref-flows"><span class="caption">Carregando…</span></div>
+</div>
 </div>
 {% endblock %}
 

@@ -644,6 +644,76 @@ class RouteRegistryRevertRequest(BaseModel):
     versao:      int
 
 
+class RouteGatilho(BaseModel):
+    regex:    str
+    exemplos: list[str] = []
+
+
+class RouteRegistryCreateRequest(BaseModel):
+    nome:    str
+    campos:  dict = {}
+    gatilho: RouteGatilho | None = None
+
+
+async def _rota_conhecida(session, rota: str) -> bool:
+    """Rota fixa (código) ou personalizada (linha no Postgres)."""
+    from src.infrastructure import route_registry
+    from src.infrastructure.repositories.route_registry_repository import RouteRegistryRepository
+
+    if rota in route_registry.DEFAULTS_FIXOS:
+        return True
+    return await RouteRegistryRepository(session).obter(rota) is not None
+
+
+async def _aplicar_gatilho_rota(
+    session, nome: str, regex: str, exemplos: list[str], doc_type: str | None, k: int | None,
+) -> None:
+    """Grava/atualiza a intent em `intents_router` e espelha no Redis
+    (`router:regex` / `router:config`) para o classificador (supervisor.py L3)
+    pegar já na próxima mensagem, sem restart."""
+    import json as _json
+
+    from sqlalchemy.dialects.postgresql import insert as _pg_insert
+
+    from src.infrastructure.database.models import IntentRouter
+
+    kv = int(k) if k else 6
+    stmt = _pg_insert(IntentRouter).values(
+        nome=nome, regex=regex, exemplos=exemplos or [],
+        doc_type=doc_type or "geral", k_vector=kv, k_text=kv, ativo=True,
+    ).on_conflict_do_update(
+        index_elements=["nome"],
+        set_={"regex": regex, "exemplos": exemplos or [], "doc_type": doc_type or "geral",
+              "k_vector": kv, "k_text": kv, "ativo": True},
+    )
+    await session.execute(stmt)
+
+    try:
+        from src.infrastructure.redis_client import get_redis_text
+        r = get_redis_text()
+        r.hset("router:regex", nome, regex)
+        r.hset("router:config", nome, _json.dumps(
+            {"doc_type": doc_type or "geral", "k_vector": kv, "k_text": kv}
+        ))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [ADMIN] gatilho '%s' não espelhado no Redis: %s", nome, exc)
+
+
+async def _remover_gatilho_rota(session, nome: str) -> None:
+    from sqlalchemy import delete as _delete
+
+    from src.infrastructure.database.models import IntentRouter
+
+    await session.execute(_delete(IntentRouter).where(IntentRouter.nome == nome))
+    try:
+        from src.infrastructure.redis_client import get_redis_text
+        r = get_redis_text()
+        r.hdel("router:regex", nome)
+        r.hdel("router:config", nome)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [ADMIN] gatilho '%s' não removido do Redis: %s", nome, exc)
+
+
 @router.get("/routes")
 async def get_route_registry(_: TokenPayload = Depends(require_admin_jwt)):
     """Lista as 11 rotas com valor/versão atuais e reconcilia o espelho Redis."""
@@ -675,12 +745,13 @@ async def get_route_registry_historico(
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.repositories.route_registry_repository import RouteRegistryRepository
 
-    if rota not in route_registry.ROTAS:
-        raise HTTPException(404, f"'{rota}' não é uma rota conhecida.")
-
     try:
         async with AsyncSessionLocal() as session:
+            if not await _rota_conhecida(session, rota):
+                raise HTTPException(404, f"'{rota}' não é uma rota conhecida.")
             hist = await RouteRegistryRepository(session).historico(rota)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.warning("⚠️  [ADMIN] Falha ao ler histórico da rota '%s': %s", rota, exc)
         raise HTTPException(500, "Falha ao consultar o histórico.")
@@ -709,9 +780,6 @@ async def _gravar_route_registry(
         RouteRegistryRepository,
     )
 
-    if rota not in route_registry.ROTAS:
-        raise HTTPException(404, f"'{rota}' não é uma rota conhecida.")
-
     try:
         campos_validos = route_registry.validar_campos(campos)
     except route_registry.CamposInvalidos as exc:
@@ -719,10 +787,14 @@ async def _gravar_route_registry(
 
     try:
         async with AsyncSessionLocal() as session:
+            if not await _rota_conhecida(session, rota):
+                raise HTTPException(404, f"'{rota}' não é uma rota conhecida.")
             cfg = await RouteRegistryRepository(session).upsert(
                 rota, campos_validos, versao_esperada=versao_esperada, atualizado_por=admin,
             )
             await session.commit()
+    except HTTPException:
+        raise
     except ConflitoDeVersao as exc:
         raise HTTPException(409, {
             "erro": "conflito_de_versao",
@@ -765,12 +837,13 @@ async def revert_route_registry(
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.repositories.route_registry_repository import RouteRegistryRepository
 
-    if rota not in route_registry.ROTAS:
-        raise HTTPException(404, f"'{rota}' não é uma rota conhecida.")
-
     try:
         async with AsyncSessionLocal() as session:
+            if not await _rota_conhecida(session, rota):
+                raise HTTPException(404, f"'{rota}' não é uma rota conhecida.")
             snap = await RouteRegistryRepository(session).snapshot_da_versao(rota, body.para_versao)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.warning("⚠️  [ADMIN] Falha ao ler versão-alvo da rota '%s': %s", rota, exc)
         raise HTTPException(500, "Falha ao consultar o histórico.")
@@ -782,3 +855,93 @@ async def revert_route_registry(
     return await _gravar_route_registry(
         rota, campos, body.versao, payload.sub, "revert_route_registry",
     )
+
+
+@router.post("/routes")
+async def criar_route_registry(
+    body:    RouteRegistryCreateRequest,
+    payload: TokenPayload = Depends(require_admin_jwt),
+):
+    """Cria uma rota personalizada. Com `gatilho`, também grava a intent de
+    classificação (`intents_router` + espelho Redis) — o classificador passa a
+    mandar mensagens que casam a regex para esta rota já na próxima mensagem."""
+    from src.infrastructure import route_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.route_registry_repository import RouteRegistryRepository
+
+    try:
+        nome = route_registry.validar_nome_rota(body.nome)
+        campos_validos = route_registry.validar_campos(body.campos)
+    except route_registry.CamposInvalidos as exc:
+        raise HTTPException(400, str(exc))
+
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = RouteRegistryRepository(session)
+            if await repo.obter(nome) is not None:
+                raise HTTPException(409, f"A rota '{nome}' já existe.")
+            cfg = await repo.upsert(
+                nome, campos_validos, versao_esperada=0, atualizado_por=payload.sub,
+            )
+            if body.gatilho and body.gatilho.regex.strip():
+                await _aplicar_gatilho_rota(
+                    session, nome, body.gatilho.regex.strip(),
+                    body.gatilho.exemplos, campos_validos.get("doc_type"),
+                    campos_validos.get("k"),
+                )
+            await session.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [ADMIN] Falha ao criar rota '%s': %s", body.nome, exc)
+        raise HTTPException(500, "Falha ao criar a rota. Tente novamente.")
+
+    route_registry.espelhar_redis(cfg)
+
+    from src.infrastructure.adapters.redis_audit_log import RedisAuditLog
+    await RedisAuditLog().registar(
+        admin_id=payload.sub, action="criar_rota", target=nome,
+        payload={"campos": campos_validos, "gatilho": bool(body.gatilho)}, resultado="ok",
+    )
+    return {"ok": True, "rota": nome, "versao": cfg.versao}
+
+
+@router.delete("/routes/{rota}")
+async def apagar_route_registry(
+    rota:    str,
+    payload: TokenPayload = Depends(require_admin_jwt),
+):
+    """Apaga uma rota personalizada (linha + histórico + gatilho). As 11 rotas
+    fixas não podem ser apagadas."""
+    from src.infrastructure import route_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.route_registry_repository import RouteRegistryRepository
+
+    if not route_registry.pode_apagar(rota):
+        raise HTTPException(400, f"'{rota}' é uma rota fixa e não pode ser apagada.")
+
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = RouteRegistryRepository(session)
+            existia = await repo.remover(rota)
+            await _remover_gatilho_rota(session, rota)
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [ADMIN] Falha ao apagar rota '%s': %s", rota, exc)
+        raise HTTPException(500, "Falha ao apagar a rota. Tente novamente.")
+
+    if not existia:
+        raise HTTPException(404, f"A rota '{rota}' não existe.")
+
+    try:
+        from src.infrastructure.redis_client import get_redis_text
+        get_redis_text().delete(f"route:{rota}")
+    except Exception:
+        pass
+
+    from src.infrastructure.adapters.redis_audit_log import RedisAuditLog
+    await RedisAuditLog().registar(
+        admin_id=payload.sub, action="apagar_rota", target=rota,
+        payload=None, resultado="ok",
+    )
+    return {"ok": True, "rota": rota}

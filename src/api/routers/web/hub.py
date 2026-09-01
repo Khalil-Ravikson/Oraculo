@@ -1843,6 +1843,17 @@ async def graph_studio_nodes(request: Request):
     return {"nodes": get_registry().list_nodes()}
 
 
+@router.get("/graph-studio/reference")
+async def graph_studio_reference(request: Request):
+    """Diagramas (somente leitura) do roteamento que já existe — reflete
+    `supervisor.py` + `route_registry`, não é editável nem executável."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return {"error": "Não autorizado"}
+    from src.graph.reference_flows import como_json
+    return {"fluxos": como_json()}
+
+
 @router.get("/graph-studio/topologies")
 async def graph_studio_topologies(request: Request):
     """Topologias salvas (`graph_topology`, migration 015)."""
@@ -1873,6 +1884,7 @@ class GraphTopologySaveRequest(BaseModel):
     topology_json: dict
     description:   str = ""
     status:        str = "draft"
+    gatilho:       str | None = None
 
 
 @router.post("/graph-studio/save")
@@ -1891,6 +1903,7 @@ async def graph_studio_save(request: Request, data: GraphTopologySaveRequest):
             resultado = await topology_registry.salvar(
                 session, data.name, data.topology_json,
                 data.description, data.status, admin=payload.sub,
+                gatilho=data.gatilho,
             )
             await session.commit()
     except topology_registry.TopologiaInvalidaError as exc:
@@ -1933,29 +1946,51 @@ async def graph_studio_remove(request: Request, data: GraphTopologyRemoveRequest
 
 
 class GraphTestRequest(BaseModel):
-    name:    str
-    dry_run: bool = True
+    name:           str
+    dry_run:        bool = True
+    modo:           str = "caminho"   # "caminho" (dry-run) | "sandbox" (real isolado)
+    mensagem_teste: str = ""
 
 
 @router.post("/graph-studio/test")
 async def graph_studio_test(request: Request, data: GraphTestRequest):
-    """Executa uma topologia salva. `dry_run=True` (padrão) só calcula o
-    caminho e emite os eventos — não chama nenhum componente de verdade.
-    Execução real (`dry_run=False`) exige `FEATURE_GRAPH_EXECUTOR_PILOTO`."""
+    """Executa uma topologia salva.
+
+    - `modo="caminho"` (padrão): dry-run — só calcula a ordem e emite os
+      eventos, não chama nenhum componente.
+    - `modo="sandbox"`: teste manual — roda os componentes DE VERDADE, mas
+      isolado (`tenant_id=None`, sem persistência, limite de nós + timeout).
+      Consome tokens do provedor ativo. Só dispara neste clique.
+
+    Execução ligada ao pipeline de produção (`modo="producao"`) continuaria
+    exigindo `FEATURE_GRAPH_EXECUTOR_PILOTO` — não implementada aqui."""
     payload = _verificar_cookie(request)
     if not payload:
         return {"error": "Não autorizado"}
 
-    from src.graph.graph_executor import executar_topologia_salva
+    from src.graph.graph_executor import (
+        executar_topologia_salva, executar_topologia_sandbox,
+    )
 
-    dry = data.dry_run
-    if not dry:
-        from src.infrastructure import dynamic_config
-        if not dynamic_config.get_bool("FEATURE_GRAPH_EXECUTOR_PILOTO"):
-            return {"error": "Execução real está desligada (chave de laboratório 'Executor de grafo piloto')."}
+    if data.modo == "sandbox":
+        try:
+            resultado = await executar_topologia_sandbox(data.name, data.mensagem_teste)
+        except Exception as exc:
+            logger.warning("⚠️  [HUB] Falha no teste sandbox de '%s': %s", data.name, exc)
+            return {"error": "Falha na execução."}
+        try:
+            from src.infrastructure.adapters.redis_audit_log import RedisAuditLog
+            await RedisAuditLog().registar(
+                admin_id=payload.sub, action="graph_sandbox_test", target=data.name,
+                payload={"mensagem": data.mensagem_teste[:120], "ok": resultado.ok},
+                resultado="ok" if resultado.ok else "erro",
+            )
+        except Exception:
+            pass
+        return resultado.to_dict()
 
     try:
-        resultado = await executar_topologia_salva(data.name, dry_run=dry)
+        resultado = await executar_topologia_salva(data.name, dry_run=True)
     except Exception as exc:
         logger.warning("⚠️  [HUB] Falha ao executar topologia '%s': %s", data.name, exc)
         return {"error": "Falha na execução."}

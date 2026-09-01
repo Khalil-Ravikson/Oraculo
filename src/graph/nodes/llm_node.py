@@ -141,6 +141,29 @@ class LLMNode(BaseNode):
         }
 
     @property
+    def config_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "system_instruction": {
+                    "type": "string",
+                    "title": "Instrução de sistema",
+                    "description": "Como o modelo deve se comportar",
+                },
+                "temperatura": {
+                    "type": "number",
+                    "title": "Temperatura",
+                    "minimum": 0, "maximum": 1, "default": 0.2,
+                },
+                "agente": {
+                    "type": "string",
+                    "title": "Agente",
+                    "description": "Resolve override de provedor por agente (opcional)",
+                },
+            },
+        }
+
+    @property
     def metadata(self) -> Dict[str, Any]:
         return {
             "name": self.node_id,

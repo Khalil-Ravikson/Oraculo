@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass, replace
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,30 @@ _DEFAULTS: dict[str, RouteConfig] = {
 }
 
 ROTAS: frozenset[str] = frozenset(_DEFAULTS)
+
+# As 11 rotas que vivem no código — nunca deletáveis pelo painel. Rotas
+# criadas em /hub/routes existem só no Postgres (+ espelho Redis) e podem ser
+# apagadas. `ROTAS` continua sendo só as fixas (usado por checagens síncronas
+# do caminho quente que não têm sessão de banco).
+DEFAULTS_FIXOS: frozenset[str] = frozenset(_DEFAULTS)
+
+_RE_NOME_ROTA = re.compile(r"^[A-Z][A-Z0-9_]{2,23}$")
+
+
+def validar_nome_rota(nome: str) -> str:
+    nome = (nome or "").strip().upper()
+    if not _RE_NOME_ROTA.match(nome):
+        raise CamposInvalidos(
+            "Nome de rota: 3–24 caracteres, MAIÚSCULAS, dígitos ou '_', "
+            "começando por letra."
+        )
+    if nome in DEFAULTS_FIXOS:
+        raise CamposInvalidos(f"'{nome}' é uma rota fixa — escolha outro nome.")
+    return nome
+
+
+def pode_apagar(rota: str) -> bool:
+    return rota not in DEFAULTS_FIXOS
 
 # Rota classificada mas não registrada (ex.: intent custom adicionada por um
 # operador). Comportamento antigo: `decision.rota not in _ROTAS_LANGGRAPH` →
@@ -232,14 +257,23 @@ async def hydrate_redis() -> int:
 # ─── Hub: merge + validação de escrita ──────────────────────────────────────
 
 def snapshot(cfgs: list[RouteConfig]) -> list[dict]:
-    """Une as linhas do Postgres com `_DEFAULTS` — rota ainda não gravada
-    aparece com o default e `versao: 0`."""
+    """Une as linhas do Postgres com `_DEFAULTS`. Rota fixa ainda não gravada
+    aparece com o default e `versao: 0`. Rota personalizada (só Postgres)
+    aparece com `fixa: False`."""
     por_rota = {c.rota: c for c in cfgs}
     saida = []
     for rota in _DEFAULTS:
         cfg = por_rota.get(rota)
         d = to_dict(cfg or _DEFAULTS[rota])
         d["versao"] = cfg.versao if cfg else 0
+        d["fixa"] = True
+        saida.append(d)
+    for rota, cfg in sorted(por_rota.items()):
+        if rota in _DEFAULTS:
+            continue
+        d = to_dict(cfg)
+        d["versao"] = cfg.versao
+        d["fixa"] = False
         saida.append(d)
     return saida
 
@@ -300,8 +334,9 @@ def validar_campos(campos: dict) -> dict:
 
 def merge_default(rota: str, campos: dict) -> RouteConfig:
     """RouteConfig resultante de aplicar `campos` sobre o default da rota —
-    usado quando a linha ainda não existe no Postgres."""
-    base = _DEFAULTS[rota]
+    usado quando a linha ainda não existe no Postgres. Rota personalizada
+    (fora de `_DEFAULTS`) parte de `_UNKNOWN` (motor clássico)."""
+    base = _DEFAULTS.get(rota) or replace(_UNKNOWN, rota=rota)
     ps = campos.get("planner_steps", base.planner_steps)
     return replace(
         base,

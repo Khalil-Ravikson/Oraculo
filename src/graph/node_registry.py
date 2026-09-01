@@ -216,12 +216,12 @@ def _auto_register_known_nodes(registry: NodeRegistry) -> None:
     """
     from src.graph.nodes import (
         STTNode, TTSNode, EmbeddingsNode, LLMNode, ParserNode, ToolNode,
-        ChannelNode, MCPLabNode, RestLabNode,
+        ChannelNode, MCPLabNode, RestLabNode, TriggerNode,
     )
 
     for node_cls in (
         STTNode, TTSNode, EmbeddingsNode, LLMNode, ParserNode, ToolNode,
-        ChannelNode, MCPLabNode, RestLabNode,
+        ChannelNode, MCPLabNode, RestLabNode, TriggerNode,
     ):
         try:
             registry.register(node_cls())

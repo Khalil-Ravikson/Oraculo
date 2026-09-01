@@ -136,6 +136,33 @@ def test_snapshot_merge_com_defaults():
     assert snap["GERAL"]["versao"] == 0          # não gravada
     assert snap["GERAL"]["planner_steps"] == ["rag_search"]
     assert snap["SIGAA"]["owner"] == "langgraph_conditional"
+    assert all(s["fixa"] for s in snap.values())
+
+
+def test_snapshot_inclui_rota_personalizada():
+    from dataclasses import replace
+    custom = replace(rr.merge_default("TESTE_GUI", {"owner": "legacy"}), versao=3)
+    snap = {s["rota"]: s for s in rr.snapshot([custom])}
+    assert len(snap) == 12
+    assert snap["TESTE_GUI"]["fixa"] is False
+    assert snap["TESTE_GUI"]["versao"] == 3
+
+
+def test_validar_nome_rota():
+    assert rr.validar_nome_rota(" teste_gui ") == "TESTE_GUI"
+    for ruim in ("ab", "1XYZ", "com-traco", "GERAL"):
+        with pytest.raises(rr.CamposInvalidos):
+            rr.validar_nome_rota(ruim)
+
+
+def test_pode_apagar():
+    assert rr.pode_apagar("TESTE_GUI") is True
+    assert rr.pode_apagar("GERAL") is False
+
+
+def test_merge_default_rota_personalizada_parte_do_unknown():
+    cfg = rr.merge_default("NOVA_ROTA", {"k": 0})
+    assert cfg.owner == "legacy" and cfg.k == 0
 
 
 def test_rota_desconhecida_delega_para_legado_e_nao_gateia():

@@ -102,6 +102,7 @@ export const TERMOS = {
   'node:tool_default':        { rotulo: 'Executor de ferramentas', tooltip: 'Roda as ferramentas vinculadas aos agentes' },
   'node:lab_mcp':             { rotulo: 'Laboratório MCP', tooltip: 'Ambiente de estudo — não faz parte do fluxo de produção' },
   'node:lab_rest':            { rotulo: 'Laboratório REST', tooltip: 'Ambiente de estudo — não faz parte do fluxo de produção' },
+  'node:trigger_mensagem':    { rotulo: 'Mensagem de teste', tooltip: 'Ponto de entrada — injeta a frase digitada no painel de teste' },
 };
 
 function entrada(chave) {
