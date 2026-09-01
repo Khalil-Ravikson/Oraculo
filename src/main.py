@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import traceback
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,12 +25,28 @@ def create_app() -> FastAPI:
     # 1. Configuração imediata de logs (stdout sem buffer para Docker)
     setup_logging(level=settings.LOG_LEVEL)
 
+    # 2. Prometheus Instrumentator (Métricas de RPM e Latência)
+    from prometheus_fastapi_instrumentator import Instrumentator
+    instrumentator = Instrumentator()
+
+    # 3. Ciclo de vida (lifespan) — substitui os @app.on_event, deprecados
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Expõe /metrics (une métricas do FastAPI + métricas de Tokens/Custo)
+        instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
+        await _startup(settings)
+        try:
+            yield
+        finally:
+            _shutdown()
+
     app = FastAPI(
         title       = "Oráculo UEMA",
         description = "Assistente Académico Inteligente da UEMA",
         version     = "5.1.0",
         docs_url    = "/api/docs" if settings.DEV_MODE else None,
         redoc_url   = None,
+        lifespan    = lifespan,
     )
 
     # 1b. Tracing (OpenTelemetry → Jaeger) — NO-OP se ENABLE_TRACING=False
@@ -37,23 +54,11 @@ def create_app() -> FastAPI:
     setup_tracing(service_name="oraculo-api")
     instrument_fastapi(app)
 
-    # 2. Prometheus Instrumentator (Métricas de RPM e Latência)
-    from prometheus_fastapi_instrumentator import Instrumentator
-    instrumentator = Instrumentator().instrument(app)
+    instrumentator.instrument(app)
 
-    # 3. Montagem de ficheiros estáticos e registo de rotas
+    # 4. Montagem de ficheiros estáticos e registo de rotas
     _montar_static(app)
     _registrar_routers(app)
-
-    @app.on_event("startup")
-    async def on_startup():
-        # Expõe /metrics (une métricas do FastAPI + métricas customizadas de Tokens/Custo)
-        instrumentator.expose(app, endpoint="/metrics", include_in_schema=False)
-        await _startup(settings)
-
-    @app.on_event("shutdown")
-    async def on_shutdown():
-        _shutdown()
 
     # ── Rotas de Sistema ──────────────────────────────────────────────────────
 
@@ -117,10 +122,14 @@ async def _startup(settings) -> None:
 
     # 2. IA: Pré-aquecimento de Embeddings e Chain
     try:
+        import asyncio
         from src.rag.embeddings import get_embeddings
-        
-        # Singleton de Embeddings (Google Gemini)
-        _ = get_embeddings().embed_query("teste de aquecimento")
+
+        # Singleton de Embeddings (Google Gemini) — `embed_query` é síncrono e,
+        # com provider google, é chamada de rede (+ retries do tenacity). Roda
+        # em thread pool pra não travar o event loop no boot: o /health e os
+        # outros passos de startup respondem enquanto o modelo aquece.
+        await asyncio.to_thread(lambda: get_embeddings().embed_query("teste de aquecimento"))
         logger.info("✅ Modelo de Embeddings carregado")
         # 🔥 ADICIONE ESTE BLOCO AQUI PARA O PRÉ-AQUECIMENTO DOS WORKERS 👇
         logger.info("⚙️  Fazendo Autodiscovery dos Workers do Cognitive OS...")

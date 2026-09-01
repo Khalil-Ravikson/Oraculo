@@ -43,6 +43,13 @@ router    = APIRouter(prefix="/hub", tags=["Portal Admin"])
 templates = Jinja2Templates(directory="templates")
 
 
+def _nao_autorizado() -> JSONResponse:
+    """Resposta padrão para request sem cookie admin válido nas rotas JSON.
+    HTTP 401 (não 200) — o front continua tratando via `d.error`, mas agora
+    métricas/observabilidade veem o status certo."""
+    return JSONResponse({"error": "Não autorizado"}, status_code=401)
+
+
 def _verificar_cookie(request: Request) -> TokenPayload | None:
     """Verifica cookie admin_token sem lançar exception (para redirects)."""
     token = request.cookies.get("admin_token")
@@ -81,8 +88,9 @@ async def login_submit(
     result = auth.login(username, password)
 
     if not result.sucesso:
+        from urllib.parse import quote
         return RedirectResponse(
-            f"/hub/login?erro={result.erro}",
+            f"/hub/login?erro={quote(result.erro or 'Falha no login')}",
             status_code=302,
         )
 
@@ -93,7 +101,7 @@ async def login_submit(
         max_age=result.expires_in,
         httponly=True,
         samesite="lax",
-        secure=False,  # True em HTTPS produção
+        secure=not settings.DEV_MODE,  # Secure em produção (HTTPS), off em dev (HTTP)
     )
     return response
 
@@ -480,7 +488,7 @@ async def agents_data(request: Request):
     """Endpoint REST para alimentar o catálogo de agentes."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.agents.registry import registry
     from src.capabilities.persistence.agent_config import status_de_todos
@@ -527,7 +535,7 @@ async def agents_toggle(request: Request, name: str, data: AgentToggleRequest):
     """Liga/desliga um agente (admin:agent:{nome}:enabled no Redis)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.agents.registry import registry
     from src.capabilities.persistence.agent_config import set_agent_enabled
@@ -551,7 +559,7 @@ async def agents_set_descricao(request: Request, name: str, data: AgentDescricao
     """Edita a descrição administrável do agente no catálogo Postgres (Sprint 2, Fase 9)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.agents.registry import registry
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -597,7 +605,7 @@ async def agents_set_llm(request: Request, name: str, data: AgentLLMRequest):
     `infrastructure/adapters/llm_factory.py::_override_do_agente`)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     _validos = _providers_registrados()
     if data.llm_provider and data.llm_provider not in _validos:
@@ -659,7 +667,7 @@ async def llm_provider_get(request: Request):
     """Provider global ativo agora (troca em runtime, sem restart)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.infrastructure.adapters.llm_factory import _provider_global_ativo
     return {"provider": _provider_global_ativo(), "opcoes": list(_providers_registrados())}
@@ -671,7 +679,7 @@ async def llm_provider_set(request: Request, data: GlobalLLMProviderRequest):
     sem restart) — afeta toda chamada que não tenha override por agente."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
     _validos = _providers_registrados()
     if data.provider not in _validos:
         return {"error": f"Provedor inválido: {data.provider}. Use um de {_validos}."}
@@ -712,7 +720,7 @@ async def providers_listar(request: Request):
     seed dos 3 nativos na primeira chamada."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.infrastructure.adapters import llm_provider_store, llm_provider_registry
     from src.infrastructure.adapters.llm_factory import _provider_global_ativo
@@ -747,7 +755,7 @@ class ProviderCriarRequest(BaseModel):
 async def providers_criar(request: Request, data: ProviderCriarRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.infrastructure.adapters import llm_provider_store
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -779,7 +787,7 @@ class ProviderToggleRequest(BaseModel):
 async def providers_toggle(request: Request, data: ProviderToggleRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.infrastructure.adapters import llm_provider_store
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -806,7 +814,7 @@ class ProviderRemoverRequest(BaseModel):
 async def providers_remover(request: Request, data: ProviderRemoverRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.infrastructure.adapters import llm_provider_store
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -840,7 +848,7 @@ async def providers_test_connection(request: Request, data: ProviderTestRequest)
     salvar)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     import os as _os
     from src.infrastructure.adapters import llm_provider_registry
@@ -883,7 +891,7 @@ async def channels_listar(request: Request):
     instância atual na primeira chamada."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.services import channel_store
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -919,7 +927,7 @@ class CanalCriarRequest(BaseModel):
 async def channels_criar(request: Request, data: CanalCriarRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.services import channel_store
     from src.infrastructure.security.ssrf_validator import URLInseguraError
@@ -953,7 +961,7 @@ class CanalToggleRequest(BaseModel):
 async def channels_toggle(request: Request, data: CanalToggleRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
     from src.services import channel_store
     from src.infrastructure.database.session import AsyncSessionLocal
     try:
@@ -975,7 +983,7 @@ class CanalRemoverRequest(BaseModel):
 async def channels_remover(request: Request, data: CanalRemoverRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
     from src.services import channel_store
     from src.infrastructure.database.session import AsyncSessionLocal
     try:
@@ -998,7 +1006,7 @@ async def channels_reconnect(request: Request, data: CanalIdRequest):
     """Dispara o QR de pareamento da instância — devolve o base64 para exibir."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
     from src.services import channel_store
     from src.infrastructure.database.session import AsyncSessionLocal
     async with AsyncSessionLocal() as session:
@@ -1018,7 +1026,7 @@ async def channels_webhook(request: Request, data: CanalWebhookRequest):
     """Grava o novo webhook (Postgres + espelho) e tenta aplicá-lo na Evolution."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
     from src.services import channel_store
     from src.infrastructure.security.ssrf_validator import URLInseguraError
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1050,7 +1058,7 @@ async def llm_custo_brl_rate_set(request: Request, data: BrlRateRequest):
     câmbio externa, decisão deliberada, ver plano de observabilidade)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
     if data.taxa <= 0:
         return {"error": "Taxa precisa ser maior que zero."}
 
@@ -1072,7 +1080,7 @@ async def llm_custo_brl_rate_usar_auto(request: Request):
     fallback fixo, se a task `atualizar_taxa_brl` ainda não rodou)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.infrastructure.observability.pricing import _CHAVE_BRL_RATE, taxa_brl_ativa, taxa_brl_origem
     from src.infrastructure.redis_client import get_redis_text
@@ -1103,7 +1111,7 @@ async def llm_custo_page(request: Request):
 async def llm_custo_data(request: Request, horas: int = 24):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.repositories.observability_repository import ObservabilityRepository
@@ -1168,7 +1176,7 @@ async def llm_circuit_reset(request: Request, data: CircuitResetRequest):
     """Zera o disjuntor de falhas de um provedor (fecha o circuito)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
     try:
         from src.infrastructure.adapters import llm_circuit_breaker
         llm_circuit_breaker.registrar_sucesso(data.provider)
@@ -1183,7 +1191,7 @@ async def llm_pricing_data(request: Request):
     """Tabela de preços editável (`llm_pricing`, migration 008)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.repositories.llm_pricing_repository import LlmPricingRepository
@@ -1214,7 +1222,7 @@ async def llm_pricing_set(request: Request, data: LlmPricingRequest):
     override de LLM por agente (`agents_set_llm` acima)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.repositories.llm_pricing_repository import LlmPricingRepository
@@ -1263,7 +1271,7 @@ async def agent_prompt_data(request: Request, name: str):
     """Prompt ativo (Postgres/Redis legado/hardcoded) + histórico de versões."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.agents.registry import registry
     from src.capabilities.persistence.prompt_config import historico, obter_prompt_ativo
@@ -1311,7 +1319,7 @@ class AgentPromptRequest(BaseModel):
 async def agent_prompt_publicar(request: Request, name: str, data: AgentPromptRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.agents.registry import registry
     from src.capabilities.persistence.prompt_config import publicar_novo_prompt
@@ -1340,7 +1348,7 @@ async def agent_prompt_publicar(request: Request, name: str, data: AgentPromptRe
 async def agent_prompt_resetar(request: Request, name: str):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.agents.registry import registry
     from src.capabilities.persistence.prompt_config import resetar_para_padrao
@@ -1380,7 +1388,7 @@ async def capabilities_data(request: Request):
     (`agente_tools`) + servidores MCP cadastrados (para o modal de criação)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.capabilities.registry import manifestos
     from src.capabilities import agent_tools, tool_catalog
@@ -1423,7 +1431,7 @@ async def tools_criar(request: Request, data: ToolCriarRequest):
     URL de ferramenta HTTP passa por validação SSRF antes de gravar."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.capabilities import tool_catalog
     from src.infrastructure.security.ssrf_validator import URLInseguraError
@@ -1457,7 +1465,7 @@ class ToolToggleRequest(BaseModel):
 async def tools_toggle(request: Request, data: ToolToggleRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.capabilities import tool_catalog
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1483,7 +1491,7 @@ class ToolRemoverRequest(BaseModel):
 async def tools_remover(request: Request, data: ToolRemoverRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.capabilities import tool_catalog
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1512,7 +1520,7 @@ async def tools_test(request: Request, data: ToolTestRequest):
     cru — nunca lança (o executor sempre retorna `{ok: bool}`)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.capabilities import tool_catalog, dynamic_tool_executor
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1540,7 +1548,7 @@ async def capabilities_toggle(request: Request, data: CapabilityToggleRequest):
     """Liga/desliga um vínculo agente↔capability."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.capabilities import agent_tools
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1580,7 +1588,7 @@ async def graph_nodes_data(request: Request):
     desabilitado de `graph_node_config` (migration 013)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph.node_registry import get_registry
     from src.graph import node_config, node_health
@@ -1620,7 +1628,7 @@ async def graph_nodes_toggle(request: Request, data: GraphNodeToggleRequest):
     Layer, o nó continua existindo em código)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph.node_registry import get_registry
 
@@ -1658,7 +1666,7 @@ async def mcp_servers_data(request: Request):
     """Servidores MCP cadastrados (`mcp_servers`, migration 014)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1693,7 +1701,7 @@ async def mcp_servers_register(request: Request, data: McpServerRegisterRequest)
     da variável de ambiente do segredo (nunca o valor)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph import mcp_server_registry
     from src.infrastructure.security.ssrf_validator import URLInseguraError
@@ -1728,7 +1736,7 @@ async def mcp_servers_test(request: Request, data: McpServerNameRequest):
     """Conecta no servidor, mede latência e lista as ferramentas expostas."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1749,7 +1757,7 @@ async def mcp_servers_sync(request: Request, data: McpServerNameRequest):
     — ficam disponíveis para vincular a um agente em /hub/capabilities."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1773,7 +1781,7 @@ class McpServerToggleRequest(BaseModel):
 async def mcp_servers_toggle(request: Request, data: McpServerToggleRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1799,7 +1807,7 @@ class McpServerRemoveRequest(BaseModel):
 async def mcp_servers_remove(request: Request, data: McpServerRemoveRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1836,7 +1844,7 @@ async def graph_studio_nodes(request: Request):
     /hub/graph-nodes, formato reduzido (só o que o canvas precisa)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph.node_registry import get_registry
 
@@ -1849,7 +1857,7 @@ async def graph_studio_reference(request: Request):
     `supervisor.py` + `route_registry`, não é editável nem executável."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
     from src.graph.reference_flows import como_json
     return {"fluxos": como_json()}
 
@@ -1859,7 +1867,7 @@ async def graph_studio_topologies(request: Request):
     """Topologias salvas (`graph_topology`, migration 015)."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph import topology_registry
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1893,7 +1901,7 @@ async def graph_studio_save(request: Request, data: GraphTopologySaveRequest):
     erros de validação sem gravar nada se a topologia for inválida."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph import topology_registry
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1927,7 +1935,7 @@ class GraphTopologyRemoveRequest(BaseModel):
 async def graph_studio_remove(request: Request, data: GraphTopologyRemoveRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph import topology_registry
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1966,7 +1974,7 @@ async def graph_studio_test(request: Request, data: GraphTestRequest):
     exigindo `FEATURE_GRAPH_EXECUTOR_PILOTO` — não implementada aqui."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.graph.graph_executor import (
         executar_topologia_salva, executar_topologia_sandbox,
@@ -2017,7 +2025,7 @@ async def infra_storage_page(request: Request):
 async def infra_storage_data(request: Request):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.infrastructure.observability import storage_health
 
@@ -2046,7 +2054,7 @@ async def infra_health_page(request: Request):
 async def infra_health_data(request: Request):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
     from src.infrastructure.observability import system_health
     return await system_health.coletar()
 
@@ -2057,7 +2065,7 @@ async def infra_redis_recriar_indices(request: Request):
     sumiu. NÃO apaga nem restaura dados. Ação segura."""
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
 
     from src.infrastructure.observability import storage_health
 
@@ -2089,7 +2097,7 @@ async def infra_search_page(request: Request):
 async def infra_search_data(request: Request):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
     from src.infrastructure.observability import search_health
     return {"indices": search_health.listar_indices()}
 
@@ -2103,7 +2111,7 @@ class BuscaTesteRequest(BaseModel):
 async def infra_search_test(request: Request, data: BuscaTesteRequest):
     payload = _verificar_cookie(request)
     if not payload:
-        return {"error": "Não autorizado"}
+        return _nao_autorizado()
     from src.infrastructure.observability import search_health
     return await search_health.testar_busca(data.query, min(max(data.k, 1), 20))
 
@@ -2553,6 +2561,17 @@ async def eval_query(request: Request):
             history=""
         )
 
+        crag = getattr(result, "crag_score", None)
+        await queue.put(json.dumps({
+            "tipo": "metricas",
+            "rota": getattr(result, "rota", "GERAL"),
+            "crag_score": round(crag, 3) if isinstance(crag, (int, float)) else None,
+            "tokens_total": getattr(result, "tokens_used", 0),
+            "tokens_entrada": 0,
+            "tokens_saida": getattr(result, "tokens_used", 0),
+            "latencia_ms": getattr(result, "total_ms", 0),
+        }))
+
         await queue.put(json.dumps({
             "tipo": "resposta",
             "texto": result.answer,
@@ -2562,72 +2581,18 @@ async def eval_query(request: Request):
 
         await queue.put(json.dumps({"tipo": "done"}))
 
-        step_queue: asyncio.Queue = asyncio.Queue()
+    async def _run_guarded():
+        try:
+            await _run()
+        except Exception as exc:
+            logger.exception("❌ [EVAL] /query _run falhou: %s", exc)
+            try:
+                await queue.put(json.dumps({"tipo": "error", "msg": str(exc)[:200]}))
+                await queue.put(json.dumps({"tipo": "done"}))
+            except Exception:
+                pass
 
-        async def forward_steps():
-            while True:
-                step = await step_queue.get()
-                if step.name == "DONE":
-                    break
-                frontend_id = _STEP_MAP.get(step.name)
-                if frontend_id is None:
-                    continue
-
-                if step.status == "running":
-                    await queue.put(json.dumps({
-                        "tipo": "step_start", "step": frontend_id
-                    }))
-                elif step.status in ("ok", "skip", "error"):
-                    badge = "ok" if step.status == "ok" else step.status
-                    if step.name == "transform_query" and step.status == "ok":
-                        badge = "transformed"
-                    await queue.put(json.dumps({
-                        "tipo": "step_result", "step": frontend_id,
-                        "resultado": step.detail[:100],
-                        "badge": badge,
-                        "ms": step.latency_ms,
-                    }))
-
-                    if step.name == "retrieve" and step.data:
-                        for chunk in step.data.get("chunks_preview", []):
-                            await queue.put(json.dumps({
-                                "tipo": "chunk_rag",
-                                "source": chunk.get("source", ""),
-                                "score": round(chunk.get("rrf_score", 0), 4),
-                                "preview": chunk.get("content", "")[:150],
-                            }))
-
-        forwarder = asyncio.create_task(forward_steps())
-
-        result = await chain.invoke(
-            message=pergunta,
-            session_id=session_id,
-            user_context={"nome": "Admin Live", "role": "admin"},
-            debug_queue=step_queue,
-        )
-
-        await forwarder
-
-        await queue.put(json.dumps({
-            "tipo": "resposta",
-            "texto": result.answer,
-            "fonte": result.route,
-            "tokens": result.tokens_used,
-        }))
-
-        await queue.put(json.dumps({
-            "tipo": "metricas",
-            "rota": result.route,
-            "crag_score": round(result.crag_score, 3),
-            "tokens_total": result.tokens_used,
-            "tokens_entrada": 0,
-            "tokens_saida": result.tokens_used,
-            "latencia_ms": result.total_ms,
-        }))
-
-        await queue.put(json.dumps({"tipo": "done"}))
-
-    asyncio.create_task(_run())
+    asyncio.create_task(_run_guarded())
 
     async def generator():
         while True:

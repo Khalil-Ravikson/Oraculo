@@ -37,6 +37,10 @@ tmp/
 *.pdf
 *.csv
 
+# Clone local do fonte da Evolution API (repo próprio, com .git aninhado —
+# usado só como referência local, não faz parte deste projeto)
+evolution-api/
+
 # Backups
 .oraculo_backup_*
 

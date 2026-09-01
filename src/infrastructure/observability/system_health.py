@@ -10,6 +10,7 @@ derruba o painel.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -18,12 +19,20 @@ _ESTADO_CIRCUITO = {"fechado": "operacional", "meio_aberto": "testando recupera�
 
 
 async def coletar() -> dict:
+    # `_provedores`/`_componentes`/`_filas` fazem I/O síncrono (Redis, broadcast
+    # Celery) — rodam em thread pool pra não travar o event loop da API
+    # (`_filas` sozinho segura o loop por até 3s no `control.ping`).
+    provedores, componentes, filas = await asyncio.gather(
+        asyncio.to_thread(_provedores),
+        asyncio.to_thread(_componentes),
+        asyncio.to_thread(_filas),
+    )
     return {
-        "provedores": _provedores(),
-        "componentes": _componentes(),
+        "provedores": provedores,
+        "componentes": componentes,
         "mcp": await _mcp(),
         "bancos": await _bancos(),
-        "filas": _filas(),
+        "filas": filas,
         "flags_laboratorio": _flags(),
     }
 
@@ -113,8 +122,10 @@ async def _bancos() -> dict:
 def _filas() -> dict:
     try:
         from src.infrastructure.celery_app import celery_app
-        result = celery_app.control.ping(timeout=3)
-        workers = list(result[0].keys()) if result else []
+        # `ping` volta como lista de pacotes [{worker: {...}}, ...] — cada
+        # worker pode responder num pacote separado, então junta todos.
+        result = celery_app.control.ping(timeout=3) or []
+        workers = sorted({nome for pacote in result for nome in pacote})
         return {"estado": "operacional" if workers else "sem resposta", "workers": workers}
     except Exception as exc:  # noqa: BLE001
         return {"estado": "erro", "erro": str(exc)[:150], "workers": []}

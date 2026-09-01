@@ -134,7 +134,14 @@ services:
     volumes:
       - redis_data:/data
     environment:
-      REDIS_ARGS: "--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru"
+      # volatile-lru (não allkeys-lru): sob pressão de memória o Redis só
+      # pode evictar chaves COM TTL (working memory, semantic cache). As
+      # chaves sem TTL — índice RediSearch dos chunks (RAG) e checkpoints do
+      # LangGraph (AsyncRedisSaver, db0) — ficam protegidas; allkeys-lru
+      # evictava essas em silêncio, corrompendo busca e perdendo estado de
+      # funil/HITL. maxmemory 768mb: folga sobre os 512mb antigos (o
+      # container tem mem_limit 1024m; redis-stack usa ~120-150mb de base).
+      REDIS_ARGS: "--appendonly yes --maxmemory 768mb --maxmemory-policy volatile-lru"
     ports:
       - "8001:8001"
     healthcheck:

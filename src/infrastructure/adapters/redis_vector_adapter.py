@@ -324,14 +324,18 @@ class RedisVLVectorAdapter(IVectorStorePort):
             k_text        = k,
             source_filter = source_filter,
         )
-        # Divide os resultados para manter compatibilidade com RetrieveContextUseCase
-        metade = len(resultados) // 2
-        return {
-            "vetorial": [{"id": r["id"], "content": r["content"], "source": r["source"]}
-                         for r in resultados[:metade or len(resultados)]],
-            "textual":  [{"id": r["id"], "content": r["content"], "source": r["source"]}
-                         for r in resultados[metade:]],
-        }
+        # `buscar_hibrido` já devolve a lista FUNDIDA (RRF do RedisVL) e
+        # ordenada por relevância. NÃO cortar no meio pra fingir duas listas —
+        # isso descartava o `combined_score` e embaralhava o ranking quando o
+        # `RetrieveContextUseCase` refazia RRF sobre metades arbitrárias.
+        # Entregamos a lista única já ordenada em `vetorial`; a re-fusão do
+        # use case sobre uma lista só preserva a ordem 1:1.
+        itens = [
+            {"id": r["id"], "content": r["content"], "source": r["source"],
+             "doc_type": r.get("doc_type", ""), "rrf_score": r.get("rrf_score", 0.0)}
+            for r in resultados
+        ]
+        return {"vetorial": itens, "textual": []}
 
     # ── Utilitários internos ───────────────────────────────────────────────────
 
@@ -360,18 +364,23 @@ class RedisVLVectorAdapter(IVectorStorePort):
         Normaliza o output do RedisVL para o formato esperado pelos consumers.
         O RedisVL retorna dicts com chaves do schema + score fields.
         """
+        # HybridQuery devolve `combined_score` (MAIOR = melhor);
+        # VectorQuery devolve `vector_distance` (MENOR = melhor). Antes isto
+        # jogava os dois no mesmo campo e ordenava decrescente — o que
+        # invertia a busca vetorial pura (retornava o pior match primeiro).
+        modo_distancia = bool(results) and "vector_distance" in results[0] and "combined_score" not in results[0]
+
         normalizados = []
         for doc in results:
+            bruto = doc.get("combined_score", doc.get("vector_distance", 0.0))
             normalizados.append({
                 "id":          doc.get("id", ""),
                 "content":     doc.get("content", ""),
                 "source":      doc.get("source", ""),
                 "doc_type":    doc.get("doc_type", ""),
                 "chunk_index": doc.get("chunk_index", 0),
-                # HybridQuery usa combined_score; VectorQuery usa vector_distance
-                "rrf_score":   float(doc.get("combined_score",
-                               doc.get("vector_distance", 0.0))),
+                "rrf_score":   float(bruto),
             })
-        # Ordena por score decrescente (maior = mais relevante)
-        normalizados.sort(key=lambda x: x["rrf_score"], reverse=True)
+        # distância → crescente (menor primeiro); score → decrescente.
+        normalizados.sort(key=lambda x: x["rrf_score"], reverse=not modo_distancia)
         return normalizados

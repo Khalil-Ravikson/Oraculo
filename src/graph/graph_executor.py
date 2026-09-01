@@ -146,6 +146,7 @@ class GraphExecutor:
         if ordem is None:
             res.ok = False
             res.erros = ["Topologia tem ciclo — não é possível executar."]
+            res.duracao_ms = int((time.monotonic() - t0) * 1000)
             return res
         res.ordem = ordem
 
@@ -161,10 +162,26 @@ class GraphExecutor:
             if e.get("target_node") in entradas:
                 entradas[e["target_node"]].append((e["source_node"], e["source_port"], e["target_port"]))
 
+        # nós que não vão produzir saída utilizável: desabilitados, com erro,
+        # ou que dependem (mesmo transitivamente) de um desses. Um nó a jusante
+        # de um pulado NÃO deve executar com input faltando — é pulado também.
+        bloqueados: set[str] = set()
+
         async def _rodar_nos() -> None:
             for node_id in ordem:
                 if node_id in self.desabilitados:
                     res.eventos.append({"tipo": "pulado", "node": node_id, "motivo": "componente desativado"})
+                    bloqueados.add(node_id)
+                    continue
+
+                fontes = {src for src, _sp, _tp in entradas[node_id]}
+                fontes_bloqueadas = fontes & bloqueados
+                if fontes_bloqueadas:
+                    res.eventos.append({
+                        "tipo": "pulado", "node": node_id,
+                        "motivo": f"depende de componente pulado ({', '.join(sorted(fontes_bloqueadas))})",
+                    })
+                    bloqueados.add(node_id)
                     continue
 
                 node = self.registry.get(node_id)
@@ -205,7 +222,10 @@ class GraphExecutor:
                     res.ok = False
                     res.erros.append(f"{node_id}: {exc}")
                     res.eventos.append({"tipo": "erro", "node": node_id, "erro": str(exc)[:200]})
-                    break
+                    # não aborta o fluxo todo: marca como bloqueado pra os nós
+                    # a jusante serem pulados, mas deixa ramos paralelos rodarem.
+                    bloqueados.add(node_id)
+                    continue
 
         try:
             if real:

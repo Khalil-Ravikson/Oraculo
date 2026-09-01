@@ -38,7 +38,7 @@ def get_embeddings():
     provider = os.getenv("EMBEDDING_PROVIDER", "google").lower()
 
     if provider == "google":
-        logger.info("☁️ Iniciando modelo de Embeddings na Nuvem: Google Gemini (models/embedding-001)...")
+        logger.info("☁️ Iniciando modelo de Embeddings na Nuvem: Google Gemini (models/gemini-embedding-001, 3072-dim)...")
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
         
         model = GoogleGenerativeAIEmbeddings(
