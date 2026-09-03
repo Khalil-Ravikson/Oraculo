@@ -142,7 +142,7 @@ async def _executar_http(config: dict, args: dict) -> dict[str, Any]:
 
 async def _mcp_server(nome: str) -> dict | None:
     """Registro de um servidor de `mcp_servers`, só se cadastrado E habilitado."""
-    from src.graph import mcp_server_registry
+    from src.graph_studio import mcp_server_registry
     async with AsyncSessionLocal() as session:
         for s in await mcp_server_registry.listar(session):
             if s["name"] == nome and s["habilitado"]:
@@ -155,7 +155,7 @@ async def _executar_mcp(config: dict, args: dict) -> dict[str, Any]:
 
     from mcp import ClientSession
     from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
-    from src.graph.mcp_server_registry import _auth_headers
+    from src.graph_studio.mcp_server_registry import _auth_headers
 
     servidor = config["servidor"]
     reg = await _mcp_server(servidor)

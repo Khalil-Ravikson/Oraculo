@@ -62,8 +62,8 @@ def _provedores() -> list[dict]:
 
 def _componentes() -> list[dict]:
     try:
-        from src.graph import node_health
-        from src.graph.node_registry import get_registry
+        from src.graph_studio import node_health
+        from src.graph_studio.node_registry import get_registry
         out = []
         for n in get_registry().list_nodes():
             s = node_health.resolver(n["type"])
@@ -82,7 +82,7 @@ def _componentes() -> list[dict]:
 
 async def _mcp() -> list[dict]:
     try:
-        from src.graph import mcp_server_registry
+        from src.graph_studio import mcp_server_registry
         from src.infrastructure.database.session import AsyncSessionLocal
         async with AsyncSessionLocal() as s:
             servidores = await mcp_server_registry.listar(s)

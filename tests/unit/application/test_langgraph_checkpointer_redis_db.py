@@ -47,7 +47,7 @@ async def test_get_graph_usa_mesma_db_do_redis_url_pro_checkpointer(monkeypatch)
     async_redis_saver_cls.from_conn_string = MagicMock(return_value=saver_cm)
 
     with patch("langgraph.checkpoint.redis.aio.AsyncRedisSaver", async_redis_saver_cls), \
-         patch("langgraph_experiment.graph.build_graph", return_value="grafo-fake"):
+         patch("src.application.orchestration.builder.build_graph", return_value="grafo-fake"):
         graph = await dlg._get_graph()
 
     assert graph == "grafo-fake"

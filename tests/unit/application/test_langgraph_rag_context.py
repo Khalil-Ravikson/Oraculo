@@ -10,8 +10,8 @@ evita as chamadas de RAG/síntese por completo.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from langgraph_experiment.state import OraculoState
-from langgraph_experiment.nodes import responder_rag_direto, rag_node
+from src.application.orchestration.state import OraculoState
+from src.application.orchestration.nodes import responder_rag_direto, rag_node
 from src.application.runtime.dispatcher_langgraph import _reset_payload_para_rota
 
 
@@ -143,7 +143,7 @@ async def test_rag_node_le_contexto_do_state():
         rota="EDITAL", history="hist", fatos=["fato1"],
     )
     with patch(
-        "langgraph_experiment.nodes.responder_rag_direto",
+        "src.application.orchestration.nodes.responder_rag_direto",
         new_callable=AsyncMock, return_value="resposta",
     ) as mock_responder:
         result = await rag_node(state)

@@ -29,7 +29,7 @@ class DispatchTarget(Enum):
 
 
 @dataclass
-class RouterDecision:
+class GatekeeperDecision:
     target:    DispatchTarget
     command:   str = ""          # ex: "M", "CR", "L" para admin; "5" para público
     text:      str = ""          # texto limpo para LLM
@@ -39,7 +39,7 @@ class RouterDecision:
 class MessageRouter:
     """
     Stateless. Recebe dados da mensagem + contexto Redis/DB
-    e retorna RouterDecision.
+    e retorna GatekeeperDecision.
     """
 
     # ── Padrões de trigger ────────────────────────────────────────────────────
@@ -62,54 +62,54 @@ class MessageRouter:
         allowed_group_jid: str,
         remote_jid:    str,
         is_dev: bool = False
-    ) -> RouterDecision:
+    ) -> GatekeeperDecision:
 
         # ── 0. TRAVA DE SEGURANÇA (MODO BETA) ─────────────────────────────────
         # Se a mensagem for num grupo, mas NÃO for o grupo oficial de testes -> BLOQUEIA
         if is_group and remote_jid != allowed_group_jid:
-            return RouterDecision(DispatchTarget.IGNORE, reason="grupo_estranho_ignorado")
+            return GatekeeperDecision(DispatchTarget.IGNORE, reason="grupo_estranho_ignorado")
 
         # Se a mensagem for no PRIVADO, mas a pessoa NÃO FOR ADMIN -> BLOQUEIA
         if not is_group and not is_admin:
-            return RouterDecision(DispatchTarget.IGNORE, reason="privado_bloqueado_no_beta")
+            return GatekeeperDecision(DispatchTarget.IGNORE, reason="privado_bloqueado_no_beta")
 
         # ── 1. Funil de Cadastro (Máxima Prioridade) ─────────────────────────
         if in_register_mode:
             # Mensagem é parte do fluxo de cadastro — não roteia para outros targets
-            return RouterDecision(DispatchTarget.REGISTER_MODE, text=text)
+            return GatekeeperDecision(DispatchTarget.REGISTER_MODE, text=text)
 
         if not is_registered:
-            return RouterDecision(DispatchTarget.REGISTER_MODE, text=text)
+            return GatekeeperDecision(DispatchTarget.REGISTER_MODE, text=text)
 
         # ── 2. Gatilhos dentro do Grupo Permitido ─────────────────────────────
         if is_group:
             # Dentro do grupo: só responde a comandos ($, !) ou se o bot for mencionado (@oraculo)
             if not (text.startswith("$") or text.startswith("!") or
                     self._RE_MENTION.search(text)):
-                return RouterDecision(DispatchTarget.IGNORE, reason="sem_trigger_grupo")
+                return GatekeeperDecision(DispatchTarget.IGNORE, reason="sem_trigger_grupo")
 
         # ── 3. Mensagem inútil em privado ─────────────────────────────────────
         if not is_group and self._RE_USELESS.match(text):
-            return RouterDecision(DispatchTarget.IGNORE, reason="mensagem_inutil")
+            return GatekeeperDecision(DispatchTarget.IGNORE, reason="mensagem_inutil")
 
         # ── 4. Admin Commands ($) — não requer cadastro ───────────────────────
         if text.startswith("$"):
             if not is_admin:
-                return RouterDecision(DispatchTarget.IGNORE, reason="nao_e_admin")
+                return GatekeeperDecision(DispatchTarget.IGNORE, reason="nao_e_admin")
             m = self._RE_ADMIN_CMD.match(text)
             if m:
-                return RouterDecision(
+                return GatekeeperDecision(
                     DispatchTarget.ADMIN_COMMAND,
                     command=m.group(1).upper(),
                     text=(m.group(2) or "").strip(),
                 )
-            return RouterDecision(DispatchTarget.IGNORE, reason="admin_cmd_invalido")
+            return GatekeeperDecision(DispatchTarget.IGNORE, reason="admin_cmd_invalido")
 
         # ── 5. Public Commands (!) ────────────────────────────────────────────
         if text.startswith("!"):
             m = self._RE_PUBLIC_CMD.match(text)
             if m:
-                return RouterDecision(
+                return GatekeeperDecision(
                     DispatchTarget.PUBLIC_COMMAND,
                     command=m.group(1).lower(),
                     text=(m.group(2) or "").strip(),
@@ -118,6 +118,6 @@ class MessageRouter:
         # ── 6. LLM — @oraculo em grupo OU texto livre em privado ─────────────
         clean_text = self._RE_MENTION.sub("", text).strip()
         if not clean_text:
-            return RouterDecision(DispatchTarget.IGNORE, reason="texto_vazio_apos_mention")
+            return GatekeeperDecision(DispatchTarget.IGNORE, reason="texto_vazio_apos_mention")
 
-        return RouterDecision(DispatchTarget.LLM, text=clean_text)
+        return GatekeeperDecision(DispatchTarget.LLM, text=clean_text)

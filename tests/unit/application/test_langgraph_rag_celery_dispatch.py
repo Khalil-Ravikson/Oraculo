@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from langgraph_experiment.nodes import responder_rag_direto
+from src.application.orchestration.nodes import responder_rag_direto
 
 
 def _mock_async_result(retorno=None, excecao=None):

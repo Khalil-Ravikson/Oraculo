@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from langgraph.types import Command
 
-from langgraph_experiment.graph import build_graph
+from src.application.orchestration.builder import build_graph
 import src.application.runtime.dispatcher_langgraph as dlg
 from src.router.contracts import RouterDecision
 
@@ -246,7 +246,7 @@ async def test_dispatcher_detour_institucional_preserva_ticket(monkeypatch):
     async def _fake_rag(mensagem: str, **kwargs) -> str:
         return "A UEMA foi fundada em 1981."
 
-    monkeypatch.setattr("langgraph_experiment.nodes.responder_rag_direto", _fake_rag)
+    monkeypatch.setattr("src.application.orchestration.nodes.responder_rag_direto", _fake_rag)
 
     session_id = "test_dispatcher_detour"
     r0 = await dlg.processar("abrir chamado", session_id, {})

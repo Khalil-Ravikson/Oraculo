@@ -18,13 +18,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from langgraph_experiment.nodes import (
+from src.application.orchestration.nodes import (
     check_status_node,
     greeting_node,
     media_download_node,
     sigaa_node,
 )
-from langgraph_experiment.state import OraculoState
+from src.application.orchestration.state import OraculoState
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1392,7 +1392,7 @@ async def capabilities_data(request: Request):
 
     from src.capabilities.registry import manifestos
     from src.capabilities import agent_tools, tool_catalog
-    from src.graph import mcp_server_registry
+    from src.graph_studio import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
 
     bindings, painel_tools, mcp_servers_lista = [], [], []
@@ -1590,8 +1590,8 @@ async def graph_nodes_data(request: Request):
     if not payload:
         return _nao_autorizado()
 
-    from src.graph.node_registry import get_registry
-    from src.graph import node_config, node_health
+    from src.graph_studio.node_registry import get_registry
+    from src.graph_studio import node_config, node_health
     from src.infrastructure.database.session import AsyncSessionLocal
 
     nos = get_registry().list_nodes()
@@ -1630,12 +1630,12 @@ async def graph_nodes_toggle(request: Request, data: GraphNodeToggleRequest):
     if not payload:
         return _nao_autorizado()
 
-    from src.graph.node_registry import get_registry
+    from src.graph_studio.node_registry import get_registry
 
     if get_registry().get(data.node_id) is None:
         return {"error": f"Nó '{data.node_id}' não existe no registry."}
 
-    from src.graph import node_config
+    from src.graph_studio import node_config
     from src.infrastructure.database.session import AsyncSessionLocal
 
     try:
@@ -1668,7 +1668,7 @@ async def mcp_servers_data(request: Request):
     if not payload:
         return _nao_autorizado()
 
-    from src.graph import mcp_server_registry
+    from src.graph_studio import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
 
     servidores = []
@@ -1703,7 +1703,7 @@ async def mcp_servers_register(request: Request, data: McpServerRegisterRequest)
     if not payload:
         return _nao_autorizado()
 
-    from src.graph import mcp_server_registry
+    from src.graph_studio import mcp_server_registry
     from src.infrastructure.security.ssrf_validator import URLInseguraError
     from src.infrastructure.database.session import AsyncSessionLocal
 
@@ -1738,7 +1738,7 @@ async def mcp_servers_test(request: Request, data: McpServerNameRequest):
     if not payload:
         return _nao_autorizado()
 
-    from src.graph import mcp_server_registry
+    from src.graph_studio import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
 
     try:
@@ -1759,7 +1759,7 @@ async def mcp_servers_sync(request: Request, data: McpServerNameRequest):
     if not payload:
         return _nao_autorizado()
 
-    from src.graph import mcp_server_registry
+    from src.graph_studio import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
 
     try:
@@ -1783,7 +1783,7 @@ async def mcp_servers_toggle(request: Request, data: McpServerToggleRequest):
     if not payload:
         return _nao_autorizado()
 
-    from src.graph import mcp_server_registry
+    from src.graph_studio import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
 
     try:
@@ -1809,7 +1809,7 @@ async def mcp_servers_remove(request: Request, data: McpServerRemoveRequest):
     if not payload:
         return _nao_autorizado()
 
-    from src.graph import mcp_server_registry
+    from src.graph_studio import mcp_server_registry
     from src.infrastructure.database.session import AsyncSessionLocal
 
     try:
@@ -1846,7 +1846,7 @@ async def graph_studio_nodes(request: Request):
     if not payload:
         return _nao_autorizado()
 
-    from src.graph.node_registry import get_registry
+    from src.graph_studio.node_registry import get_registry
 
     return {"nodes": get_registry().list_nodes()}
 
@@ -1858,7 +1858,7 @@ async def graph_studio_reference(request: Request):
     payload = _verificar_cookie(request)
     if not payload:
         return _nao_autorizado()
-    from src.graph.reference_flows import como_json
+    from src.graph_studio.reference_flows import como_json
     return {"fluxos": como_json()}
 
 
@@ -1869,7 +1869,7 @@ async def graph_studio_topologies(request: Request):
     if not payload:
         return _nao_autorizado()
 
-    from src.graph import topology_registry
+    from src.graph_studio import topology_registry
     from src.infrastructure.database.session import AsyncSessionLocal
 
     topologias = []
@@ -1903,7 +1903,7 @@ async def graph_studio_save(request: Request, data: GraphTopologySaveRequest):
     if not payload:
         return _nao_autorizado()
 
-    from src.graph import topology_registry
+    from src.graph_studio import topology_registry
     from src.infrastructure.database.session import AsyncSessionLocal
 
     try:
@@ -1937,7 +1937,7 @@ async def graph_studio_remove(request: Request, data: GraphTopologyRemoveRequest
     if not payload:
         return _nao_autorizado()
 
-    from src.graph import topology_registry
+    from src.graph_studio import topology_registry
     from src.infrastructure.database.session import AsyncSessionLocal
 
     try:
@@ -1976,7 +1976,7 @@ async def graph_studio_test(request: Request, data: GraphTestRequest):
     if not payload:
         return _nao_autorizado()
 
-    from src.graph.graph_executor import (
+    from src.graph_studio.graph_executor import (
         executar_topologia_salva, executar_topologia_sandbox,
     )
 

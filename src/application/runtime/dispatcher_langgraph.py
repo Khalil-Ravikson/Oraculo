@@ -94,7 +94,7 @@ async def _get_graph():
 
         from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 
-        from langgraph_experiment.graph import build_graph
+        from src.application.orchestration.builder import build_graph
         from src.infrastructure.settings import settings
 
         # Decisão 04 (Fase 2c) tentou isolar o checkpointer numa DB Redis
@@ -340,7 +340,7 @@ async def processar(
 
     # ── 0. Retomada de um interrupt() pendente (funil de ticket/CRUD em andamento) ──
     if state.next:
-        from langgraph_experiment.nodes import VALIDATORS_POR_NODE, _eh_saida, responder_rag_direto
+        from src.application.orchestration.nodes import VALIDATORS_POR_NODE, _eh_saida, responder_rag_direto
 
         node_pendente = state.next[0]
         # Comando de saída ("sair"/"cancelar"/...) tem prioridade sobre o

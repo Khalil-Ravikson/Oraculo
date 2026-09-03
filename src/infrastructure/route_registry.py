@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 _PREFIXO_REDIS = "route:"
 
 # Valores válidos de `entrypoint_node` = as chaves do dict de conditional edges
-# em `langgraph_experiment/graph.py::build_graph()` (o que vira `state.route`).
+# em `src/application/orchestration/builder.py::build_graph()` (o que vira `state.route`).
 NODES_ENTRYPOINT: frozenset[str] = frozenset({
     "rag", "ticket", "crud", "greeting", "sigaa", "media_download", "check_status",
 })
