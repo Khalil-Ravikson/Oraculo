@@ -415,8 +415,7 @@ async def processar(
 
     decision = await rotear(message, session_id, user_context)
 
-    from src.infrastructure import route_registry
-    from src.infrastructure.settings import settings
+    from src.infrastructure import dynamic_config, route_registry
 
     rr = route_registry.get(decision.rota)
 
@@ -442,7 +441,12 @@ async def processar(
                 cache_hit=False, total_ms=ms, status="ok",
             )
 
-    if rr.delega_para_legado(settings.FEATURE_LANGGRAPH_NATIVE_ROUTES) \
+    # `FEATURE_LANGGRAPH_NATIVE_ROUTES` agora é config dinâmica (ADR 0008):
+    # dá pra ligar/desligar em `/hub/config` e validar as 4 rotas condicionais
+    # pelo `/hub/chat`, sem editar `.env` nem reiniciar. Default (nada gravado)
+    # = `settings.FEATURE_LANGGRAPH_NATIVE_ROUTES` (False).
+    native_routes = dynamic_config.get_bool("FEATURE_LANGGRAPH_NATIVE_ROUTES")
+    if rr.delega_para_legado(native_routes) \
             or rr.entrypoint_node not in route_registry.NODES_ENTRYPOINT:
         # Delega inteiro pro pipeline original. `decision_pronta=decision`:
         # bug real corrigido (log de produção) — sem isso `dispatcher.py`

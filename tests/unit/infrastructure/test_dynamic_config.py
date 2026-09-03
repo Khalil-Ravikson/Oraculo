@@ -144,7 +144,8 @@ def test_snapshot_marca_chaves_nao_reconectadas():
     snap = {c["chave"]: c for c in dc.snapshot([])}
     assert snap["GEMINI_MODEL"]["reconectada"] is True
     assert snap["RAG_RERANKER_ENABLED"]["reconectada"] is True
-    assert snap["FEATURE_LANGGRAPH_NATIVE_ROUTES"]["reconectada"] is False
+    # ADR 0008: `orchestration/entrypoint.py` passou a ler via `get_bool`.
+    assert snap["FEATURE_LANGGRAPH_NATIVE_ROUTES"]["reconectada"] is True
     assert snap["DEV_TEST_NO_DB_WRITE"]["reconectada"] is False
     # chaves não gravadas: versao 0 + valor = default
     assert snap["GEMINI_MODEL"]["versao"] == 0

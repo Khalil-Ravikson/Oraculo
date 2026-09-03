@@ -69,6 +69,10 @@ _FALSOS = {"0", "false", "f", "no", "off", "nao", "não"}
 CHAVES_RECONECTADAS: frozenset[str] = frozenset({
     "GEMINI_MODEL", "RAG_CACHE_TTL_SECONDS", "RAG_RERANKER_ENABLED",
     "PARSER_PDF_PRIORIDADE", "PARSER_DESABILITADOS",
+    # ADR 0008: `orchestration/entrypoint.py` lê via `get_bool` — dá pra
+    # ligar/desligar no `/hub/config` e validar as 4 rotas condicionais pelo
+    # `/hub/chat` sem reiniciar.
+    "FEATURE_LANGGRAPH_NATIVE_ROUTES",
 })
 
 
