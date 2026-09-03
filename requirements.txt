@@ -47,8 +47,8 @@ scikit-learn>=1.3.0
 # Só o SDK/API/exporter genéricos + FastAPI (instrumentação automática,
 # isolada via middleware). Celery NÃO usa instrumentação automática de
 # propósito — este projeto tem signals customizados frágeis de event loop
-# persistente por worker (ver celery_app.py, achados do experimento
-# LangGraph); spans de Celery são criados à mão nos pontos já existentes
+# persistente por worker (ver celery_app.py); spans de Celery são criados à
+# mão nos pontos já existentes
 # de telemetria de custo (llm_factory.py/audio_service.py/process_message_task.py)
 # em vez de um instrumentador global que poderia colidir com esses signals.
 opentelemetry-api>=1.25.0
@@ -56,13 +56,13 @@ opentelemetry-sdk>=1.25.0
 opentelemetry-exporter-otlp-proto-grpc>=1.25.0
 opentelemetry-instrumentation-fastapi>=0.46b0
 
-# ── LangGraph e Persistência (habilitado só na branch/worktree `langgraph`
-# — experimento isolado, ver .claude.md do main "Sem LangGraph" e
-# langgraph_experiment/__init__.py) ────────────────────────
+# ── LangGraph e Persistência (orquestrador de produção, ADR 0008 —
+# src/application/orchestration/) ────────────────────────
 langgraph>=1.0.0
 # Pinado em vez de >=: área de resumption de múltiplos interrupts pendentes
-# tem histórico de bugs abertos recentes no pacote (ver langgraph_experiment/
-# nodes.py e .claude.md) — não deixar flutuar pra uma versão não testada.
+# tem histórico de bugs abertos recentes no pacote (ver
+# src/application/orchestration/entrypoint.py e .claude.md) — não deixar
+# flutuar pra uma versão não testada.
 langgraph-checkpoint-redis==0.5.1
 
 # ── Laboratório REST (habilitado só na branch/worktree `research/rest-mcp-estudos`

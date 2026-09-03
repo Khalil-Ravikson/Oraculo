@@ -24,13 +24,19 @@ def _load_seed(nome: str):
     return list(mod._SEED)
 
 
-# Seed acumulado das migrations que alimentam config_dinamica.
+# Seed acumulado das migrations que alimentam config_dinamica, menos as chaves
+# que migrations posteriores removem (ADR 0008 Fase 3 apaga
+# FEATURE_LANGGRAPH_NATIVE_ROUTES).
+_REMOVIDAS = {"FEATURE_LANGGRAPH_NATIVE_ROUTES"}
 SEED_009 = _load_seed("009_config_dinamica.py")
-SEED_TODAS = (
-    SEED_009
-    + _load_seed("011_config_parser.py")
-    + _load_seed("020_config_graph_executor.py")
-)
+SEED_TODAS = [
+    row for row in (
+        SEED_009
+        + _load_seed("011_config_parser.py")
+        + _load_seed("020_config_graph_executor.py")
+    )
+    if row[0] not in _REMOVIDAS
+]
 
 
 class _FakeRedisText:
@@ -144,8 +150,6 @@ def test_snapshot_marca_chaves_nao_reconectadas():
     snap = {c["chave"]: c for c in dc.snapshot([])}
     assert snap["GEMINI_MODEL"]["reconectada"] is True
     assert snap["RAG_RERANKER_ENABLED"]["reconectada"] is True
-    # ADR 0008: `orchestration/entrypoint.py` passou a ler via `get_bool`.
-    assert snap["FEATURE_LANGGRAPH_NATIVE_ROUTES"]["reconectada"] is True
     assert snap["DEV_TEST_NO_DB_WRITE"]["reconectada"] is False
     # chaves não gravadas: versao 0 + valor = default
     assert snap["GEMINI_MODEL"]["versao"] == 0

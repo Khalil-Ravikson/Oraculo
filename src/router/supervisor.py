@@ -17,11 +17,10 @@ MÉTRICAS PROMETHEUS:
   oraculo_router_latency_ms (histogram)
 
 Ex-`application/routing/semantic_router.py` (mantido ali como shim de
-compatibilidade — ver esse arquivo). Zero mudança de comportamento nesta
-migração: a única alteração é a chamada Gemini ter sido extraída para
-`router/llm_fallback.py`, e o import de `sigaa_use_cases` (usado em
-`_dag_hint_para_rota` para a rota SIGAA) permanecer local à função para não
-criar um acoplamento de import-time entre router e domain/use_cases.
+compatibilidade — ver esse arquivo). A chamada Gemini está em
+`router/llm_fallback.py`. `_dag_hint_para_rota` devolve só
+`{doc_type, k_vector, k_text}` pro RAG — o DAG do Planner (ADR 0008) foi
+deletado.
 """
 from __future__ import annotations
 
@@ -99,9 +98,9 @@ _RE_INSTA = re.compile(r'(https?://(?:www\.)?instagram\.com/(?:p|reel)/[\w\-]+)'
 # isso?" (só vira comando de download com essa combinação específica de
 # palavras). "baixar/baixe" adicionados nesta sessão — o orquestrador LLM já
 # classificava "baixe vídeo de X" como call_media (intent correto), mas essa
-# regex de extração de termo (usada tanto aqui quanto no Fast-Path de
-# dispatcher.py) só reconhecia "buscar", então a mensagem inteira virava "url"
-# e o yt-dlp falhava com "not a valid URL" — achado real testando ao vivo.
+# regex de extração de termo (usada tanto aqui quanto no `media_download_node`)
+# só reconhecia "buscar", então a mensagem inteira virava "url" e o yt-dlp
+# falhava com "not a valid URL" — achado real testando ao vivo.
 _RE_YTB_BUSCA = re.compile(
     r'\b(?:buscar|procurar|baixar|baixe)\s+(?:um\s+)?v[ií]deo\b(?:\s+(?:sobre|de|do|da))?\s+(.+)',
     re.I,
@@ -317,60 +316,22 @@ async def rotear(
 
 
 def _dag_hint_para_rota(rota: str, query: str = "", config: dict | None = None) -> dict:
-    """
-    Retorna dica de DAG para o Planner.
-    Define quais workers devem ser ativados e em que ordem.
-    """
-    if rota == "MEDIA_DOWNLOAD":
-        match_ytb = _RE_YTB.search(query)
-        if match_ytb:
-            return {"steps": ["ytb_download"], "url": match_ytb.group(1)}
-        match_insta = _RE_INSTA.search(query)
-        if match_insta:
-            return {"steps": ["insta_download"], "url": match_insta.group(1)}
-        match_busca = _RE_YTB_BUSCA.search(query)
-        if match_busca:
-            # "ytsearch1:" é o extractor de busca nativo do yt-dlp — devolve
-            # o 1º resultado, sem precisar de API/chave extra nem servidor
-            # MCP externo. `_plano_media` (planning.py) só lê a chave "url"
-            # do dag_hint, então isso reaproveita o mesmo caminho de sempre.
-            return {"steps": ["ytb_download"], "url": f"ytsearch1:{match_busca.group(1).strip()}"}
-        return {"steps": ["ytb_download"], "url": query}
+    """`{doc_type, k_vector, k_text}` da rota — taxonomia do RAG + profundidade
+    de retrieval, consumido por `nodes._rag_params_para_rota` e pelos workers
+    `worker_rag_search`. Precedência: `router:config` (de `intents_router`,
+    semeado dinamicamente) → `route_registry`.
 
-    if rota == "TICKET_ABERTURA":
-        # Fast-path próprio em dispatcher.py (agents/tickets/ticket_flow.py) —
-        # nunca chega ao Planner (ver agents/tickets/service.py pro histórico
-        # de por que essa rota nunca despacha um worker via Planner).
-        return {"steps": ["ticket_abertura"]}
-
-    if rota == "SIGAA":
-        from src.application.use_cases.sigaa_use_cases import SIGAAUseCase
-        uc = SIGAAUseCase()
-        fluxo = uc.detectar_fluxo(query)
-        if fluxo:
-            return {"steps": [fluxo["worker"]], "worker": fluxo["worker"], "args": fluxo["args"]}
-        return {"steps": ["sigaa_biblioteca"], "worker": "sigaa_biblioteca", "args": {}}
-
+    Ex-DAG do Planner (deletado, ADR 0008) — não devolve mais `steps`/`url`/
+    `worker`; a extração de URL de mídia é do `media_download_node`, o fluxo
+    SIGAA é do `sigaa_node`."""
     if config:
-        doc_type = config.get("doc_type", "geral")
         return {
-            "steps": ["greeting"] if doc_type == "greeting" else ["rag_search"],
-            "doc_type": doc_type,
+            "doc_type": config.get("doc_type", "geral"),
             "k_vector": config.get("k_vector", 6),
             "k_text": config.get("k_text", 8),
         }
 
-    # Plano A / Fase 2: o `_HINTS` hardcoded virou as colunas
-    # `planner_steps`/`doc_type`/`k` do `route_registry` (migration 010). O
-    # branch `if config:` acima (router:config, de `intents_router`) continua
-    # tendo precedência — este é só o fallback, para rota não semeada em
-    # `router:config` (e para CRUD/CHECK_STATUS, que o dispatcher intercepta
-    # antes do Planner). Rota desconhecida → default de GERAL.
     from src.infrastructure import route_registry
     rr = route_registry.get(rota)
-    hint: dict = {"steps": list(rr.planner_steps or [])}
-    if rr.doc_type:
-        hint["doc_type"] = rr.doc_type
-    if rr.k is not None:
-        hint["k"] = rr.k
-    return hint
+    k = rr.k if rr.k else 6
+    return {"doc_type": rr.doc_type or "geral", "k_vector": k, "k_text": 8}

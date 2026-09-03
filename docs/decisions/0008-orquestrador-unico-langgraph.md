@@ -1,6 +1,6 @@
 # ADR 0008 — Orquestrador único de mensagem sobre o StateGraph do LangGraph
 
-- **Status:** ativo (em execução faseada)
+- **Status:** ativo — Fases 0-3 concluídas; 4-5 em andamento
 - **Data:** 2026-09-02
 - **Supera:** ADR 0001 (LangGraph aprovado como dispatcher definitivo — este
   ADR fecha a migração que o 0001 abriu). Complementa ADR 0007 (Hub v2).
@@ -31,10 +31,10 @@ escalonamento para atendente humano.
 4. **Rota `ESCALAR_HUMANO` + nó terminal `human_handoff`** — silencia o bot
    para a sessão (Redis `handoff:session:{id}`, TTL 24h), enfileira em
    `handoff:queue`, avisa `settings.SUPPORT_GROUP_JID`. Sai com `$voltar`.
-5. **`dispatcher.py` e o Planner são aposentados** quando
-   `FEATURE_LANGGRAPH_NATIVE_ROUTES` estiver validada em produção — as 4
-   rotas condicionais (GREETING/SIGAA/MEDIA_DOWNLOAD/CHECK_STATUS) passam a
-   `owner="langgraph"` e o legado é deletado.
+5. **`dispatcher.py` e o Planner são deletados** — as 4 rotas condicionais
+   (GREETING/SIGAA/MEDIA_DOWNLOAD/CHECK_STATUS) passam a `owner="langgraph"`
+   (migration 023), a flag `FEATURE_LANGGRAPH_NATIVE_ROUTES` some, e a coluna
+   `route_registry.planner_steps` (DAG do Planner) é removida.
 6. **Topologia do grafo como dado** (`GraphSpec`, Fase 5) — finaliza a
    metade "Workflow" da Fase 2 do Plano A. Funis de ticket/CRUD ficam em
    código (subgrafos); só o fan-out simples vira spec.
@@ -48,8 +48,8 @@ escalonamento para atendente humano.
 | 0 | Pacote `orchestration/` + `src/graph_studio/` + limpeza | ✅ `33dbf25` |
 | 1 | Entrypoint único + circuit-breaker global + TD-013 | ✅ `a7f3d31` |
 | 2 | Rota/nó `human_handoff` (ESCALAR_HUMANO) + migration 022 | ✅ `b988ab2` |
-| 3 | Aposentar `dispatcher.py` + Planner | ⏳ **gated** — bloqueio #1 (rollout) |
-| 4 | Realinhar o Hub | pendente |
+| 3 | Aposentar `dispatcher.py` + Planner + migration 023 | ✅ |
+| 4 | Realinhar o Hub | parcial (`c67a571`/`be77173`/`fdadc99`) |
 | 5 | `GraphSpec` declarativa | pendente |
 
 ## Consequências
@@ -57,18 +57,22 @@ escalonamento para atendente humano.
 - Toda mudança de roteamento passa a ter **um lugar** (`orchestration/`) —
   fim de "verifique os dois dispatchers".
 - O kill-switch de `/hub/agents` passa a valer para SIGAA, RAG e todas as
-  rotas nativas — antes só para as delegadas.
-- Enquanto a Fase 3 não fecha, `dispatcher.py` continua sendo o caminho de
-  produção de GREETING/SIGAA/MEDIA_DOWNLOAD/CHECK_STATUS (comportamento
-  idêntico ao de antes, `FEATURE_LANGGRAPH_NATIVE_ROUTES=False`).
-- A Fase 3 depende de uma **janela de validação em WhatsApp real** com a flag
-  ligada — é rollout, não código (ver `aposentadoria_dispatcher_legado.md`).
+  rotas — antes só para as delegadas.
+- `FEATURE_LANGGRAPH_NATIVE_ROUTES` não existe mais (nem em `settings.py`, nem
+  em `dynamic_config`, nem no seed de `config_dinamica`).
+
+## Rollout
+
+O plano original previa uma **janela de validação em WhatsApp real** com a
+flag ligada antes de deletar o legado. O dono optou por concluir todas as
+fases sem essa janela — a validação em produção fica como checklist pós-merge
+(`aposentadoria_dispatcher_legado.md`), não como bloqueio de código.
 
 ## Dívidas fechadas
 
+- **TD-001 / TD-002** (Fase 3) — um só orquestrador, um só vocabulário de nó.
 - **TD-013** (Fase 1) — override `IGNORE→LLM` do gatekeeper deixa de ser
   incondicional.
 - **TD-017** (Fase 3) — teste de auth SIGAA reescrito para o `auth_token`.
 - **TD-018** (Fase 3) — testes de cadastro forçam `DEV_TEST_NO_DB_WRITE=False`.
 - **TD-012 / TD-014** (Fase 3) — 5 arquivos de teste órfãos deletados.
-- **TD-001 / TD-002** — fecham quando a Fase 3 deletar `dispatcher.py`.

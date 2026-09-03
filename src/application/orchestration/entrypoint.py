@@ -1,38 +1,16 @@
 """
 src/application/orchestration/entrypoint.py
 ===========================================
-Entrypoint ÚNICO de processamento de mensagem (ADR 0008). Substitui os dois
-dispatchers — `dispatcher.py` (legado) e `dispatcher_langgraph.py`.
+Entrypoint ÚNICO de processamento de mensagem (ADR 0008). Sucessor dos dois
+dispatchers, ambos deletados na Fase 3.
 
-Roda os fast-paths de front (STT, mídia sem legenda, labs REST/MCP),
-guardrails de input, continuação de HITL legado, e então classifica via
-`router/supervisor.py::rotear()` (o Supervisor real, 5 camadas — único ponto
-de classificação do sistema). A rota vira ou uma invocação do `StateGraph`
-(`builder.build_graph`) ou, enquanto `FEATURE_LANGGRAPH_NATIVE_ROUTES`
-estiver desligada, uma delegação pra `dispatcher.py` nas 4 rotas condicionais
-(GREETING/SIGAA/MEDIA_DOWNLOAD/CHECK_STATUS) — costura reversível da Fase 1
-(ADR 0008); a Fase 3 remove a delegação e deleta `dispatcher.py`.
-
-O circuit-breaker por agente (kill-switch de `/hub/agents`) roda aqui, uma
-vez, para TODAS as rotas — antes vivia só em `dispatcher.py` e não valia
-para as rotas nativas do grafo.
-
-Guardrails de input (prompt injection/rate limit) e a continuação de HITL
-legado (`handle_hitl_continuation`, SIGAA CPF/senha via
-`hitl:session:{id}`) rodam DIRETO aqui (não mais só via delegação pro
-dispatcher.py) — precisam existir neste módulo porque ele processa a
-maioria das rotas sem nunca chamar dispatcher.py.
-
-Classificação de rota reaproveita `router/supervisor.py::rotear()` (o
-Supervisor real, 5 camadas) — não o classify_node interno do
-langgraph_experiment (que é só um regex simplificado usado no teste via
-CLI). Isso evita reabrir o problema dos "três cérebros" documentado em
-`notas.md` item 5.1: aqui só tem UM classificador decidindo, o mesmo que
-already roda em produção.
-
-Classificação de rota reaproveita `router/supervisor.py::rotear()` (o
-Supervisor real, 5 camadas) — não o `classify_node` do grafo (regex
-simplificado, só usado no REPL `scripts/graph_repl.py`).
+Roda: mute de atendimento humano, fast-paths de front (STT, mídia sem
+legenda, labs REST/MCP), guardrails de input, continuação de HITL legado
+(SIGAA CPF/senha), classificação via `router/supervisor.py::rotear()` (o
+Supervisor real, 5 camadas — ÚNICO classificador do sistema), circuit-breaker
+por agente (kill-switch de `/hub/agents`, para TODAS as rotas), e então
+invoca o `StateGraph` (`builder.build_graph`). O `classify_node` do grafo é
+passthrough em produção (regex, só usado no REPL `scripts/graph_repl.py`).
 
 Checkpointer: `AsyncRedisSaver` (não `MemorySaver`) — obrigatório porque a
 API e os workers Celery rodam em processos/containers diferentes; um
@@ -63,21 +41,8 @@ import logging
 import time
 
 from src.application.runtime.contracts import OSResult
-# Costura reversível da Fase 1 (ADR 0008): as 4 rotas condicionais
-# (GREETING/SIGAA/MEDIA_DOWNLOAD/CHECK_STATUS) delegam pra cá enquanto
-# `FEATURE_LANGGRAPH_NATIVE_ROUTES` estiver desligada. A Fase 3 remove este
-# import e deleta `dispatcher.py`.
-from src.application.runtime.dispatcher import processar as _processar_original
 
 logger = logging.getLogger(__name__)
-
-# A decisão "grafo vs dispatcher.py legado" por rota vem do `route_registry`
-# (coluna `owner` + FEATURE_LANGGRAPH_NATIVE_ROUTES, migration 010):
-#   owner="langgraph"              → tratada pelo grafo
-#   owner="langgraph_conditional"  → grafo só com FEATURE_LANGGRAPH_NATIVE_ROUTES
-#   owner="legacy"                 → sempre delegada pra dispatcher.py
-#   permite_detour                 → pode interromper um funil HITL
-#   entrypoint_node                → qual node do grafo (state.route)
 
 # Singleton de processo: correto desde que o processo Celery mantenha um único event loop
 # vivo pela vida inteira (ver src/infrastructure/celery_app.py::run_in_worker_loop() +
@@ -117,7 +82,7 @@ async def _get_graph():
         saver = await _saver_cm.__aenter__()  # fechado explicitamente em on_worker_process_shutdown
         await saver.asetup()
         _graph = build_graph(saver)
-        logger.info("🧪 [LANGGRAPH] Grafo compilado com AsyncRedisSaver (DB Redis dedicada) — checkpoint compartilhado entre API/workers.")
+        logger.info("🧭 [ORCH] Grafo compilado com AsyncRedisSaver — checkpoint compartilhado entre API/workers.")
     return _graph
 
 
@@ -130,7 +95,7 @@ async def aclose_graph() -> None:
         try:
             await _saver_cm.__aexit__(None, None, None)
         except Exception:
-            logger.exception("⚠️  [LANGGRAPH] Falha ao fechar AsyncRedisSaver no shutdown.")
+            logger.exception("⚠️  [ORCH] Falha ao fechar AsyncRedisSaver no shutdown.")
         finally:
             _saver_cm = None
             _graph = None
@@ -157,19 +122,18 @@ def _reset_payload_para_rota(
     uma sessão que saiu de um funil anterior ("sair"/RBAC bloqueado) fica
     com cancelado=True gravado no checkpoint pra sempre — e como as edges
     condicionais checam state.cancelado ANTES de qualquer outra regra
-    (langgraph_experiment/nodes.py), todo funil novo nessa mesma sessão
+    (orchestration/nodes.py), todo funil novo nessa mesma sessão
     aceita a 1ª resposta e vai direto pro __end__, sem nunca perguntar o
     resto (reproduzido em teste real: 1x "sair", todo ticket seguinte
     quebrado).
 
-    `rota`/`history`/`fatos` (Fase 3.5): contexto que antes se perdia ao
+    `rota`/`history`/`fatos`: contexto que antes se perdia ao
     entrar no grafo — só faz sentido pra `route == "rag"` (ticket/crud não
     usam RAG), mas incluir sempre é inofensivo (nodes.py só lê quando
     relevante).
 
-    `user_context` (Fase 2d): idem, só usado pelos nodes nativos
-    check_status/greeting/media_download/sigaa (ex.: chat_id de entrega),
-    inofensivo pros demais."""
+    `user_context`: usado pelos nós check_status/greeting/media_download/
+    sigaa (ex.: chat_id de entrega), inofensivo pros demais."""
     payload = {
         "session_id": session_id, "message": message, "route": route, "cancelado": False,
         "rota": rota, "history": history, "fatos": fatos or [],
@@ -191,7 +155,7 @@ def _to_os_result(result: dict, rota: str, t0: float) -> OSResult:
             answer=pergunta, plan_id="langgraph_hitl", rota=rota,
             cache_hit=False, total_ms=ms, status="hitl_pending",
         )
-    # Fase 2d: nodes nativos portados de fast-paths que tinham seu próprio
+    # Nós portados de fast-paths que tinham seu próprio
     # HITL fora do interrupt()/checkpoint do LangGraph (ex.: sigaa_node,
     # HITL via hitl:session:* no Redis) podem devolver status="hitl_pending"
     # explícito no dict do node — sem __interrupt__ nenhum, porque o grafo
@@ -230,18 +194,10 @@ async def processar(
         pass
 
     # ── -2. Fast-Path ÁUDIO (STT) ────────────────────────────────────────────
-    # Roda ANTES de tudo, inclusive dos labs REST/MCP abaixo — nota de voz
-    # chega com `message` vazio, e ESTE módulo (não dispatcher.py) é o entry
-    # point real chamado por process_message_task.py::_handle_message().
-    # Bug real encontrado em produção nesta sessão: a interceptação de áudio
-    # só existia em dispatcher.py::processar(), que só é chamado DAQUI quando
-    # a rota classificada não é uma das que este módulo trata direto
-    # (TICKET_ABERTURA/CRUD/RAG) — ou seja, nunca rodava pro caso mais comum
-    # (voice note → rota GERAL, tratada direto aqui via LangGraph): `rotear("",
-    # ...)` classificava a mensagem vazia como GERAL, e o node de RAG do
-    # LangGraph ia pro embedding com query vazia (`EmbedContentRequest.content
-    # contains an empty Part`, capturado/logado pelo SemanticCache mas sem
-    # nunca transcrever o áudio de verdade). Ver notas.md seção 11.
+    # Nota de voz chega com `message` vazio — transcreve ANTES de classificar,
+    # senão `rotear("")` classifica a mensagem vazia como GERAL e o RAG vai
+    # pro embedding com query vazia (`EmbedContentRequest.content contains an
+    # empty Part`). Ver notas.md seção 11.
     if user_context.get("media_type") == "audioMessage" and user_context.get("msg_key_id"):
         from src.application.runtime.audio_intake import _transcrever_audio_recebido
         from src.infrastructure.redis_client import get_redis_text
@@ -256,14 +212,9 @@ async def processar(
                 total_ms=ms, status="error",
             )
         message = f"{message.strip()}\n{transcript}" if message.strip() else transcript
-        # Marca como consumido antes de qualquer delegação pra
-        # dispatcher.py::processar() mais abaixo — evita baixar/transcrever o
-        # MESMO áudio de novo lá (que mantém a mesma checagem como rede de
-        # segurança pra outros consumidores diretos, ex.: admin hub/eval_api,
-        # ou se o import em process_message_task.py voltar a apontar pro
-        # dispatcher.py puro — ver nota "Ativado trocando o import" acima).
+        # Marca como consumido pra não retranscrever.
         user_context = {**user_context, "media_type": "", "msg_key_id": ""}
-        logger.info("🎤 [LANGGRAPH] Áudio transcrito | session=%s | texto='%.60s'",
+        logger.info("🎤 [ORCH] Áudio transcrito | session=%s | texto='%.60s'",
                     session_id, message)
 
     # ── -1c. Fast-Path MÍDIA SEM LEGENDA (imagem/sticker/vídeo/documento) ────
@@ -316,21 +267,11 @@ async def processar(
             cache_hit=False, total_ms=ms, status="ok",
         )
 
-    # ── -0c. Guardrails de input + continuação de HITL legado (Fase 2d) ─────
-    # Achado ao preparar a Fase 2d: este módulo nunca rodava
-    # InputGuardrail/handle_hitl_continuation — dependia inteiramente de
-    # delegar pra dispatcher.py::processar() (que roda os dois no topo) nas
-    # rotas fora de _ROTAS_LANGGRAPH. Isso já deixava GERAL/CALENDARIO/
-    # EDITAL/CONTATOS/WIKI/TICKET_ABERTURA/CRUD (sempre tratadas aqui, nunca
-    # delegadas) sem guardrail de prompt injection/rate limit; migrar SIGAA
-    # pra cá (Decisão 01) tornaria isso permanente pra 100% da produção, e
-    # pioraria um bug de roteamento real: o HITL legado de SIGAA
-    # (CPF/senha, `hitl:session:{id}`) não é visível pro Supervisor — sem
-    # este check, uma sessão no meio da coleta de CPF podia ser
-    # reclassificada pelo Supervisor pra uma rota RAG e o CPF digitado virar
-    # query de busca em vez de continuar o login. Mesma ordem/posição
-    # relativa que dispatcher.py já usa (guardrails antes, HITL legado
-    # depois), só que aqui em vez de lá.
+    # ── -0c. Guardrails de input + continuação de HITL legado ────────────────
+    # Guardrails ANTES do HITL: se a sessão está no meio da coleta de CPF/senha
+    # do SIGAA (`hitl:session:{id}`, invisível pro Supervisor), sem este check
+    # o Supervisor reclassificaria a mensagem e o CPF digitado viraria query de
+    # busca em vez de continuar o login.
     from src.application.chain.guardrails import get_input_guardrail
 
     def _validate_sync():
@@ -394,7 +335,7 @@ async def processar(
                 answer = f"{resposta_rag}\n\n📋 Voltando ao que estávamos fazendo:\n{pergunta_pendente}"
                 ms = int((time.monotonic() - t0) * 1000)
                 logger.info(
-                    "🧪 [LANGGRAPH] Detour institucional (rota=%s) durante node=%s (session=%s)",
+                    "🧭 [ORCH] Detour institucional (rota=%s) durante node=%s (session=%s)",
                     decision.rota, node_pendente, session_id,
                 )
                 return OSResult(
@@ -415,20 +356,15 @@ async def processar(
 
     decision = await rotear(message, session_id, user_context)
 
-    from src.infrastructure import dynamic_config, route_registry
+    from src.infrastructure import route_registry
 
     rr = route_registry.get(decision.rota)
 
     # ── 1a. Circuit-breaker por agente (kill-switch de /hub/agents) ───────────
-    # ADR 0008 (Fase 1): antes vivia só em `dispatcher.py::processar()` e não
-    # valia pras rotas nativas do grafo (GERAL/CALENDARIO/EDITAL/CONTATOS/WIKI/
-    # TICKET_ABERTURA/CRUD) — desligar um agente em `/hub/agents` não bloqueava
-    # nada dessas. Aqui roda pra TODAS as rotas, antes de entrar no grafo ou
-    # delegar. GREETING/MEDIA_DOWNLOAD/CHECK_STATUS têm `agente=NULL` (fast-
-    # paths utilitários, sempre ligados). `dispatcher.py` mantém a mesma
-    # checagem enquanto existir — a checagem dupla nas rotas delegadas é
-    # inofensiva (mesmo resultado). Não roda no caminho de resume de funil
-    # pendente (acima), mantendo a paridade com o comportamento anterior.
+    # ADR 0008: roda pra TODAS as rotas antes de entrar no grafo (antes vivia
+    # só no `dispatcher.py` legado). GREETING/MEDIA_DOWNLOAD/CHECK_STATUS/
+    # ESCALAR_HUMANO têm `agente=NULL` (utilitários, sempre ligados). Não roda
+    # no caminho de resume de funil pendente — só numa mensagem nova.
     if rr.agente:
         from src.capabilities.persistence.agent_config import is_agent_enabled
         if not await is_agent_enabled(r, rr.agente):
@@ -441,21 +377,16 @@ async def processar(
                 cache_hit=False, total_ms=ms, status="ok",
             )
 
-    # `FEATURE_LANGGRAPH_NATIVE_ROUTES` agora é config dinâmica (ADR 0008):
-    # dá pra ligar/desligar em `/hub/config` e validar as 4 rotas condicionais
-    # pelo `/hub/chat`, sem editar `.env` nem reiniciar. Default (nada gravado)
-    # = `settings.FEATURE_LANGGRAPH_NATIVE_ROUTES` (False).
-    native_routes = dynamic_config.get_bool("FEATURE_LANGGRAPH_NATIVE_ROUTES")
-    if rr.delega_para_legado(native_routes) \
-            or rr.entrypoint_node not in route_registry.NODES_ENTRYPOINT:
-        # Delega inteiro pro pipeline original. `decision_pronta=decision`:
-        # bug real corrigido (log de produção) — sem isso `dispatcher.py`
-        # reclassificava a MESMA mensagem do zero (2ª chamada Gemini Flash paga).
-        return await _processar_original(message, session_id, user_context, history, fatos,
-                                          decision_pronta=decision)
-
+    # Rota classificada mas cujo `entrypoint_node` não é um nó real do grafo
+    # (ex.: rota personalizada mal configurada no /hub/routes) → trata como
+    # `rag` (o `_UNKNOWN` já aponta pra lá; isto é só a rede de segurança).
     route = rr.entrypoint_node
-    logger.info("🧪 [LANGGRAPH] rota=%s → node=%s (session=%s)", decision.rota, route, session_id)
+    if route not in route_registry.NODES_ENTRYPOINT:
+        logger.warning("⚠️  [ORCH] rota=%s tem entrypoint_node inválido '%s' — usando 'rag'",
+                       decision.rota, route)
+        route = "rag"
+
+    logger.info("🧭 [ORCH] rota=%s → node=%s (session=%s)", decision.rota, route, session_id)
 
     payload = _reset_payload_para_rota(
         session_id, message, route,

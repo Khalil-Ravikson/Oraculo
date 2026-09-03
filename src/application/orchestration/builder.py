@@ -121,9 +121,6 @@ def build_graph(checkpointer=None):
         lambda state: state.route,
         {
             "rag": "rag", "ticket": "ticket_ask_tipo", "crud": "crud_ask_campo",
-            # Fase 2d (Decisão 01) — só alcançáveis com
-            # settings.FEATURE_LANGGRAPH_NATIVE_ROUTES ligada (ver
-            # dispatcher_langgraph.py::_ROTAS_LANGGRAPH_NATIVAS_CONDICIONAIS).
             "check_status": "check_status", "greeting": "greeting",
             "media_download": "media_download", "sigaa": "sigaa",
             "human_handoff": "human_handoff",

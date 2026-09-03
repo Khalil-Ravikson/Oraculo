@@ -1,19 +1,13 @@
 """
-infrastructure/celery_app.py — Sprint 1 (Recovery Signal + Stream Health)
-=========================================================================
+infrastructure/celery_app.py — configuração do Celery
+====================================================
 
-MUDANÇAS vs versão anterior:
-  ADICIONADO:
-    - Signal worker_ready → chama recover_pending_messages() no startup
-    - Fila "streams" para o recovery task periódico (opcional)
-
-  MANTIDO:
-    - Beat schedule (notificações diárias)
-    - Task routing: filas reais em `task_routes` abaixo são
-      default / admin / rag_search / synthesis / media / graph. NÃO existe
-      fila `notificacoes` — o `--queues=...,notificacoes` no comando do
-      worker em docker-compose.yml é vestigial (nenhuma task roteia pra lá).
-    - Timezone America/Sao_Paulo
+- Broker Redis DB/1, result backend DB/2 (o app fica na DB/0).
+- Filas reais em `task_routes`: default / admin / rag_search / synthesis /
+  media / graph. Timezone America/Sao_Paulo.
+- `worker_ready` recupera mensagens XPENDING do Redis Stream no boot.
+- `worker_process_init`/`shutdown` mantêm um event loop asyncio persistente
+  por processo (necessário pro AsyncRedisSaver do grafo — ver abaixo).
 """
 import asyncio
 import os
@@ -62,8 +56,6 @@ celery_app.conf.update(
         "src.application.workers.worker_db_connector",
         "src.application.workers.worker_memory_manager",
         "src.application.workers.worker_reranker",
-        "src.application.workers.worker_action",
-        "src.application.workers.worker_greeting",
         "src.application.workers.worker_sigaa",
     ],
 
@@ -120,8 +112,6 @@ celery_app.conf.update(
         "worker_db_connector":    {"queue": "default"},
         "worker_memory_manager":  {"queue": "default"},
         "worker_reranker":        {"queue": "rag_search"},
-        "worker_action":          {"queue": "default"},
-        "worker_greeting":       {"queue": "default"},
         "worker_sigaa_biblioteca":      {"queue": "default"},
         "worker_sigaa_extensao":        {"queue": "default"},
         "worker_sigaa_processos":       {"queue": "default"},
@@ -145,13 +135,12 @@ from celery.signals import worker_ready, worker_process_init, worker_process_shu
 # sequenciais dentro de cada processo — ver docker-compose.yml, sem --pool
 # explícito nos comandos = default prefork).
 #
-# Motivo: o experimento LangGraph (dispatcher_langgraph.py) usa um
-# AsyncRedisSaver que precisa sobreviver entre mensagens da mesma sessão
-# (HITL via interrupt()/Command(resume=...)). Um recurso async assim NÃO pode
-# atravessar a fronteira de um asyncio.run() por task (cria "Event loop is
-# closed"/"Future attached to a different loop" — ver notas.md/relatório da
-# investigação desta branch). A correção é nunca destruir o loop entre tasks:
-# criado uma vez aqui, reusado via run_in_worker_loop() em vez de
+# Motivo: o orquestrador (orchestration/entrypoint.py) usa um AsyncRedisSaver
+# que precisa sobreviver entre mensagens da mesma sessão (HITL via
+# interrupt()/Command(resume=...)). Um recurso async assim NÃO pode atravessar
+# a fronteira de um asyncio.run() por task (cria "Event loop is closed"/
+# "Future attached to a different loop"). A correção é nunca destruir o loop
+# entre tasks: criado uma vez aqui, reusado via run_in_worker_loop() em vez de
 # asyncio.run(), fechado em on_worker_process_shutdown.
 # ─────────────────────────────────────────────────────────────────────────────
 _worker_loop: asyncio.AbstractEventLoop | None = None
@@ -159,7 +148,7 @@ _worker_loop: asyncio.AbstractEventLoop | None = None
 
 def run_in_worker_loop(coro):
     """Substitui asyncio.run() nas tasks que precisam de recursos async de
-    vida longa (checkpointer do experimento LangGraph). Reusa o mesmo loop
+    vida longa (checkpointer do grafo de orquestração). Reusa o mesmo loop
     durante toda a vida do processo worker — nunca cria um loop novo por task."""
     global _worker_loop
     if _worker_loop is None or _worker_loop.is_closed():

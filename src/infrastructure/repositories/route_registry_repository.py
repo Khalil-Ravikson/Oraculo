@@ -35,7 +35,6 @@ def _to_config(row: RouteRegistry) -> RouteConfig:
         rota=row.rota, entrypoint_node=row.entrypoint_node, owner=row.owner,
         agente=row.agente, cacheavel=row.cacheavel, permite_detour=row.permite_detour,
         doc_type=row.doc_type, k=row.k,
-        planner_steps=tuple(row.planner_steps) if row.planner_steps is not None else None,
         versao=row.versao,
     )
 

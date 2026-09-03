@@ -9,9 +9,8 @@
 | **Entrada da API / webhook** | `src/main.py`, `src/application/webhook/` |
 | **Pré-filtro de mensagem (gate)** | `src/router/gatekeeper.py` |
 | **Classificação de intenção (Supervisor)** | `src/router/supervisor.py`, `src/router/llm_fallback.py` |
-| **Orquestração — caminho de produção** | `src/application/runtime/dispatcher_langgraph.py` |
-| **Orquestração — caminho legado (SSE/eval/debug)** | `src/application/runtime/dispatcher.py` — ver `docs/technical-debt.md` TD-001 |
-| **Planner (monta DAG de workers)** | `src/agents/academic_knowledge/planning.py` |
+| **Orquestração (entrypoint único, ADR 0008)** | `src/application/orchestration/entrypoint.py` |
+| **Grafo de produção (nós, arestas)** | `src/application/orchestration/builder.py`, `nodes.py`, `state.py` |
 | **Agentes de domínio** | `src/agents/` (`academic_knowledge/` RAG, `sigaa/`, `tickets/`, `conversation/`) |
 | **Tools/integrações autodescobertas** | `src/capabilities/` (`rag/`, `sigaa/`, `messaging/`, `persistence/`, `tools/`) |
 | **RBAC / permissões** | `src/domain/permissions.py` |
@@ -29,15 +28,16 @@
 | **API admin (JSON)** | `src/api/routers/admin/` (`admin_api.py`, `eval_api.py`, `admin_users_api.py`) |
 | **Configuração (env vars)** | `src/infrastructure/settings.py`, `.env.example` |
 | **Testes** | `tests/unit/` (espelha `src/`), `tests/integration/`, `tests/e2e/`, `tests/eval/` |
-| **Laboratórios de pesquisa (não produção)** | `rest_lab/`, `mcp_lab/`, `langgraph_experiment/` — ver banner em cada diretório |
+| **Laboratórios de pesquisa (não produção)** | `rest_lab/`, `mcp_lab/` — ver banner em cada diretório |
+| **Graph Studio (paleta de componentes + sandbox, não é o grafo de produção)** | `src/graph_studio/`, `templates/hub/graph-studio.html` |
 
 ## Fluxo de uma mensagem, em uma linha por etapa
 
 ```
 Evolution API → webhook FastAPI → Porteiro (Postgres) → lock (Redis)
   → Celery (worker, fila default) → gatekeeper.py → router/supervisor.py
-  → dispatcher_langgraph.py → Planner → agents/capabilities → llm_factory.py
-  → Evolution API → WhatsApp
+  → orchestration/entrypoint.py → StateGraph (orchestration/builder.py)
+  → agents/capabilities → llm_factory.py → Evolution API → WhatsApp
 ```
 
 Detalhe completo de cada seta: [`arquitetura_oraculo.md` §5](arquitetura_oraculo.md).

@@ -36,16 +36,17 @@ def classify_node(state: OraculoState) -> dict:
     return {"route": route}
 
 
-def _doc_type_para_rota(rota: str, query: str) -> str:
-    """Reaproveita o mapeamento rota→doc_type que já existe no Supervisor
-    (`_dag_hint_para_rota`) em vez de duplicar a tabela CALENDARIO→"calendario"/
-    EDITAL→"edital"/etc. aqui."""
+def _rag_params_para_rota(rota: str, query: str) -> tuple[str, int]:
+    """`(doc_type, k_vector)` da rota — reaproveita o mapeamento do Supervisor
+    (`_dag_hint_para_rota`, que lê `router:config`/`route_registry`) em vez de
+    duplicar a tabela CALENDARIO→"calendario", EDITAL→k=10, etc."""
     from src.router.supervisor import _dag_hint_para_rota
-    return _dag_hint_para_rota(rota, query).get("doc_type", "geral")
+    h = _dag_hint_para_rota(rota, query)
+    return h.get("doc_type", "geral"), int(h.get("k_vector", 6) or 6)
 
 
 # Se a rota é cacheável vem do `route_registry` (coluna `cacheavel`, migration
-# 010) — mesma fonte usada por semantic_cache.py/worker_synthesis.py/dispatcher.py.
+# 010) — mesma fonte usada por semantic_cache.py/worker_synthesis.py.
 from src.infrastructure import route_registry
 
 
@@ -58,8 +59,8 @@ async def responder_rag_direto(
 ) -> str:
     """Chama RAGSearchService/SynthesisService reais e devolve só o texto da
     resposta — extraído de rag_node pra ser reaproveitado também pelo filtro
-    de "detour" institucional em dispatcher_langgraph.py (sem duplicar a
-    lógica de busca+síntese).
+    de "detour" institucional no entrypoint (sem duplicar a lógica de
+    busca+síntese).
 
     Fase 3.5: antes disso, `rota`/`history`/`fatos`/`session_id` não existiam
     aqui — toda pergunta RAG via LangGraph rodava com `doc_type="geral"` (sem
@@ -85,10 +86,12 @@ async def responder_rag_direto(
     from src.agents.academic_knowledge.service import RAGSearchService
     from src.agents.academic_knowledge.synthesis import SynthesisService
 
+    doc_type, k = _rag_params_para_rota(rota, mensagem)
     rag = RAGSearchService()
     result = await rag.buscar(
         mensagem,
-        doc_type=_doc_type_para_rota(rota, mensagem),
+        doc_type=doc_type,
+        k_vector=k,
         rota=rota,
         fatos=fatos,
         historico=history,
@@ -119,22 +122,18 @@ async def _responder_rag_via_celery(
     """Despacha RAG+síntese pros workers Celery especializados (filas
     rag_search/synthesis, ver task_routes em celery_app.py) em vez de chamar
     RAGSearchService/SynthesisService in-process — Decisão 02/Fase 2b do
-    plano de integração: mesma distribuição de carga entre filas que o
-    Planner legado (dispatcher.py::_despachar_workers) já usa, só que
-    aguardada de dentro do node do grafo em vez de entregue como efeito
-    colateral (o Planner dispara um chord que termina em
-    enviar_resposta_whatsapp_task e nunca aguarda o resultado; aqui
-    precisamos do texto de volta pra continuar o grafo, então é o mesmo
-    chord rag_search→synthesis, mas sem a etapa de entrega, com
-    `.get()` aguardado fora da event loop via asyncio.to_thread — o
+    plano de integração: distribui carga entre as filas rag_search/synthesis,
+    aguardada de dentro do node do grafo (precisamos do texto de volta pra
+    continuar o grafo), com um chord rag_search→synthesis sem a etapa de
+    entrega, com `.get()` aguardado fora da event loop via asyncio.to_thread — o
     worker do LangGraph já roda um loop persistente por processo (ver
     celery_app.py::run_in_worker_loop), então isso não bloqueia outras
     mensagens sendo processadas nele.
 
     Gated por settings.FEATURE_LANGGRAPH_CELERY_DISPATCH (desligado por
     padrão) — o SemanticCache().set() do resultado é feito pelo próprio
-    worker_synthesis_task (mesmo comportamento do Planner legado), por isso
-    não é repetido aqui como no caminho in-process acima.
+    worker_synthesis_task, por isso não é repetido aqui como no caminho
+    in-process acima.
     """
     import asyncio
     import uuid
@@ -150,11 +149,13 @@ async def _responder_rag_via_celery(
         "query": mensagem, "route": rota, "history": history,
         "fatos": fatos, "session_id": session_id,
     }
+    doc_type, k = _rag_params_para_rota(rota, mensagem)
     rag_event = {
         "plan_id": plan_id,
         "session_id": session_id,
         "step_id": "s1",
-        "doc_type": _doc_type_para_rota(rota, mensagem),
+        "doc_type": doc_type,
+        "k_vector": k,
         "query": mensagem,
         "rota": rota,
         "fatos": fatos,
@@ -199,25 +200,19 @@ async def rag_node(state: OraculoState) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Fase 2d do plano de integração (Decisão 01) — CHECK_STATUS/GREETING/
-# MEDIA_DOWNLOAD/SIGAA portados de fast-paths inline em
-# application/runtime/dispatcher.py::processar() pra nodes nativos do
-# grafo. Nenhum tem HITL via interrupt()/checkpoint (nem precisava: SIGAA
-# já gerencia o próprio HITL fora do LangGraph, via hitl:session:* no Redis
-# — ver handle_hitl_continuation, chamado direto por
-# dispatcher_langgraph.py::processar() ANTES de rotear), então cada um roda
-# do início ao fim numa invocação só, igual ao rag_node acima. SIGAA
-# reaproveita start_or_continue_sigaa() (já fatorado, zero duplicação);
-# CHECK_STATUS/GREETING/MEDIA_DOWNLOAD reimplementam a mesma lógica do
-# fast-path original — dispatcher.py fica só como caminho de debug/eval
-# (Decisão 01), então a duplicação é aceita aqui em vez de forçar uma
-# extração maior no meio da migração.
+# CHECK_STATUS / GREETING / MEDIA_DOWNLOAD / SIGAA — nós terminais do grafo,
+# única implementação dessas rotas (ADR 0008: o dispatcher legado que as
+# atendia foi aposentado). Nenhum usa HITL via interrupt()/checkpoint: SIGAA
+# gerencia o próprio HITL fora do LangGraph, via hitl:session:* no Redis
+# (ver handle_hitl_continuation, chamado pelo entrypoint ANTES de rotear),
+# então cada um roda do início ao fim numa invocação só, igual ao rag_node.
+# SIGAA reaproveita start_or_continue_sigaa() (já fatorado).
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 async def check_status_node(state: OraculoState) -> dict:
-    """Reimplementa o Fast-Path CHECK_STATUS de dispatcher.py::processar()
-    — histórico da última task Celery da sessão, sem acionar RAG."""
+    """Rota CHECK_STATUS — histórico da última task Celery da sessão, sem
+    acionar RAG."""
     from src.memory.services.redis_memory_service import get_cognitive_memory
 
     mem = get_cognitive_memory()
@@ -230,8 +225,8 @@ async def check_status_node(state: OraculoState) -> dict:
 
 
 async def greeting_node(state: OraculoState) -> dict:
-    """Reimplementa o Fast-Path GREETING de dispatcher.py::processar() —
-    saudação aleatória + registro do turno na memória cognitiva."""
+    """Rota GREETING — saudação aleatória + registro do turno na memória
+    cognitiva."""
     import random
 
     from src.memory.services.redis_memory_service import get_cognitive_memory
@@ -255,8 +250,7 @@ async def greeting_node(state: OraculoState) -> dict:
 
 
 async def media_download_node(state: OraculoState) -> dict:
-    """Reimplementa o Fast-Path MEDIA_DOWNLOAD de dispatcher.py::processar()
-    — dispara download (YouTube/Instagram) via chain Celery
+    """Rota MEDIA_DOWNLOAD — dispara download (YouTube/Instagram) via chain Celery
     (download → enviar_resposta_whatsapp_task) e devolve resposta imediata
     de "download iniciado"; a entrega real acontece depois, assíncrona."""
     from celery import chain
@@ -270,8 +264,8 @@ async def media_download_node(state: OraculoState) -> dict:
         url = urls[0]
     else:
         # Sem URL na mensagem — pode ser busca por termo ("buscar vídeo
-        # sobre X"), mesma checagem do fast-path original: sem ela, a
-        # mensagem inteira vira "url" e o yt-dlp falha.
+        # sobre X"): sem essa checagem, a mensagem inteira vira "url" e o
+        # yt-dlp falha.
         from src.router.supervisor import _RE_YTB_BUSCA
 
         match_busca = _RE_YTB_BUSCA.search(message)
@@ -309,13 +303,11 @@ async def media_download_node(state: OraculoState) -> dict:
 
 
 async def sigaa_node(state: OraculoState) -> dict:
-    """Reimplementa o Fast-Path SIGAA de dispatcher.py::processar() —
-    reaproveita start_or_continue_sigaa() (já fatorado em
-    agents/sigaa/auth_flow.py, zero duplicação da lógica de autenticação/
-    HITL). A continuação do HITL (CPF/senha) não passa por aqui — é
-    interceptada antes de rotear, por handle_hitl_continuation em
-    dispatcher_langgraph.py::processar(); este node só cobre o INÍCIO do
-    fluxo (1ª mensagem classificada como SIGAA)."""
+    """Rota SIGAA — reaproveita start_or_continue_sigaa() (fatorado em
+    agents/sigaa/auth_flow.py). A continuação do HITL (CPF/senha) não passa
+    por aqui — é interceptada antes de rotear, por handle_hitl_continuation
+    no entrypoint; este node só cobre o INÍCIO do fluxo (1ª mensagem
+    classificada como SIGAA)."""
     from src.agents.sigaa.auth_flow import start_or_continue_sigaa
     from src.infrastructure.redis_client import get_redis_text
     from src.router.contracts import RouterDecision
@@ -417,15 +409,15 @@ async def human_handoff_node(state: OraculoState) -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Validadores puros (sem interrupt(), sem side effect) — usados DENTRO de cada
-# node (pra decidir avançar ou re-perguntar) E por
-# dispatcher_langgraph.py::VALIDATORS_POR_NODE (pra decidir, ANTES de resumir
-# o grafo, se a mensagem do usuário parece resposta válida pro passo pendente
-# ou um "detour" institucional). Um único lugar de verdade pra cada regra —
-# evita a mesma regra divergir entre o node e o filtro de detour.
+# node (pra decidir avançar ou re-perguntar) E pelo entrypoint via
+# VALIDATORS_POR_NODE (pra decidir, ANTES de resumir o grafo, se a mensagem do
+# usuário parece resposta válida pro passo pendente ou um "detour"
+# institucional). Um único lugar de verdade pra cada regra — evita a mesma
+# regra divergir entre o node e o filtro de detour.
 #
 # Cada validador devolve (ok: bool, valor_normalizado). `ok=False` sinaliza
 # tanto "resposta inválida" quanto candidato a detour — quem decide o que
-# fazer com isso é o chamador (node re-pergunta; dispatcher tenta RAG antes
+# fazer com isso é o chamador (node re-pergunta; o entrypoint tenta RAG antes
 # de desistir).
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -539,10 +531,10 @@ def _com_erro(pergunta: str, erro: str) -> str:
 # (ticket ou CRUD), checado ANTES do validador específico do node. Existe
 # porque, sem isso, uma mensagem como "sair"/"cancelar" solta no meio do
 # funil não validava pro passo pendente e caía no filtro de detour
-# institucional (dispatcher_langgraph.py) — ia pro RAG, respondia "não
-# encontrei" e voltava a repetir a mesma pergunta pendente, sem nunca sair.
-# Ver _eh_saida() usado também por dispatcher_langgraph.py::processar() pra
-# pular o detour quando a mensagem é claramente um pedido de saída.
+# institucional (no entrypoint) — ia pro RAG, respondia "não encontrei" e
+# voltava a repetir a mesma pergunta pendente, sem nunca sair.
+# Ver _eh_saida() usado também pelo entrypoint pra pular o detour quando a
+# mensagem é claramente um pedido de saída.
 # ─────────────────────────────────────────────────────────────────────────────
 
 _RE_SAIR_HITL = re.compile(r"^\s*(sair|cancelar?|desist[oi]r?|abortar|encerrar|parar)\s*[.!]?\s*$", re.I)
@@ -805,12 +797,11 @@ async def crud_save(state: OraculoState) -> dict:
     return {"answer": f"✅ Cadastro atualizado com sucesso!\n\n{resumo}"}
 
 
-# Registry usado por dispatcher_langgraph.py pro filtro de "detour": dado o
-# node pendente (state.next[0]), decide se a mensagem do usuário parece
-# resposta válida pra ELE, sem duplicar a regra de validação de cada node.
-# `state_values` aqui é um dict (StateSnapshot.values, vindo de
-# app.aget_state() no dispatcher) — não a instância Pydantic OraculoState
-# usada dentro dos nodes/edges do grafo.
+# Registry usado pelo entrypoint pro filtro de "detour": dado o node pendente
+# (state.next[0]), decide se a mensagem do usuário parece resposta válida pra
+# ELE, sem duplicar a regra de validação de cada node. `state_values` aqui é
+# um dict (StateSnapshot.values, vindo de app.aget_state() no entrypoint) —
+# não a instância Pydantic OraculoState usada dentro dos nodes/edges do grafo.
 VALIDATORS_POR_NODE = {
     "ticket_ask_tipo": lambda state_values, texto: validar_tipo(texto)[0],
     "ticket_ask_categoria": lambda state_values, texto: validar_categoria(texto)[0],

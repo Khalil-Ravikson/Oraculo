@@ -349,14 +349,13 @@ class RouteRegistry(Base):
 
     id              = Column(Integer, primary_key=True)
     rota            = Column(String(40), nullable=False)
-    entrypoint_node = Column(String(40), nullable=False)   # state.route: rag|ticket|crud|greeting|sigaa|media_download|check_status
-    owner           = Column(String(24), nullable=False)   # langgraph | langgraph_conditional | legacy
+    entrypoint_node = Column(String(40), nullable=False)   # state.route: rag|ticket|crud|greeting|sigaa|media_download|check_status|human_handoff
+    owner           = Column(String(24), nullable=False)   # ADR 0008: sempre "langgraph" (mantida como registro)
     agente          = Column(String(50), nullable=True)    # nome no registry; NULL p/ rotas utilitárias
     cacheavel       = Column(Boolean, nullable=False)
     permite_detour  = Column(Boolean, server_default="false", nullable=False)
     doc_type        = Column(String(30), nullable=True)
     k               = Column(Integer, nullable=True)
-    planner_steps   = Column(ARRAY(String), nullable=True)
     versao          = Column(Integer, server_default="1", nullable=False)
     tenant_id       = Column(PGUUID(as_uuid=True), nullable=True)
     atualizado_em   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

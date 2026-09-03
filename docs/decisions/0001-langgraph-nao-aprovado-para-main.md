@@ -1,11 +1,9 @@
 # ADR 0001 — LangGraph fica isolado em branch/worktree própria, não é aprovado para `main`
 
-- **Status:** substituído (2026-08-25) — ver Decisão 01 do plano de
-  integração LangGraph/REST/MCP: LangGraph aprovado como dispatcher
-  definitivo de produção (100%), migração em andamento na branch
-  `integration/langgraph-rest-mcp` (Fase 2 do plano). Este ADR fica como
-  registro histórico da rejeição original e do bloqueio que a antecedia —
-  ver "Bloqueio atual" abaixo, fechado nesta mesma sessão.
+- **Status:** substituído por **ADR 0008** (2026-09-03). LangGraph é o
+  orquestrador único de produção (`src/application/orchestration/`); o
+  `dispatcher.py` legado e `langgraph_experiment/` não existem mais. Este ADR
+  fica só como registro histórico da rejeição original.
 - **Data da decisão original:** rejeição inicial anterior a 2026-07-27; reavaliação em 2026-07-31
 - **Fonte:** extraído de `.claude.md` (versão anterior a 2026-08-25) e `notas.md` §7-9
 
@@ -56,13 +54,8 @@ regra de negócio, não bug de código óbvio): `_STATUS_BLOQUEADOS` em
 intencional; vale confirmar com quem decide as regras de negócio do
 Oráculo antes de mexer.
 
-## Consequências
+## Consequências (superadas pelo ADR 0008)
 
-- `docker-compose.yml` precisa manter `langgraph_experiment/` montado como
-  volume nos serviços que montam `./src`.
-- `requirements.txt` mantém `langgraph`/`langgraph-checkpoint-redis` pinados
-  (histórico de bugs conhecidos no pacote de checkpointer) mesmo fora de uso
-  em produção — isso significa que essas dependências vão para a imagem
-  Docker de `main` também, já que o `Dockerfile` instala `requirements.txt`
-  por inteiro. Ver auditoria de 2026-08-24, seção de configuração, para esse
-  risco específico.
+O que este ADR previa (`langgraph_experiment/` isolado, montado como volume,
+dependências "fora de uso em produção") não vale mais: LangGraph é o runtime
+de produção. Ver ADR 0008.

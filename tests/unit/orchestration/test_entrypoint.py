@@ -96,9 +96,6 @@ async def test_agente_ativo_segue_pro_grafo(monkeypatch):
 @pytest.mark.asyncio
 async def test_rota_sem_agente_nao_checa_breaker(monkeypatch):
     """GREETING tem agente=NULL — não deve nem tentar checar o breaker."""
-    from src.infrastructure import settings as settings_module
-
-    monkeypatch.setattr(settings_module.settings, "FEATURE_LANGGRAPH_NATIVE_ROUTES", True)
     app = _fake_app()
     sentinel = MagicMock(side_effect=AssertionError("breaker não deve ser consultado"))
 

@@ -48,13 +48,12 @@ def db_limpo():
     with conn.cursor() as cur:
         cur.execute("TRUNCATE route_registry, route_registry_historico RESTART IDENTITY")
         for rota, cfg in rr._DEFAULTS.items():
-            steps = list(cfg.planner_steps) if cfg.planner_steps is not None else None
             cur.execute(
                 "INSERT INTO route_registry "
-                "(rota, entrypoint_node, owner, agente, cacheavel, permite_detour, doc_type, k, planner_steps, versao) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,1)",
+                "(rota, entrypoint_node, owner, agente, cacheavel, permite_detour, doc_type, k, versao) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1)",
                 (rota, cfg.entrypoint_node, cfg.owner, cfg.agente, cfg.cacheavel,
-                 cfg.permite_detour, cfg.doc_type, cfg.k, steps),
+                 cfg.permite_detour, cfg.doc_type, cfg.k),
             )
             cur.execute(
                 "INSERT INTO route_registry_historico (rota, versao, snapshot) VALUES (%s, 1, %s)",

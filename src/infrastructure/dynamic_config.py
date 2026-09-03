@@ -49,7 +49,6 @@ _PREFIXO_REDIS = "config:"
 ALLOWED_DYNAMIC_KEYS: dict[str, str] = {
     "DEV_TEST_NO_DB_WRITE":              "bool",
     "DEV_TEST_SKIP_REGISTRATION":        "bool",
-    "FEATURE_LANGGRAPH_NATIVE_ROUTES":   "bool",
     "FEATURE_LANGGRAPH_CELERY_DISPATCH": "bool",
     "GEMINI_MODEL":                      "str",
     "RAG_CACHE_TTL_SECONDS":             "int",
@@ -69,10 +68,6 @@ _FALSOS = {"0", "false", "f", "no", "off", "nao", "não"}
 CHAVES_RECONECTADAS: frozenset[str] = frozenset({
     "GEMINI_MODEL", "RAG_CACHE_TTL_SECONDS", "RAG_RERANKER_ENABLED",
     "PARSER_PDF_PRIORIDADE", "PARSER_DESABILITADOS",
-    # ADR 0008: `orchestration/entrypoint.py` lê via `get_bool` — dá pra
-    # ligar/desligar no `/hub/config` e validar as 4 rotas condicionais pelo
-    # `/hub/chat` sem reiniciar.
-    "FEATURE_LANGGRAPH_NATIVE_ROUTES",
 })
 
 

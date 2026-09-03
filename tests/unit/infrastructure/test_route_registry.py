@@ -1,9 +1,9 @@
 """
-Plano A / Fase 2 — `src/infrastructure/route_registry.py`.
+Plano A / Fase 2 + ADR 0008 — `src/infrastructure/route_registry.py`.
 
 Contrato da camada síncrona (caminho quente): Redis → `_DEFAULTS`, degradação
-sem exceção, reverso node→rota, predicado de delegação, validação de escrita,
-e a paridade `_DEFAULTS` ↔ migration 010 ↔ `contracts.ROTAS_SEM_CACHE`.
+sem exceção, reverso node→rota, validação de escrita, e a paridade
+`_DEFAULTS` ↔ migrations 010/022/023 ↔ `contracts.ROTAS_SEM_CACHE`.
 """
 import importlib.util
 import pathlib
@@ -24,10 +24,16 @@ def _carregar_seed(nome: str) -> dict:
 
 
 # Todas as migrations que semeiam linhas em `route_registry`. `_DEFAULTS` do
-# código deve bater com a UNIÃO delas.
-SEED_010 = {
+# código deve bater com a UNIÃO delas, DEPOIS de aplicar as transformações da
+# migration 023 (ADR 0008 Fase 3): owner→"langgraph" em todas, planner_steps
+# removido.
+_SEED_BRUTO = {
     **_carregar_seed("010_route_registry"),
     **_carregar_seed("022_route_registry_escalar_humano"),
+}
+SEED_010 = {
+    rota: {**{k: v for k, v in row.items() if k != "planner_steps"}, "owner": "langgraph"}
+    for rota, row in _SEED_BRUTO.items()
 }
 
 
@@ -63,9 +69,9 @@ def test_get_le_do_redis(fake_redis):
     assert rr.get("GERAL").k == 42
 
 
-def test_get_rota_desconhecida_retorna_config_legado(fake_redis):
+def test_get_rota_desconhecida_cai_no_no_rag(fake_redis):
     cfg = rr.get("ROTA_QUE_NAO_EXISTE")
-    assert cfg.rota == "ROTA_QUE_NAO_EXISTE" and cfg.owner == "legacy"
+    assert cfg.rota == "ROTA_QUE_NAO_EXISTE" and cfg.entrypoint_node == "rag"
 
 
 def test_get_com_redis_fora_do_ar_nao_levanta(monkeypatch):
@@ -86,15 +92,6 @@ def test_rota_do_node():
     assert rr.rota_do_node("rag") == "GERAL"
     assert rr.rota_do_node("ticket") == "TICKET_ABERTURA"
     assert rr.rota_do_node("crud") == "CRUD"
-
-
-def test_delega_para_legado():
-    geral = rr._DEFAULTS["GERAL"]                 # owner=langgraph
-    sigaa = rr._DEFAULTS["SIGAA"]                 # owner=langgraph_conditional
-    assert geral.delega_para_legado(False) is False
-    assert geral.delega_para_legado(True) is False
-    assert sigaa.delega_para_legado(False) is True     # flag OFF → dispatcher.py
-    assert sigaa.delega_para_legado(True) is False     # flag ON → grafo
 
 
 # ─── Validação de escrita ───────────────────────────────────────────────────
@@ -133,10 +130,10 @@ def test_validar_normaliza_bool_e_agente_vazio():
 
 def test_validar_aceita_campos_ok():
     out = rr.validar_campos({
-        "owner": "legacy", "entrypoint_node": "rag", "agente": "academic_knowledge",
-        "planner_steps": ["rag_search"], "k": 5,
+        "owner": "langgraph", "entrypoint_node": "rag", "agente": "academic_knowledge",
+        "k": 5,
     })
-    assert out["owner"] == "legacy" and out["k"] == 5
+    assert out["owner"] == "langgraph" and out["k"] == 5
 
 
 # ─── Snapshot p/ o Hub ──────────────────────────────────────────────────────
@@ -145,14 +142,14 @@ def test_snapshot_merge_com_defaults():
     snap = {s["rota"]: s for s in rr.snapshot([])}
     assert len(snap) == len(rr._DEFAULTS)
     assert snap["GERAL"]["versao"] == 0          # não gravada
-    assert snap["GERAL"]["planner_steps"] == ["rag_search"]
-    assert snap["SIGAA"]["owner"] == "langgraph_conditional"
+    assert "planner_steps" not in snap["GERAL"]
+    assert snap["SIGAA"]["owner"] == "langgraph"
     assert all(s["fixa"] for s in snap.values())
 
 
 def test_snapshot_inclui_rota_personalizada():
     from dataclasses import replace
-    custom = replace(rr.merge_default("TESTE_GUI", {"owner": "legacy"}), versao=3)
+    custom = replace(rr.merge_default("TESTE_GUI", {"owner": "langgraph"}), versao=3)
     snap = {s["rota"]: s for s in rr.snapshot([custom])}
     assert len(snap) == len(rr._DEFAULTS) + 1
     assert snap["TESTE_GUI"]["fixa"] is False
@@ -173,22 +170,21 @@ def test_pode_apagar():
 
 def test_merge_default_rota_personalizada_parte_do_unknown():
     cfg = rr.merge_default("NOVA_ROTA", {"k": 0})
-    assert cfg.owner == "legacy" and cfg.k == 0
+    assert cfg.entrypoint_node == "rag" and cfg.k == 0
 
 
-def test_rota_desconhecida_delega_para_legado_e_nao_gateia():
-    # Comportamento antigo de rota fora de _ROTAS_LANGGRAPH: dispatcher.py,
-    # sem circuit-breaker, sem detour, hint = GERAL.
+def test_rota_desconhecida_cai_no_no_rag_sem_gate():
+    # ADR 0008: rota fora de `_DEFAULTS` roda no grafo pelo nó `rag`, sem
+    # circuit-breaker (agente=None), sem detour, hint = GERAL.
     u = rr.get("INTENT_CUSTOM_DO_OPERADOR")
-    assert u.owner == "legacy"
-    assert u.delega_para_legado(False) is True and u.delega_para_legado(True) is True
+    assert u.entrypoint_node == "rag"
     assert u.agente is None and u.permite_detour is False
-    assert u.doc_type == "geral" and u.k == 6 and u.planner_steps == ("rag_search",)
+    assert u.doc_type == "geral" and u.k == 6
 
 
 # ─── Paridade das 3 fontes ─────────────────────────────────────────────────
 
-def test_defaults_batem_com_o_seed_da_migration_010():
+def test_defaults_batem_com_o_seed_das_migrations():
     assert set(rr._DEFAULTS) == set(SEED_010)
     for rota, cfg in rr._DEFAULTS.items():
         seed = SEED_010[rota]
@@ -199,8 +195,6 @@ def test_defaults_batem_com_o_seed_da_migration_010():
         assert cfg.permite_detour == seed["permite_detour"], rota
         assert cfg.doc_type == seed["doc_type"], rota
         assert cfg.k == seed["k"], rota
-        seed_steps = tuple(seed["planner_steps"]) if seed["planner_steps"] is not None else None
-        assert cfg.planner_steps == seed_steps, rota
 
 
 def test_rotas_sem_cache_derivam_dos_defaults():

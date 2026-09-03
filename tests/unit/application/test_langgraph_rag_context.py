@@ -1,11 +1,9 @@
 # tests/unit/application/test_langgraph_rag_context.py
 """
-Fase 3.5: antes desta fase, `langgraph_experiment/nodes.py::responder_rag_direto`
-chamava RAGSearchService/SynthesisService só com a mensagem crua — rota fina,
-histórico (L1) e fatos (L4) se perdiam ao entrar no grafo, e o SemanticCache
-nunca era consultado (toda pergunta repetida pagava LLM de novo). Estes testes
-cobrem que o contexto agora chega nos dois serviços, e que um hit de cache
-evita as chamadas de RAG/síntese por completo.
+`orchestration/nodes.py::responder_rag_direto` — propagação de contexto pro
+RAG. Cobre que rota fina, `doc_type`/`k` resolvidos, histórico (L1) e fatos
+(L4) chegam em RAGSearchService/SynthesisService, e que um hit de
+SemanticCache evita as chamadas de RAG/síntese por completo.
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,6 +11,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from src.application.orchestration.state import OraculoState
 from src.application.orchestration.nodes import responder_rag_direto, rag_node
 from src.application.orchestration.entrypoint import _reset_payload_para_rota
+
+
+@pytest.fixture(autouse=True)
+def _rag_in_process(monkeypatch):
+    """Estes testes exercem o caminho in-process de `responder_rag_direto`
+    (RAGSearchService/SynthesisService mockados). Força
+    FEATURE_LANGGRAPH_CELERY_DISPATCH=False independente do `.env` local —
+    senão o node despacha um chord Celery real e o teste depende de broker."""
+    from src.infrastructure import settings as settings_module
+
+    monkeypatch.setattr(
+        settings_module.settings, "FEATURE_LANGGRAPH_CELERY_DISPATCH", False,
+    )
 
 
 def _mock_rag_result(chunks=None):

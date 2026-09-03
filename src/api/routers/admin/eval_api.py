@@ -310,7 +310,6 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
     unique_session_id = f"{session_id}_{item['id']}"
 
     try:
-        # 🔥 Usa o novo Cognitive OS em vez do Oracle Chain
         from src.application.orchestration.entrypoint import processar
         result = await processar(
             message=question,
@@ -319,12 +318,10 @@ async def _evaluate_single(item: dict, session_id: str = "eval") -> SingleEvalRe
             history=""
         )
 
+        # `processar()` já devolve a resposta sintetizada (RAG in-process ou
+        # via chord Celery aguardado) — sem mais o polling de Stream do
+        # `dispatcher.py` legado (deletado, ADR 0008).
         answer = result.answer
-        if not answer and getattr(result, "plan_id", None):
-            from src.application.runtime.dispatcher import _aguardar_resposta_final
-            final_data = await _aguardar_resposta_final(result.plan_id, timeout=15.0)
-            if final_data:
-                answer = final_data.get("answer", "")
 
         retrieved_texts = await _get_retrieved_chunks(question, getattr(result, "rota", "GERAL"))
 

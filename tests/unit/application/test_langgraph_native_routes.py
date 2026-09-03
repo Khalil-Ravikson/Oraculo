@@ -1,16 +1,9 @@
 # tests/unit/application/test_langgraph_native_routes.py
 """
-Fase 2d do plano de integração (Decisão 01): CHECK_STATUS/GREETING/
-MEDIA_DOWNLOAD/SIGAA portados de fast-paths de dispatcher.py::processar()
-pra nodes nativos do grafo (langgraph_experiment/nodes.py), atrás de
-settings.FEATURE_LANGGRAPH_NATIVE_ROUTES (desligada por padrão).
-
-Duas camadas cobertas aqui:
-  1. Os 4 nodes em isolamento (lógica reimplementada bate com o fast-path
-     original de dispatcher.py).
-  2. dispatcher_langgraph.py::processar() — flag desligada continua
-     delegando pro dispatcher.py original (comportamento pré-2d,
-     intocado); flag ligada roteia pro grafo.
+ADR 0008: CHECK_STATUS / GREETING / MEDIA_DOWNLOAD / SIGAA como nós nativos
+do grafo (`src/application/orchestration/nodes.py`). Cobre os 4 nós em
+isolamento — a integração via entrypoint está em
+`test_langgraph_native_routes_flag.py`.
 """
 from __future__ import annotations
 

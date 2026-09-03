@@ -1,10 +1,13 @@
-# Aposentadoria do `dispatcher.py` legado — checklist de rollout
+# Aposentadoria do `dispatcher.py` legado — CONCLUÍDA
 
-> **Status: decisão fechada (ADR 0008), execução gated.** As Fases 0-2 do
-> ADR 0008 fecharam os bloqueios de código #2 e #4. Falta só o bloqueio #1
-> (janela de validação em WhatsApp real com `FEATURE_LANGGRAPH_NATIVE_ROUTES`
-> ligada) — quando isso rodar N dias sem regressão, a Fase 3 flipa as 4 rotas
-> pra `owner="langgraph"` e deleta `dispatcher.py` + Planner.
+> **Status: FEITO (ADR 0008 Fase 3).** `dispatcher.py`, o Planner e os workers
+> `worker_greeting`/`worker_action` foram deletados. As 4 rotas condicionais
+> passaram a `owner="langgraph"` (migration 023), a flag
+> `FEATURE_LANGGRAPH_NATIVE_ROUTES` foi removida e a coluna
+> `route_registry.planner_steps` foi dropada. O dono optou por não fazer a
+> janela de validação em WhatsApp real antes de deletar — a validação em
+> produção (§ "Checklist pós-merge" abaixo) fica como acompanhamento, não
+> bloqueio. Este documento vira histórico.
 
 ## Contexto
 
@@ -43,29 +46,34 @@ Depois disso, os únicos consumidores de `dispatcher.py` são:
 `dispatcher_langgraph.py` (delegação intencional) e `process_message_task.py`
 (nada — só via `dispatcher_langgraph`).
 
-## O que falta para efetivamente aposentar
+## Bloqueios — todos fechados
 
-| # | Bloqueio | Tipo | Estado (ADR 0008) |
-|---|---|---|---|
-| 1 | `FEATURE_LANGGRAPH_NATIVE_ROUTES=true` nunca validado via WhatsApp real. Enquanto `false`, `dispatcher.py` é caminho de produção ativo para SIGAA/MEDIA_DOWNLOAD/GREETING/CHECK_STATUS. | **Rollout** | ⏳ **ABERTO** — é o único gargalo restante. Operação. |
-| 2 | Os nodes nativos não rodam circuit-breaker por agente nem semantic cache — `dispatcher.py` roda. | Código | ✅ **FECHADO** (Fase 1). Circuit-breaker movido pro `entrypoint.py`, roda pra TODAS as rotas antes de delegar/entrar no grafo. Semantic cache: as 4 rotas condicionais são `cacheavel=False` — não havia cache pra replicar. |
-| 3 | Fluxo do Planner (`criar_plano` → `_despachar_workers`) só existe em `dispatcher.py`. | Código / avaliação | Cenário A (RAG chord) já replicado por `_responder_rag_via_celery`. Cenário B (`_plano_sigaa`/`_plano_media`) fica sem chamador assim que a flag ligar (`sigaa_node`/`media_download_node` montam a própria chain). Deletar junto com `dispatcher.py`. |
-| 4 | `chain_sse.py` — órfão. | Limpeza | ✅ **FECHADO** (Fase 0). Deletado. |
-| 5 | `_aguardar_resposta_final` (usado por `eval_api.py`). | Config | Dispensável quando `FEATURE_LANGGRAPH_CELERY_DISPATCH` estiver garantidamente ligada (hoje `true` no `.env`). Deletar junto com `dispatcher.py`. |
+| # | Bloqueio | Estado |
+|---|---|---|
+| 1 | `FEATURE_LANGGRAPH_NATIVE_ROUTES=true` nunca validado via WhatsApp real. | Fechado por decisão do dono — validação vira checklist pós-merge, não bloqueio. |
+| 2 | Nodes nativos não rodavam circuit-breaker por agente nem semantic cache. | ✅ Fase 1 — circuit-breaker no `entrypoint.py`, pra todas as rotas. As 4 rotas são `cacheavel=False`, não havia cache pra replicar. |
+| 3 | Fluxo do Planner só existia em `dispatcher.py`. | ✅ Fase 3 — cenário A replicado por `_responder_rag_via_celery`; cenário B coberto por `sigaa_node`/`media_download_node`. Planner deletado. |
+| 4 | `chain_sse.py` órfão. | ✅ Fase 0 — deletado. |
+| 5 | `_aguardar_resposta_final` (usado por `eval_api.py`). | ✅ Fase 3 — `eval_api.py` lê `.answer` direto. |
 
-## Sequência de rollout (Fase 3 do ADR 0008)
+## O que a Fase 3 fez
 
-1. `.env` de homologação: `FEATURE_LANGGRAPH_NATIVE_ROUTES=true` (exige
-   restart — é `settings.py`, não config dinâmica). Sem tocar `route_registry`.
-2. Validar por WhatsApp real, N dias: GREETING, CHECK_STATUS, SIGAA (login
-   CPF/senha completo), MEDIA_DOWNLOAD (link + busca por termo). Comparar com
-   o comportamento de `FEATURE_LANGGRAPH_NATIVE_ROUTES=false`.
-3. Sem regressão: migration que muda `route_registry` das 4 rotas de
-   `langgraph_conditional` → `langgraph` + `_DEFAULTS` + `OWNERS_VALIDOS`
-   → `{"langgraph"}`.
-4. Deletar: `dispatcher.py`, `application/chain/planner.py` (shim),
-   `criar_plano`/`_planejar_com_pro`/`_plano_*`, `_despachar_workers`,
-   `_aguardar_resposta_final`, `_buscar_resposta_cached`. Reescrever
-   `eval_api.py:314-325` pra ler `.answer` direto. Deletar
-   `worker_greeting`/`worker_action` (Planner-only). Deletar
-   `tests/unit/application/test_dispatcher*.py`.
+- Deletou `src/application/runtime/dispatcher.py`, `application/chain/planner.py`,
+  `agents/academic_knowledge/planning.py` (`criar_plano`/`_planejar_com_pro`/
+  `_plano_*`/`_despachar_workers`/`_aguardar_resposta_final`),
+  `worker_greeting`, `worker_action` e `tests/unit/application/test_dispatcher*.py`.
+- `route_registry`: as 4 rotas → `owner="langgraph"`, `OWNERS_VALIDOS = {"langgraph"}`,
+  `RouteConfig.delega_para_legado()` removido, coluna `planner_steps` dropada
+  (migration 023).
+- `FEATURE_LANGGRAPH_NATIVE_ROUTES` removida de `settings.py`,
+  `dynamic_config.py` e do seed de `config_dinamica` (migration 023).
+- `eval_api.py::_evaluate_single` lê `.answer` direto (sem o polling de Stream).
+- Cenário B do Planner (`_plano_sigaa`/`_plano_media`): `sigaa_node` e
+  `media_download_node` montam a própria chain — sem chamador do Planner.
+
+## Checklist pós-merge (validação em produção, não bloqueio)
+
+Rodar por WhatsApp real depois do deploy: GREETING, CHECK_STATUS, SIGAA
+(login CPF/senha completo), MEDIA_DOWNLOAD (link + busca por termo),
+ESCALAR_HUMANO ("quero falar com um atendente"). Regressão aqui é rollback
+do deploy, não do código.

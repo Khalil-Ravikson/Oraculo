@@ -1,6 +1,6 @@
 import pytest
 
-from src.application.runtime.dispatcher import _quer_resposta_em_audio, _remover_pedido_audio
+from src.application.runtime.audio_intake import _quer_resposta_em_audio, _remover_pedido_audio
 
 
 @pytest.mark.parametrize("texto", [

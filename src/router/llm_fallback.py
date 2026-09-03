@@ -7,9 +7,9 @@ camadas rápidas (regex/heurística/KNN) de `supervisor.py` não resolvem.
 FUSÃO ROUTER+ORQUESTRADOR (Fase 3, ver notas.md §5.1): este módulo já
 abrigou dois classificadores concorrentes (`_classificar_com_flash`, rota de
 conteúdo, e um `orchestrate()` que decidia ação de alto nível e SEMPRE
-sobrescrevia o Supervisor em `application/runtime/dispatcher.py` — até 2
-chamadas LLM pagas por mensagem, brigando por precedência, já causa de 2
-incidentes documentados). `orchestrate()` foi absorvido por
+sobrescrevia o Supervisor no dispatcher legado — até 2 chamadas LLM pagas por
+mensagem, brigando por precedência, já causa de 2 incidentes documentados).
+`orchestrate()` foi absorvido por
 `_classificar_com_flash()`, que agora também recebe contexto de memória
 (histórico/última tarefa/memória operacional) e classifica
 CHECK_STATUS/MEDIA_DOWNLOAD junto com as rotas de conteúdo — um único

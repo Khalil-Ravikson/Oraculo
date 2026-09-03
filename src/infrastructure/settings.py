@@ -83,12 +83,8 @@ class Settings(BaseSettings):
     #
     # Fase 2b: rag_node/responder_rag_direto despacham RAG/síntese pros
     # workers Celery especializados (rag_search/synthesis) em vez de
-    # chamar os serviços in-process, como o Planner legado já faz.
+    # chamar os serviços in-process.
     FEATURE_LANGGRAPH_CELERY_DISPATCH: bool = False
-    # Fase 2d: SIGAA/MEDIA_DOWNLOAD/GREETING/CHECK_STATUS passam a ser
-    # nodes nativos do grafo, em vez de dispatcher_langgraph.py delegar
-    # pra dispatcher.py nessas rotas.
-    FEATURE_LANGGRAPH_NATIVE_ROUTES: bool = False
     # Hub v2 Sprint 8: GraphExecutor executa uma topologia de graph_studio
     # ligada ao pipeline real. Nada lê no hot path ainda — a flag existe
     # para o dia em que um trecho piloto (busca/embeddings) for conectado.

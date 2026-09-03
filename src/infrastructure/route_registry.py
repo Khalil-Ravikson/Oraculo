@@ -1,27 +1,18 @@
 """
 infrastructure/route_registry.py — mapa rota→EXECUÇÃO (runtime, sem restart)
 ================================================================================
-Plano A / Fase 2 (docs/historico/plataforma_orientada_a_configuracao.md §D/§K).
-Colapsa numa única fonte os dicts/frozensets hardcoded de rota→execução:
-
-    contracts.ROTAS_SEM_CACHE               → RouteConfig.cacheavel
-    dispatcher.py::_ROTA_PARA_AGENTE        → RouteConfig.agente
-    dispatcher_langgraph.py::_ROTA_TO_ROUTE → RouteConfig.entrypoint_node
-    dispatcher_langgraph.py::_ROTAS_LANGGRAPH / _ROTAS_LANGGRAPH_NATIVAS_CONDICIONAIS
-                                            → RouteConfig.owner
-    dispatcher_langgraph.py::_ROTAS_DETOUR_RAG → RouteConfig.permite_detour
-    supervisor.py::_dag_hint_para_rota::_HINTS → RouteConfig.doc_type / .k / .planner_steps
+Plano A / Fase 2 + ADR 0008. Fonte única de "dada a rota fina, qual nó do
+grafo é o ponto de entrada, com que doc_type/k, se é cacheável, se permite
+detour, e qual agente (kill-switch)".
 
 Mesma mecânica de `dynamic_config.py`:
 
     Redis (espelho de leitura rápida)  →  Postgres (fonte de verdade)  →  _DEFAULTS
 
-`get()` é SÍNCRONO (caminho quente: supervisor, semantic_cache, workers).
+`get()` é SÍNCRONO (caminho quente: supervisor, semantic_cache, entrypoint).
 `aget()` é async com read-repair. `hydrate_redis()` roda no boot do FastAPI e
-de cada worker Celery. Nenhuma leitura levanta — cai em `_DEFAULTS` (as 11
-rotas hardcoded, cópia fiel do estado pré-Fase-2). Rota fora de `ROTAS` cai em
-`_UNKNOWN` (owner="legacy" → dispatcher.py, sem circuit-breaker, sem detour —
-igual ao comportamento antigo de "rota fora de _ROTAS_LANGGRAPH").
+de cada worker Celery. Nenhuma leitura levanta — cai em `_DEFAULTS` (as 12
+rotas hardcoded). Rota fora de `ROTAS` cai em `_UNKNOWN` (nó `rag` do grafo).
 
 NÃO cobre CLASSIFICAÇÃO — regex/embeddings/`router:config` continuam em
 `intents_router` (migration 003), intocada.
@@ -44,12 +35,14 @@ NODES_ENTRYPOINT: frozenset[str] = frozenset({
     "human_handoff",
 })
 
-OWNERS_VALIDOS: frozenset[str] = frozenset({"langgraph", "langgraph_conditional", "legacy"})
+# ADR 0008 Fase 3: `dispatcher.py` legado foi deletado — todo assunto roda
+# no grafo. `owner` fica só como registro (todas as rotas = "langgraph").
+OWNERS_VALIDOS: frozenset[str] = frozenset({"langgraph"})
 
 # Campos que o Hub pode editar (o resto é identidade/auditoria).
 CAMPOS_EDITAVEIS: frozenset[str] = frozenset({
     "entrypoint_node", "owner", "agente", "cacheavel", "permite_detour",
-    "doc_type", "k", "planner_steps",
+    "doc_type", "k",
 })
 _MAX_LEN = {"entrypoint_node": 40, "owner": 24, "agente": 50, "doc_type": 30}
 
@@ -64,56 +57,46 @@ class RouteConfig:
     permite_detour: bool
     doc_type: str | None
     k: int | None
-    planner_steps: tuple[str, ...] | None
     versao: int = 1
-
-    def delega_para_legado(self, native_routes_flag: bool) -> bool:
-        """True se esta rota deve ser tratada por `dispatcher.py` em vez do grafo."""
-        if self.owner == "legacy":
-            return True
-        return self.owner == "langgraph_conditional" and not native_routes_flag
 
 
 def to_dict(cfg: RouteConfig) -> dict:
     """RouteConfig → dict JSON-serializável (fonte única da serialização —
     usada pelo espelho Redis, pelo snapshot do Hub e pelo histórico do repo)."""
-    d = asdict(cfg)
-    d["planner_steps"] = list(cfg.planner_steps) if cfg.planner_steps is not None else None
-    return d
+    return asdict(cfg)
 
 
-def _rc(rota, entrypoint_node, owner, agente, cacheavel, permite_detour, doc_type, k, planner_steps):
+def _rc(rota, entrypoint_node, owner, agente, cacheavel, permite_detour, doc_type, k):
     return RouteConfig(
         rota=rota, entrypoint_node=entrypoint_node, owner=owner, agente=agente,
         cacheavel=cacheavel, permite_detour=permite_detour, doc_type=doc_type, k=k,
-        planner_steps=tuple(planner_steps) if planner_steps is not None else None,
         versao=1,
     )
 
 
-# Fallback hardcoded — cópia fiel do estado pré-Fase-2. Espelha o seed da
-# migration 010. `test_route_registry` trava a paridade contra a migration.
+# Fallback hardcoded. Espelha o seed das migrations 010 + 022 + 023.
+# `test_route_registry` trava a paridade contra elas.
 _DEFAULTS: dict[str, RouteConfig] = {
-    "GERAL":           _rc("GERAL", "rag", "langgraph", "academic_knowledge", True, True, "geral", 6, ["rag_search"]),
-    "CALENDARIO":      _rc("CALENDARIO", "rag", "langgraph", "academic_knowledge", True, True, "calendario", 8, ["rag_search"]),
-    "EDITAL":          _rc("EDITAL", "rag", "langgraph", "academic_knowledge", True, True, "edital", 10, ["rag_search"]),
-    "CONTATOS":        _rc("CONTATOS", "rag", "langgraph", "academic_knowledge", True, True, "contatos", 6, ["rag_search"]),
-    "WIKI":            _rc("WIKI", "rag", "langgraph", "academic_knowledge", True, True, "wiki_ctic", 6, ["rag_search"]),
-    "CRUD":            _rc("CRUD", "crud", "langgraph", "tickets", False, False, None, 0, ["crud_tool"]),
-    "TICKET_ABERTURA": _rc("TICKET_ABERTURA", "ticket", "langgraph", "tickets", True, False, None, 0, ["ticket_abertura"]),
-    "GREETING":        _rc("GREETING", "greeting", "langgraph_conditional", None, False, False, None, 0, ["greeting"]),
-    "SIGAA":           _rc("SIGAA", "sigaa", "langgraph_conditional", "sigaa", False, False, None, 0, ["sigaa_biblioteca"]),
-    "MEDIA_DOWNLOAD":  _rc("MEDIA_DOWNLOAD", "media_download", "langgraph_conditional", None, False, False, None, 0, None),
-    "CHECK_STATUS":    _rc("CHECK_STATUS", "check_status", "langgraph_conditional", None, False, False, None, 0, []),
+    "GERAL":           _rc("GERAL", "rag", "langgraph", "academic_knowledge", True, True, "geral", 6),
+    "CALENDARIO":      _rc("CALENDARIO", "rag", "langgraph", "academic_knowledge", True, True, "calendario", 8),
+    "EDITAL":          _rc("EDITAL", "rag", "langgraph", "academic_knowledge", True, True, "edital", 10),
+    "CONTATOS":        _rc("CONTATOS", "rag", "langgraph", "academic_knowledge", True, True, "contatos", 6),
+    "WIKI":            _rc("WIKI", "rag", "langgraph", "academic_knowledge", True, True, "wiki_ctic", 6),
+    "CRUD":            _rc("CRUD", "crud", "langgraph", "tickets", False, False, None, 0),
+    "TICKET_ABERTURA": _rc("TICKET_ABERTURA", "ticket", "langgraph", "tickets", True, False, None, 0),
+    "GREETING":        _rc("GREETING", "greeting", "langgraph", None, False, False, None, 0),
+    "SIGAA":           _rc("SIGAA", "sigaa", "langgraph", "sigaa", False, False, None, 0),
+    "MEDIA_DOWNLOAD":  _rc("MEDIA_DOWNLOAD", "media_download", "langgraph", None, False, False, None, 0),
+    "CHECK_STATUS":    _rc("CHECK_STATUS", "check_status", "langgraph", None, False, False, None, 0),
     # ADR 0008 Fase 2: escalonamento pra atendente humano. owner="langgraph"
     # (nó nativo, sem flag), agente=NULL (utilitário, sempre ligado), nunca
     # cacheável, não permite detour (é terminal).
-    "ESCALAR_HUMANO":  _rc("ESCALAR_HUMANO", "human_handoff", "langgraph", None, False, False, None, 0, None),
+    "ESCALAR_HUMANO":  _rc("ESCALAR_HUMANO", "human_handoff", "langgraph", None, False, False, None, 0),
 }
 
 ROTAS: frozenset[str] = frozenset(_DEFAULTS)
 
-# As 11 rotas que vivem no código — nunca deletáveis pelo painel. Rotas
+# As rotas fixas que vivem no código — nunca deletáveis pelo painel. Rotas
 # criadas em /hub/routes existem só no Postgres (+ espelho Redis) e podem ser
 # apagadas. `ROTAS` continua sendo só as fixas (usado por checagens síncronas
 # do caminho quente que não têm sessão de banco).
@@ -138,15 +121,13 @@ def pode_apagar(rota: str) -> bool:
     return rota not in DEFAULTS_FIXOS
 
 # Rota classificada mas não registrada (ex.: intent custom adicionada por um
-# operador). Comportamento antigo: `decision.rota not in _ROTAS_LANGGRAPH` →
-# delegava pra dispatcher.py, sem circuit-breaker por agente, sem detour, e o
-# `_dag_hint` caía em `_HINTS["GERAL"]`. `_UNKNOWN` reproduz isso.
+# operador). Cai no nó `rag` do grafo, cacheável, sem detour.
 _UNKNOWN: RouteConfig = _rc(
-    "?", "rag", "legacy", None, True, False, "geral", 6, ["rag_search"],
+    "?", "rag", "langgraph", None, True, False, "geral", 6,
 )
 
 # Rota canônica por node de entrada (reverso, p/ o caminho de resume do
-# dispatcher_langgraph). Ambíguo só p/ "rag" → resolve pra GERAL.
+# entrypoint). Ambíguo só p/ "rag" → resolve pra GERAL.
 _NODE_PARA_ROTA: dict[str, str] = {
     "rag": "GERAL", "ticket": "TICKET_ABERTURA", "crud": "CRUD",
     "greeting": "GREETING", "sigaa": "SIGAA",
@@ -166,13 +147,11 @@ def _redis_key(rota: str) -> str:
 
 
 def _from_dict(d: dict) -> RouteConfig:
-    ps = d.get("planner_steps")
     return RouteConfig(
         rota=d["rota"], entrypoint_node=d["entrypoint_node"], owner=d["owner"],
         agente=d.get("agente"), cacheavel=bool(d["cacheavel"]),
         permite_detour=bool(d.get("permite_detour", False)),
         doc_type=d.get("doc_type"), k=d.get("k"),
-        planner_steps=tuple(ps) if ps is not None else None,
         versao=int(d.get("versao", 1)),
     )
 
@@ -212,13 +191,12 @@ def _default(rota: str) -> RouteConfig:
 
 def get(rota: str) -> RouteConfig:
     """RouteConfig da rota. Redis → _DEFAULTS. Nunca levanta. Rota fora de
-    `ROTAS` → `_UNKNOWN` (delega pro dispatcher.py, igual ao comportamento
-    antigo de rota fora de `_ROTAS_LANGGRAPH`)."""
+    `ROTAS` → `_UNKNOWN` (nó `rag` do grafo)."""
     return _ler_redis(rota) or _default(rota)
 
 
 def rota_do_node(node: str) -> str:
-    """Reverso node→rota canônica (caminho de resume do dispatcher_langgraph)."""
+    """Reverso node→rota canônica (caminho de resume do entrypoint)."""
     return _NODE_PARA_ROTA.get(node, (node or "GERAL").upper())
 
 
@@ -322,11 +300,6 @@ def validar_campos(campos: dict) -> dict:
         if out["k"] < 0:
             raise CamposInvalidos("k não pode ser negativo")
 
-    if out.get("planner_steps") is not None:
-        ps = out["planner_steps"]
-        if not isinstance(ps, list) or not all(isinstance(s, str) for s in ps):
-            raise CamposInvalidos("planner_steps deve ser uma lista de strings ou nulo")
-
     for b in ("cacheavel", "permite_detour"):
         if b in out:
             out[b] = bool(out[b])
@@ -341,11 +314,6 @@ def validar_campos(campos: dict) -> dict:
 def merge_default(rota: str, campos: dict) -> RouteConfig:
     """RouteConfig resultante de aplicar `campos` sobre o default da rota —
     usado quando a linha ainda não existe no Postgres. Rota personalizada
-    (fora de `_DEFAULTS`) parte de `_UNKNOWN` (motor clássico)."""
+    (fora de `_DEFAULTS`) parte de `_UNKNOWN` (nó `rag`)."""
     base = _DEFAULTS.get(rota) or replace(_UNKNOWN, rota=rota)
-    ps = campos.get("planner_steps", base.planner_steps)
-    return replace(
-        base,
-        **{k: v for k, v in campos.items() if k != "planner_steps"},
-        planner_steps=tuple(ps) if ps is not None else None,
-    )
+    return replace(base, **campos)
