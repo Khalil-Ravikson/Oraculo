@@ -311,6 +311,39 @@ async def system_flags(_: TokenPayload = Depends(require_admin_jwt)):
     }
 
 
+@router.get("/rag/status")
+async def rag_status(_: TokenPayload = Depends(require_admin_jwt)):
+    """Cards do painel inicial (`home.js`): chunks indexados, mensagens
+    processadas e hit do cache nas últimas 24h. Tudo best-effort — se uma
+    fonte cai, o campo vem 0/None e os outros ainda preenchem."""
+    chunks_count = 0
+    try:
+        from src.infrastructure.redis_client import diagnosticar
+        diag = diagnosticar()
+        chunks_count = int(diag.get("total_chunks", 0) or 0)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [ADMIN] rag_status: chunks indisponível: %s", exc)
+
+    messages_today = 0
+    cache_hit_rate = None
+    try:
+        from src.infrastructure.database.session import AsyncSessionLocal
+        from src.infrastructure.repositories.observability_repository import ObservabilityRepository
+        async with AsyncSessionLocal() as session:
+            m = await ObservabilityRepository(session).get_metricas_dashboard(horas=24)
+        messages_today = int(m.get("total_msgs", 0) or 0)
+        pct = m.get("cache_hit_pct")
+        cache_hit_rate = round(float(pct) / 100.0, 3) if pct is not None else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [ADMIN] rag_status: métricas indisponíveis: %s", exc)
+
+    return {
+        "chunks_count": chunks_count,
+        "messages_today": messages_today,
+        "cache_hit_rate": cache_hit_rate,
+    }
+
+
 @router.post("/system/prompt")
 async def set_prompt(
     body:    PromptRequest,
