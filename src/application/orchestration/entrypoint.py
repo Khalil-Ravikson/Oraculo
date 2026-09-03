@@ -83,7 +83,10 @@ async def _get_graph():
         saver = await _saver_cm.__aenter__()  # fechado explicitamente em on_worker_process_shutdown
         await saver.asetup()
         _graph = build_graph(saver)
-        _graph_node_ids = frozenset(n.id for n in _graph.get_graph().nodes.values())
+        try:
+            _graph_node_ids = frozenset(n.id for n in _graph.get_graph().nodes.values())
+        except Exception:  # noqa: BLE001 — só a rede de segurança de rota inválida depende disso
+            _graph_node_ids = frozenset()
         logger.info("🧭 [ORCH] Grafo compilado com AsyncRedisSaver — checkpoint compartilhado entre API/workers.")
     return _graph
 
