@@ -4,20 +4,22 @@ tests/unit/orchestration/test_builder.py
 Trava a topologia do grafo de orquestração (`src/application/orchestration/
 builder.py::build_graph`).
 
-Fase 0 (ADR 0008): este teste congela o conjunto de nós e arestas herdado de
-`langgraph_experiment/graph.py` no momento da migração — é a rede de segurança
-que garante que mover os módulos não mudou o grafo. Quando as Fases 1-5
-adicionarem nós de front (intake/gate/policy/human_handoff) a atualização
+Este teste congela o conjunto de nós e arestas do grafo de orquestração —
+rede de segurança contra mudanças acidentais de topologia. Toda alteração
 desta baseline deve ser DELIBERADA, num commit que também explica a mudança.
+
+Histórico:
+- Fase 0: baseline igual a `langgraph_experiment/graph.py`.
+- Fase 2: + nó `human_handoff` (rota ESCALAR_HUMANO) e suas 2 arestas.
 """
 from __future__ import annotations
 
 from src.application.orchestration.builder import build_graph
 
-# Baseline congelada da Fase 0 — igual a langgraph_experiment/graph.py.
 NODES_ESPERADOS = {
     "__start__", "__end__",
     "classify", "rag", "check_status", "greeting", "media_download", "sigaa",
+    "human_handoff",
     "ticket_ask_tipo", "ticket_ask_categoria", "ticket_ask_queixa",
     "ticket_confirm", "ticket_save",
     "crud_ask_campo", "crud_ask_valor", "crud_confirm", "crud_save",
@@ -33,12 +35,14 @@ EDGES_ESPERADAS = {
     ("classify", "greeting", True),
     ("classify", "media_download", True),
     ("classify", "sigaa", True),
+    ("classify", "human_handoff", True),
     # terminais simples
     ("rag", "__end__", False),
     ("check_status", "__end__", False),
     ("greeting", "__end__", False),
     ("media_download", "__end__", False),
     ("sigaa", "__end__", False),
+    ("human_handoff", "__end__", False),
     ("ticket_save", "__end__", False),
     ("crud_save", "__end__", False),
     # funil de ticket

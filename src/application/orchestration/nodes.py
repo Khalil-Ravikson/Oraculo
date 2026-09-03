@@ -24,10 +24,11 @@ _RE_CRUD = re.compile(
 
 
 def classify_node(state: OraculoState) -> dict:
-    # Se quem chamou o grafo já decidiu a rota (ex: dispatcher_langgraph.py,
-    # que reaproveita o Supervisor real), respeita — só cai no regex quando
-    # invocado direto (ex: run_test.py, teste manual via CLI).
-    if state.route in ("rag", "ticket", "crud"):
+    # Se quem chamou o grafo já decidiu a rota (o `entrypoint.py`, que
+    # reaproveita o Supervisor real de 5 camadas), respeita — em produção
+    # `state.route` SEMPRE chega preenchido. O regex abaixo só serve ao REPL
+    # `scripts/graph_repl.py` (invocação direta sem rota).
+    if state.route:
         return {}
     if _RE_CRUD.search(state.message):
         return {"route": "crud"}
@@ -341,6 +342,77 @@ async def sigaa_node(state: OraculoState) -> dict:
         )
         return {"answer": "Não consegui processar sua solicitação do SIGAA agora. Tente novamente. 🙏"}
     return {"answer": resultado.answer, "status": resultado.status}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ESCALAR_HUMANO — nó terminal (ADR 0008 Fase 2). Silencia o bot pra a sessão
+# por 24h (`handoff:session:{id}`), registra na fila `handoff:queue` e avisa
+# um grupo/número de suporte. `gate`/`entrypoint` checam `handoff:session:*`
+# no topo e não respondem nada enquanto durar. Sai do modo com `$voltar <jid>`
+# (admin) ou o TTL.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_HANDOFF_TTL_S = 86400
+_MSG_HANDOFF = (
+    "Vou te encaminhar para um atendente humano. 🙋\n"
+    "Já avisei a equipe — em breve alguém continua o atendimento por aqui. "
+    "Enquanto isso, o assistente automático fica em pausa nesta conversa."
+)
+
+
+async def human_handoff_node(state: OraculoState) -> dict:
+    from src.infrastructure.redis_client import get_redis_text
+    from src.infrastructure.settings import settings
+
+    session_id = state.session_id
+    r = get_redis_text()
+
+    try:
+        r.set(f"handoff:session:{session_id}", "1", ex=_HANDOFF_TTL_S)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️ [HANDOFF] Falha ao gravar handoff:session:%s: %s", session_id, exc)
+
+    nome = (state.user_context or {}).get("nome") or "(sem nome)"
+    chat_id = (state.user_context or {}).get("chat_id") or session_id
+
+    hist_curto = ""
+    try:
+        from src.memory.services.redis_memory_service import get_cognitive_memory
+        hist_curto = (await get_cognitive_memory().format_history(session_id) or "")[-600:]
+    except Exception:  # noqa: BLE001
+        pass
+
+    aviso = (
+        "🙋 *Atendimento humano solicitado*\n"
+        f"Sessão: `{session_id}`\n"
+        f"Pessoa: {nome}\n"
+        f"Última mensagem: {state.message[:200]}\n"
+        + (f"\n_Histórico recente:_\n{hist_curto}" if hist_curto else "")
+        + f"\n\nO bot está pausado para esta conversa por 24h. Reativar: `$voltar {session_id}`"
+    )
+
+    try:
+        r.xadd("handoff:queue", {
+            "session_id": session_id, "chat_id": chat_id, "nome": nome,
+            "mensagem": state.message[:300], "ts": str(int(time.time())),
+        }, maxlen=500, approximate=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️ [HANDOFF] Falha ao gravar handoff:queue: %s", exc)
+
+    destino = settings.SUPPORT_GROUP_JID or (
+        (settings.ADMIN_NUMBERS or "").split(",")[0].strip()
+    )
+    if destino:
+        try:
+            from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
+            await EvolutionAdapter().enviar_mensagem(destino, aviso)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("⚠️ [HANDOFF] Falha ao avisar suporte (%s): %s", destino, exc)
+    else:
+        logger.warning("⚠️ [HANDOFF] Sem SUPPORT_GROUP_JID nem ADMIN_NUMBERS — aviso não enviado.")
+
+    logger.info("🙋 [HANDOFF] Sessão %s encaminhada a atendente humano.", session_id)
+    return {"answer": _MSG_HANDOFF, "status": "handoff", "handoff": True}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

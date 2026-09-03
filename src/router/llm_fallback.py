@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 class RoutingDecision(BaseModel):
     """Esquema Pydantic para validação estruturada da decisão de roteamento pelo Gemini."""
-    rota: str = Field(description="A rota: CALENDARIO, EDITAL, CONTATOS, WIKI, CRUD, TICKET_ABERTURA, GREETING, SIGAA, MEDIA_DOWNLOAD, CHECK_STATUS, ou GERAL")
+    rota: str = Field(description="A rota: CALENDARIO, EDITAL, CONTATOS, WIKI, CRUD, TICKET_ABERTURA, GREETING, SIGAA, MEDIA_DOWNLOAD, CHECK_STATUS, ESCALAR_HUMANO, ou GERAL")
     confianca: float = Field(description="Nível de certeza da decisão (0.0 a 1.0)")
     motivo: str = Field(description="Justificativa breve da decisão (máx 60 caracteres)")
 
@@ -52,6 +52,7 @@ se fornecido) e classificá-la em EXATAMENTE uma das rotas válidas.
 - SIGAA: Consultas a dados acadêmicos pessoais do discente no SIGAA, incluindo notas, média, histórico escolar, coeficiente de rendimento (CR), índice de rendimento acadêmico (IRA), turmas do semestre, salas de aula, horários, professores, carga horária e estrutura curricular.
 - MEDIA_DOWNLOAD: Pedidos para baixar/receber um vídeo, áudio, ou criar um sticker (ex: "manda um vídeo de gatos aí", "quero um sticker dessa foto"), mesmo sem os verbos "buscar"/"baixar" explícitos.
 - CHECK_STATUS: Usuário pergunta sobre o andamento/resultado de uma tarefa ou pedido ANTERIOR (ex: "e aí, já saiu?", "como ficou aquilo que pedi?"), ou faz referência direta à "requisição anterior". Só classifique assim se houver contexto de [ÚLTIMA TAREFA]/[MEMÓRIA OPERACIONAL] abaixo indicando que existe algo pendente a checar — sem esse contexto, uma pergunta sobre "status"/"andamento" de algo que não foi mencionado antes é GERAL.
+- ESCALAR_HUMANO: Usuário pede explicitamente para falar com uma pessoa/atendente humano, demonstra frustração clara com o bot e quer outro canal de atendimento, ou recusa continuar falando com o robô (ex: "quero falar com um atendente", "me passa pra uma pessoa de verdade", "não quero mais falar com robô"). NÃO classifique assim uma pergunta que só menciona "atendente"/"responsável" de um setor (isso é CONTATOS ou GERAL).
 - GERAL: Perguntas fora do escopo oficial da UEMA, conversas informais ou mensagens totalmente ambíguas que não se encaixam em nenhuma outra rota.
 </rotas_validas>
 

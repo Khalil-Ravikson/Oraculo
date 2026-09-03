@@ -41,6 +41,7 @@ _PREFIXO_REDIS = "route:"
 # em `src/application/orchestration/builder.py::build_graph()` (o que vira `state.route`).
 NODES_ENTRYPOINT: frozenset[str] = frozenset({
     "rag", "ticket", "crud", "greeting", "sigaa", "media_download", "check_status",
+    "human_handoff",
 })
 
 OWNERS_VALIDOS: frozenset[str] = frozenset({"langgraph", "langgraph_conditional", "legacy"})
@@ -104,6 +105,10 @@ _DEFAULTS: dict[str, RouteConfig] = {
     "SIGAA":           _rc("SIGAA", "sigaa", "langgraph_conditional", "sigaa", False, False, None, 0, ["sigaa_biblioteca"]),
     "MEDIA_DOWNLOAD":  _rc("MEDIA_DOWNLOAD", "media_download", "langgraph_conditional", None, False, False, None, 0, None),
     "CHECK_STATUS":    _rc("CHECK_STATUS", "check_status", "langgraph_conditional", None, False, False, None, 0, []),
+    # ADR 0008 Fase 2: escalonamento pra atendente humano. owner="langgraph"
+    # (nó nativo, sem flag), agente=NULL (utilitário, sempre ligado), nunca
+    # cacheável, não permite detour (é terminal).
+    "ESCALAR_HUMANO":  _rc("ESCALAR_HUMANO", "human_handoff", "langgraph", None, False, False, None, 0, None),
 }
 
 ROTAS: frozenset[str] = frozenset(_DEFAULTS)
@@ -146,6 +151,7 @@ _NODE_PARA_ROTA: dict[str, str] = {
     "rag": "GERAL", "ticket": "TICKET_ABERTURA", "crud": "CRUD",
     "greeting": "GREETING", "sigaa": "SIGAA",
     "media_download": "MEDIA_DOWNLOAD", "check_status": "CHECK_STATUS",
+    "human_handoff": "ESCALAR_HUMANO",
 }
 
 

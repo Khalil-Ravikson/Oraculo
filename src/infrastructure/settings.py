@@ -139,6 +139,9 @@ class Settings(BaseSettings):
     ADMIN_CONFIRMATION_TOKEN:  str = ""
     STUDENT_NUMBERS:           str = ""
     ALLOWED_GROUP_ID: str = "120363409704662108@g.us"
+    # ADR 0008 Fase 2: pra onde o nó `human_handoff` manda o aviso de que uma
+    # conversa precisa de atendente humano. Vazio → cai no 1º de ADMIN_NUMBERS.
+    SUPPORT_GROUP_JID: str = ""
     # Fallback quando não há override em `admin:usd_brl_rate` (Redis, editável
     # via /hub/llm-custo) — cotação aproximada, não uma fonte de câmbio ao
     # vivo (decisão deliberada: taxa fixa configurável, sem API externa).

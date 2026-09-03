@@ -23,6 +23,7 @@ from src.application.orchestration.nodes import (
     crud_confirm,
     crud_save,
     greeting_node,
+    human_handoff_node,
     media_download_node,
     rag_node,
     sigaa_node,
@@ -103,6 +104,7 @@ def build_graph(checkpointer=None):
     graph.add_node("greeting", _instrumented("greeting", greeting_node))
     graph.add_node("media_download", _instrumented("media_download", media_download_node))
     graph.add_node("sigaa", _instrumented("sigaa", sigaa_node))
+    graph.add_node("human_handoff", _instrumented("human_handoff", human_handoff_node))
     graph.add_node("ticket_ask_tipo", _instrumented("ticket_ask_tipo", ticket_ask_tipo))
     graph.add_node("ticket_ask_categoria", _instrumented("ticket_ask_categoria", ticket_ask_categoria))
     graph.add_node("ticket_ask_queixa", _instrumented("ticket_ask_queixa", ticket_ask_queixa))
@@ -124,6 +126,7 @@ def build_graph(checkpointer=None):
             # dispatcher_langgraph.py::_ROTAS_LANGGRAPH_NATIVAS_CONDICIONAIS).
             "check_status": "check_status", "greeting": "greeting",
             "media_download": "media_download", "sigaa": "sigaa",
+            "human_handoff": "human_handoff",
         },
     )
     graph.add_edge("rag", END)
@@ -131,6 +134,7 @@ def build_graph(checkpointer=None):
     graph.add_edge("greeting", END)
     graph.add_edge("media_download", END)
     graph.add_edge("sigaa", END)
+    graph.add_edge("human_handoff", END)
 
     graph.add_conditional_edges(
         "ticket_ask_tipo", _tipo_valido,

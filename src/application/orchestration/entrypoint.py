@@ -212,6 +212,23 @@ async def processar(
 ) -> OSResult:
     t0 = time.monotonic()
 
+    # ── -3. Sessão em atendimento humano (ADR 0008 Fase 2) ───────────────────
+    # `human_handoff_node` silenciou o bot pra esta sessão. Não responde nada
+    # (nem "digitando…") enquanto durar `handoff:session:{id}` — o atendente
+    # humano assume. Sai do modo com `$voltar <jid>` (admin) ou o TTL de 24h.
+    from src.infrastructure.redis_client import get_redis_text
+
+    r = get_redis_text()
+    try:
+        if r.exists(f"handoff:session:{session_id}"):
+            ms = int((time.monotonic() - t0) * 1000)
+            return OSResult(
+                answer="", plan_id="handoff_muted", rota="ESCALAR_HUMANO",
+                cache_hit=False, total_ms=ms, status="handoff",
+            )
+    except Exception:  # noqa: BLE001 — Redis fora não pode travar o pipeline
+        pass
+
     # ── -2. Fast-Path ÁUDIO (STT) ────────────────────────────────────────────
     # Roda ANTES de tudo, inclusive dos labs REST/MCP abaixo — nota de voz
     # chega com `message` vazio, e ESTE módulo (não dispatcher.py) é o entry
@@ -314,10 +331,6 @@ async def processar(
     # query de busca em vez de continuar o login. Mesma ordem/posição
     # relativa que dispatcher.py já usa (guardrails antes, HITL legado
     # depois), só que aqui em vez de lá.
-    from src.infrastructure.redis_client import get_redis_text
-
-    r = get_redis_text()
-
     from src.application.chain.guardrails import get_input_guardrail
 
     def _validate_sync():

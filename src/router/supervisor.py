@@ -139,9 +139,24 @@ _RE_CHECK_STATUS = re.compile(
 # Rota WIKI (não SIGAA — esses sistemas não são o portal do aluno).
 _RE_SISTEMA_WIKI = re.compile(r'\b(sipac|siguema)\b', re.I)
 
+# Pedido explícito de atendimento humano (ADR 0008, Fase 2) — L1 pra não
+# gastar token do Flash num pedido inequívoco. Só frases claras: "atendente"
+# sozinho num contexto acadêmico não conta (ex.: "quem é o atendente da
+# biblioteca?" cai no RAG normal), por isso exige o verbo de contato.
+_RE_HUMANO = re.compile(
+    r'\b(falar|conversar|transferir?|me\s+passa)\b.{0,20}\bcom\s+(um[a]?\s+)?'
+    r'(algu[ée]m|pessoa|gente|atendente|humano|respons[áa]vel)\b|'
+    r'\b(quero|preciso|queria)\b.{0,15}\b(um[a]?\s+)?(atendente|humano)\b|'
+    r'\batend(?:ente|imento)\s+humano\b|\bpessoa\s+de\s+verdade\b|'
+    r'\bn[ãa]o\s+quero\s+(falar\s+com\s+)?(rob[ôo]|bot|m[áa]quina|assistente)\b',
+    re.I,
+)
+
 
 def _regex_rapido(query: str) -> str | None:
     """Layer 1: Fast-path regex ANTES do Flash — economiza ~50 tokens."""
+    if _RE_HUMANO.search(query):
+        return "ESCALAR_HUMANO"
     if _RE_YTB.search(query):
         return "MEDIA_DOWNLOAD"
     if _RE_INSTA.search(query):

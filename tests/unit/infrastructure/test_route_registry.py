@@ -13,11 +13,22 @@ import pytest
 from src.infrastructure import route_registry as rr
 from src.router.contracts import ROTAS_SEM_CACHE
 
-_MIG = pathlib.Path(__file__).parents[3] / "migrations" / "versions" / "010_route_registry.py"
-_spec = importlib.util.spec_from_file_location("_migration_010", _MIG)
-_migration_010 = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_migration_010)
-SEED_010 = {row["rota"]: row for row in _migration_010._SEED}
+_VERS = pathlib.Path(__file__).parents[3] / "migrations" / "versions"
+
+
+def _carregar_seed(nome: str) -> dict:
+    spec = importlib.util.spec_from_file_location(f"_mig_{nome}", _VERS / f"{nome}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return {row["rota"]: row for row in getattr(mod, "_SEED", [])}
+
+
+# Todas as migrations que semeiam linhas em `route_registry`. `_DEFAULTS` do
+# código deve bater com a UNIÃO delas.
+SEED_010 = {
+    **_carregar_seed("010_route_registry"),
+    **_carregar_seed("022_route_registry_escalar_humano"),
+}
 
 
 class _FakeRedisText:
@@ -132,7 +143,7 @@ def test_validar_aceita_campos_ok():
 
 def test_snapshot_merge_com_defaults():
     snap = {s["rota"]: s for s in rr.snapshot([])}
-    assert len(snap) == 11
+    assert len(snap) == len(rr._DEFAULTS)
     assert snap["GERAL"]["versao"] == 0          # não gravada
     assert snap["GERAL"]["planner_steps"] == ["rag_search"]
     assert snap["SIGAA"]["owner"] == "langgraph_conditional"
@@ -143,7 +154,7 @@ def test_snapshot_inclui_rota_personalizada():
     from dataclasses import replace
     custom = replace(rr.merge_default("TESTE_GUI", {"owner": "legacy"}), versao=3)
     snap = {s["rota"]: s for s in rr.snapshot([custom])}
-    assert len(snap) == 12
+    assert len(snap) == len(rr._DEFAULTS) + 1
     assert snap["TESTE_GUI"]["fixa"] is False
     assert snap["TESTE_GUI"]["versao"] == 3
 

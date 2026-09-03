@@ -14,7 +14,7 @@ from dataclasses import dataclass
 # ── Rotas válidas ──────────────────────────────────────────────────────────────
 ROTAS_VALIDAS = frozenset({
     "CALENDARIO", "EDITAL", "CONTATOS", "WIKI", "CRUD", "TICKET_ABERTURA", "GREETING", "GERAL", "MEDIA_DOWNLOAD", "SIGAA",
-    "CHECK_STATUS",
+    "CHECK_STATUS", "ESCALAR_HUMANO",
 })
 
 # ── Workers Celery válidos para o Planner ──────────────────────────────────────
@@ -29,7 +29,7 @@ VALID_WORKERS = frozenset({"rag_search", "synthesis", "greeting"})
 # worker_synthesis.py / dispatcher.py / nodes.py via `route_registry.get(rota)`.
 # Este frozenset fica como baseline hardcoded (espelha `route_registry._DEFAULTS`;
 # `test_route_registry` trava a paridade) e para consumidores de teste/doc.
-ROTAS_SEM_CACHE = frozenset({"SIGAA", "MEDIA_DOWNLOAD", "GREETING", "CRUD", "CHECK_STATUS"})
+ROTAS_SEM_CACHE = frozenset({"SIGAA", "MEDIA_DOWNLOAD", "GREETING", "CRUD", "CHECK_STATUS", "ESCALAR_HUMANO"})
 
 
 @dataclass

@@ -389,6 +389,13 @@ async def _handle_message_impl(**kwargs) -> None:
     
     # ── LLM (COGNITIVE OS) ────────────────────────────────────────────────────
     if decision.target == DispatchTarget.LLM:
+        # ADR 0008 Fase 2: sessão em atendimento humano — o bot fica em
+        # silêncio total (nem "digitando…"). O entrypoint também checa isso,
+        # mas aqui evitamos o `enviar_digitando` desnecessário.
+        if r.exists(f"handoff:session:{sender}"):
+            logger.info("🙋 [HANDOFF] Sessão %s em atendimento humano — mensagem ignorada.", sender)
+            return
+
         user_context = {
             "nome":  user_data.get("nome", "") if user_data else kwargs.get("push_name", "Estudante"),
             "curso": user_data.get("curso", "") if user_data else "Instituição",
