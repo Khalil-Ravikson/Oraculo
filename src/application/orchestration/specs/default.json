@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "entrypoint": "classify",
+  "nodes": [
+    { "id": "classify",             "type": "classify",             "locked": true },
+    { "id": "rag",                  "type": "rag" },
+    { "id": "check_status",         "type": "check_status" },
+    { "id": "greeting",             "type": "greeting" },
+    { "id": "media_download",       "type": "media_download" },
+    { "id": "sigaa",                "type": "sigaa" },
+    { "id": "human_handoff",        "type": "human_handoff" },
+    { "id": "ticket_ask_tipo",      "type": "ticket_ask_tipo",      "locked": true },
+    { "id": "ticket_ask_categoria", "type": "ticket_ask_categoria", "locked": true },
+    { "id": "ticket_ask_queixa",    "type": "ticket_ask_queixa",    "locked": true },
+    { "id": "ticket_confirm",       "type": "ticket_confirm",       "locked": true },
+    { "id": "ticket_save",          "type": "ticket_save",          "locked": true },
+    { "id": "crud_ask_campo",       "type": "crud_ask_campo",       "locked": true },
+    { "id": "crud_ask_valor",       "type": "crud_ask_valor",       "locked": true },
+    { "id": "crud_confirm",         "type": "crud_confirm",         "locked": true },
+    { "id": "crud_save",            "type": "crud_save",            "locked": true }
+  ],
+  "edges": [
+    { "source": "classify", "when": "by_state_route", "route_value": "rag",            "target": "rag",            "locked": true },
+    { "source": "classify", "when": "by_state_route", "route_value": "ticket",         "target": "ticket_ask_tipo", "locked": true },
+    { "source": "classify", "when": "by_state_route", "route_value": "crud",           "target": "crud_ask_campo",  "locked": true },
+    { "source": "classify", "when": "by_state_route", "route_value": "check_status",   "target": "check_status",    "locked": true },
+    { "source": "classify", "when": "by_state_route", "route_value": "greeting",       "target": "greeting",        "locked": true },
+    { "source": "classify", "when": "by_state_route", "route_value": "media_download", "target": "media_download",  "locked": true },
+    { "source": "classify", "when": "by_state_route", "route_value": "sigaa",          "target": "sigaa",           "locked": true },
+    { "source": "classify", "when": "by_state_route", "route_value": "human_handoff",  "target": "human_handoff",   "locked": true },
+
+    { "source": "rag",            "target": "__end__", "locked": true },
+    { "source": "check_status",    "target": "__end__", "locked": true },
+    { "source": "greeting",        "target": "__end__", "locked": true },
+    { "source": "media_download",  "target": "__end__", "locked": true },
+    { "source": "sigaa",           "target": "__end__", "locked": true },
+    { "source": "human_handoff",   "target": "__end__", "locked": true },
+
+    { "source": "ticket_ask_tipo", "when": "ticket_tipo_valido", "route_value": "ticket_ask_tipo",      "target": "ticket_ask_tipo",      "locked": true },
+    { "source": "ticket_ask_tipo", "when": "ticket_tipo_valido", "route_value": "ticket_ask_categoria", "target": "ticket_ask_categoria", "locked": true },
+    { "source": "ticket_ask_tipo", "when": "ticket_tipo_valido", "route_value": "__end__",              "target": "__end__",              "locked": true },
+
+    { "source": "ticket_ask_categoria", "when": "ticket_categoria_valida", "route_value": "ticket_ask_categoria", "target": "ticket_ask_categoria", "locked": true },
+    { "source": "ticket_ask_categoria", "when": "ticket_categoria_valida", "route_value": "ticket_ask_queixa",    "target": "ticket_ask_queixa",    "locked": true },
+    { "source": "ticket_ask_categoria", "when": "ticket_categoria_valida", "route_value": "__end__",              "target": "__end__",              "locked": true },
+
+    { "source": "ticket_ask_queixa", "when": "ticket_queixa_valida", "route_value": "ticket_ask_queixa", "target": "ticket_ask_queixa", "locked": true },
+    { "source": "ticket_ask_queixa", "when": "ticket_queixa_valida", "route_value": "ticket_confirm",    "target": "ticket_confirm",    "locked": true },
+    { "source": "ticket_ask_queixa", "when": "ticket_queixa_valida", "route_value": "__end__",           "target": "__end__",           "locked": true },
+
+    { "source": "ticket_confirm", "when": "ticket_confirm_route", "route_value": "ticket_confirm", "target": "ticket_confirm", "locked": true },
+    { "source": "ticket_confirm", "when": "ticket_confirm_route", "route_value": "ticket_save",    "target": "ticket_save",    "locked": true },
+    { "source": "ticket_confirm", "when": "ticket_confirm_route", "route_value": "__end__",        "target": "__end__",        "locked": true },
+
+    { "source": "ticket_save", "target": "__end__", "locked": true },
+
+    { "source": "crud_ask_campo", "when": "crud_campo_valido", "route_value": "crud_ask_campo", "target": "crud_ask_campo", "locked": true },
+    { "source": "crud_ask_campo", "when": "crud_campo_valido", "route_value": "crud_ask_valor", "target": "crud_ask_valor", "locked": true },
+    { "source": "crud_ask_campo", "when": "crud_campo_valido", "route_value": "__end__",        "target": "__end__",        "locked": true },
+
+    { "source": "crud_ask_valor", "when": "crud_valor_valido", "route_value": "crud_ask_valor", "target": "crud_ask_valor", "locked": true },
+    { "source": "crud_ask_valor", "when": "crud_valor_valido", "route_value": "crud_confirm",   "target": "crud_confirm",   "locked": true },
+    { "source": "crud_ask_valor", "when": "crud_valor_valido", "route_value": "__end__",        "target": "__end__",        "locked": true },
+
+    { "source": "crud_confirm", "when": "crud_confirm_route", "route_value": "crud_confirm", "target": "crud_confirm", "locked": true },
+    { "source": "crud_confirm", "when": "crud_confirm_route", "route_value": "crud_save",    "target": "crud_save",    "locked": true },
+    { "source": "crud_confirm", "when": "crud_confirm_route", "route_value": "__end__",      "target": "__end__",      "locked": true },
+
+    { "source": "crud_save", "target": "__end__", "locked": true }
+  ]
+}

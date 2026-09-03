@@ -1863,6 +1863,145 @@ async def graph_studio_reference(request: Request):
     return diagrama_producao()
 
 
+@router.get("/graph-studio/spec")
+async def graph_studio_spec(request: Request):
+    """A `GraphSpec` ATIVA do grafo de produção (ADR 0008 Fase 5) + o catálogo
+    de tipos de nó e routers. É a topologia que roda de verdade — editável
+    (nós/arestas não travados), versionada, com histórico."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.application.orchestration import node_manifest, routers
+    from src.application.orchestration.loader import carregar_spec_ativa
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.graph_spec_repository import GraphSpecRepository
+
+    spec = carregar_spec_ativa()
+    versao, atualizado_por = 0, None
+    try:
+        async with AsyncSessionLocal() as session:
+            linha = await GraphSpecRepository(session).obter()
+        if linha:
+            versao, atualizado_por = linha["versao"], linha["atualizado_por"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao ler versão de graph_spec: %s", exc)
+
+    return {
+        "spec": spec.model_dump(),
+        "versao": versao,
+        "atualizado_por": atualizado_por,
+        "tipos": node_manifest.manifest(),
+        "routers": sorted(routers.nomes_registrados()),
+    }
+
+
+@router.get("/graph-studio/spec/historico")
+async def graph_studio_spec_historico(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.graph_spec_repository import GraphSpecRepository
+
+    try:
+        async with AsyncSessionLocal() as session:
+            hist = await GraphSpecRepository(session).historico()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao ler histórico de graph_spec: %s", exc)
+        return {"historico": []}
+
+    return {"historico": [
+        {**h, "atualizado_em": h["atualizado_em"].isoformat() if h["atualizado_em"] else None}
+        for h in hist
+    ]}
+
+
+class GraphSpecSaveRequest(BaseModel):
+    spec:            dict
+    versao_esperada: int = 0
+
+
+@router.post("/graph-studio/spec")
+async def graph_studio_spec_save(request: Request, data: GraphSpecSaveRequest):
+    """Valida a topologia (`validate_topology`) ANTES de gravar; devolve os
+    erros sem gravar nada se inválida. Concorrência otimista por versão
+    (409-equivalente no corpo). Grava histórico + espelha no Redis pro grafo
+    recarregar no próximo boot de processo."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.application.orchestration.spec import GraphSpec
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.graph_spec_repository import (
+        ConflitoDeVersao, GraphSpecRepository,
+    )
+
+    try:
+        spec = GraphSpec.model_validate(data.spec)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": "JSON de spec inválido.", "detalhes": [str(exc)]}
+
+    erros = spec.validate_topology()
+    if erros:
+        return {"error": "Topologia inválida — nada foi gravado.", "detalhes": erros}
+
+    normalizada = spec.model_dump()
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = GraphSpecRepository(session)
+            resultado = await repo.salvar(
+                normalizada, versao_esperada=data.versao_esperada, atualizado_por=payload.sub,
+            )
+            await session.commit()
+            await repo.espelhar_redis(normalizada)
+    except ConflitoDeVersao as exc:
+        return {"error": str(exc), "conflito": True, "versao_atual": exc.atual}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao gravar graph_spec: %s", exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    return {"ok": True, "versao": resultado["versao"],
+            "aviso": "A topologia nova entra em vigor no próximo restart dos workers."}
+
+
+class GraphSpecReverterRequest(BaseModel):
+    versao: int
+
+
+@router.post("/graph-studio/spec/reverter")
+async def graph_studio_spec_reverter(request: Request, data: GraphSpecReverterRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.application.orchestration.spec import spec_valida_ou_erro
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.graph_spec_repository import GraphSpecRepository
+
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = GraphSpecRepository(session)
+            snapshot = await repo.snapshot_da_versao(data.versao)
+            if snapshot is None:
+                return {"error": f"Versão {data.versao} não existe no histórico."}
+            spec_valida_ou_erro(snapshot)  # o snapshot antigo ainda tem que ser válido hoje
+            atual = await repo.obter()
+            resultado = await repo.salvar(
+                snapshot, versao_esperada=atual["versao"] if atual else 0,
+                atualizado_por=f"{payload.sub} (revert v{data.versao})",
+            )
+            await session.commit()
+            await repo.espelhar_redis(snapshot)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao reverter graph_spec: %s", exc)
+        return {"error": "Falha ao reverter."}
+
+    return {"ok": True, "versao": resultado["versao"]}
+
+
 @router.get("/graph-studio/topologies")
 async def graph_studio_topologies(request: Request):
     """Topologias salvas (`graph_topology`, migration 015)."""

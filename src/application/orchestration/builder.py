@@ -1,12 +1,12 @@
 """
 src/application/orchestration/builder.py
 =======================================
-Monta o `StateGraph` do LangGraph a partir dos nós de orquestração.
+Monta o `StateGraph` do LangGraph a partir de uma `GraphSpec` (ADR 0008
+Fase 5) — a topologia é dado (`specs/default.json` / tabela `graph_spec`),
+não código. `build_graph()` compila a spec ativa; `build_graph_from_spec()`
+compila qualquer spec (usado por testes e pelo preview do Hub).
 
-Sucessor de `langgraph_experiment/graph.py`. Nesta fase (0) a topologia
-ainda é declarada aqui em código; a Fase 5 (ADR 0008) move a topologia do
-fan-out simples pra `GraphSpec` (dado), mantendo os funis de ticket/CRUD
-como subgrafos de código.
+Sucessor de `langgraph_experiment/graph.py`.
 """
 from __future__ import annotations
 
@@ -15,31 +15,8 @@ import inspect
 
 from langgraph.graph import END, START, StateGraph
 
-from src.application.orchestration.nodes import (
-    check_status_node,
-    classify_node,
-    crud_ask_campo,
-    crud_ask_valor,
-    crud_confirm,
-    crud_save,
-    greeting_node,
-    human_handoff_node,
-    media_download_node,
-    rag_node,
-    sigaa_node,
-    ticket_ask_categoria,
-    ticket_ask_queixa,
-    ticket_ask_tipo,
-    ticket_confirm,
-    ticket_save,
-    _campo_crud_valido,
-    _categoria_valida,
-    _confirm_route,
-    _crud_confirm_route,
-    _queixa_valida,
-    _tipo_valido,
-    _valor_crud_valido,
-)
+from src.application.orchestration import node_manifest, routers
+from src.application.orchestration.spec import END_ID, GraphSpec
 from src.application.orchestration.state import OraculoState
 
 
@@ -79,93 +56,58 @@ def _instrumented(node_name: str, fn):
     return _sync_wrapper
 
 
-def build_graph(checkpointer=None):
-    """
-    Monta o StateGraph: classify -> (rag | funil de ticket | funil de CRUD).
+def _mem_checkpointer():
+    from langgraph.checkpoint.memory import MemorySaver
+    return MemorySaver()
 
-    Funil de ticket e funil de CRUD são sequências de nodes (1 interrupt()
-    cada), não um único node com vários interrupt() empilhados — ver
-    docstring de nodes.py pro motivo (bug conhecido do checkpointer Redis
-    com múltiplos interrupts pendentes no mesmo node).
 
-    `checkpointer` é obrigatório para o `interrupt()` funcionar entre turnos
-    (persiste onde a execução parou). Por padrão usa MemorySaver (processo
-    único, só para teste manual / unit tests sem Redis Stack); produção
-    passa o AsyncRedisSaver (ver entrypoint.py).
+def build_graph_from_spec(spec: GraphSpec, checkpointer=None):
+    """Compila uma `GraphSpec` num `CompiledStateGraph`.
+
+    Arestas condicionais que saem do mesmo nó (mesmo `when`) viram um único
+    `add_conditional_edges(source, router, {route_value: target})`. Arestas
+    simples viram `add_edge`. `interrupt()` continua sendo detalhe interno de
+    cada nó (não da spec) — os funis de ticket/CRUD ficam com `locked=True`.
+
+    `checkpointer` é obrigatório para o `interrupt()` funcionar entre turnos.
+    Sem ele (None) usa MemorySaver — processo único, testes / REPL sem Redis
+    Stack; produção passa o AsyncRedisSaver (ver entrypoint.py).
     """
+    erros = spec.validate_topology()
+    if erros:
+        raise ValueError("GraphSpec inválida:\n  - " + "\n  - ".join(erros))
+
     if checkpointer is None:
-        from langgraph.checkpoint.memory import MemorySaver
-        checkpointer = MemorySaver()
+        checkpointer = _mem_checkpointer()
 
     graph = StateGraph(OraculoState)
-    graph.add_node("classify", _instrumented("classify", classify_node))
-    graph.add_node("rag", _instrumented("rag", rag_node))
-    graph.add_node("check_status", _instrumented("check_status", check_status_node))
-    graph.add_node("greeting", _instrumented("greeting", greeting_node))
-    graph.add_node("media_download", _instrumented("media_download", media_download_node))
-    graph.add_node("sigaa", _instrumented("sigaa", sigaa_node))
-    graph.add_node("human_handoff", _instrumented("human_handoff", human_handoff_node))
-    graph.add_node("ticket_ask_tipo", _instrumented("ticket_ask_tipo", ticket_ask_tipo))
-    graph.add_node("ticket_ask_categoria", _instrumented("ticket_ask_categoria", ticket_ask_categoria))
-    graph.add_node("ticket_ask_queixa", _instrumented("ticket_ask_queixa", ticket_ask_queixa))
-    graph.add_node("ticket_confirm", _instrumented("ticket_confirm", ticket_confirm))
-    graph.add_node("ticket_save", _instrumented("ticket_save", ticket_save))
-    graph.add_node("crud_ask_campo", _instrumented("crud_ask_campo", crud_ask_campo))
-    graph.add_node("crud_ask_valor", _instrumented("crud_ask_valor", crud_ask_valor))
-    graph.add_node("crud_confirm", _instrumented("crud_confirm", crud_confirm))
-    graph.add_node("crud_save", _instrumented("crud_save", crud_save))
+    for n in spec.nodes:
+        tipo = node_manifest.get_tipo(n.type)
+        graph.add_node(n.id, _instrumented(n.id, tipo.fn))
 
-    graph.add_edge(START, "classify")
-    graph.add_conditional_edges(
-        "classify",
-        lambda state: state.route,
-        {
-            "rag": "rag", "ticket": "ticket_ask_tipo", "crud": "crud_ask_campo",
-            "check_status": "check_status", "greeting": "greeting",
-            "media_download": "media_download", "sigaa": "sigaa",
-            "human_handoff": "human_handoff",
-        },
-    )
-    graph.add_edge("rag", END)
-    graph.add_edge("check_status", END)
-    graph.add_edge("greeting", END)
-    graph.add_edge("media_download", END)
-    graph.add_edge("sigaa", END)
-    graph.add_edge("human_handoff", END)
+    graph.add_edge(START, spec.entrypoint)
 
-    graph.add_conditional_edges(
-        "ticket_ask_tipo", _tipo_valido,
-        {"ticket_ask_tipo": "ticket_ask_tipo", "ticket_ask_categoria": "ticket_ask_categoria", "__end__": END},
-    )
-    graph.add_conditional_edges(
-        "ticket_ask_categoria", _categoria_valida,
-        {"ticket_ask_categoria": "ticket_ask_categoria", "ticket_ask_queixa": "ticket_ask_queixa", "__end__": END},
-    )
-    graph.add_conditional_edges(
-        "ticket_ask_queixa", _queixa_valida,
-        {"ticket_ask_queixa": "ticket_ask_queixa", "ticket_confirm": "ticket_confirm", "__end__": END},
-    )
-    graph.add_conditional_edges(
-        "ticket_confirm", _confirm_route,
-        {"ticket_confirm": "ticket_confirm", "ticket_save": "ticket_save", "__end__": END},
-    )
-    graph.add_edge("ticket_save", END)
-
-    graph.add_conditional_edges(
-        "crud_ask_campo", _campo_crud_valido,
-        {"crud_ask_campo": "crud_ask_campo", "crud_ask_valor": "crud_ask_valor", "__end__": END},
-    )
-    graph.add_conditional_edges(
-        "crud_ask_valor", _valor_crud_valido,
-        {"crud_ask_valor": "crud_ask_valor", "crud_confirm": "crud_confirm", "__end__": END},
-    )
-    graph.add_conditional_edges(
-        "crud_confirm", _crud_confirm_route,
-        {"crud_confirm": "crud_confirm", "crud_save": "crud_save", "__end__": END},
-    )
-    graph.add_edge("crud_save", END)
+    for source, grupo in spec.edges_por_source().items():
+        condicionais = [e for e in grupo if e.when is not None]
+        if condicionais:
+            router_fn = routers.get_router(condicionais[0].when)
+            mapping = {
+                e.route_value: (END if e.target == END_ID else e.target)
+                for e in condicionais
+            }
+            graph.add_conditional_edges(source, router_fn, mapping)
+        else:
+            for e in grupo:
+                graph.add_edge(source, END if e.target == END_ID else e.target)
 
     return graph.compile(checkpointer=checkpointer)
+
+
+def build_graph(checkpointer=None):
+    """Compila a `GraphSpec` ATIVA (Redis → Postgres → `specs/default.json`).
+    Ponto de entrada usado por `entrypoint.py::_get_graph`."""
+    from src.application.orchestration.loader import carregar_spec_ativa
+    return build_graph_from_spec(carregar_spec_ativa(), checkpointer)
 
 
 def describe() -> dict:

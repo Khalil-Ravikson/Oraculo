@@ -196,6 +196,14 @@ def on_worker_process_init(**kwargs):
     except Exception as e:
         logger.warning("⚠️ [CELERY] Falha ao hidratar route_registry: %s", e)
 
+    # GraphSpec (ADR 0008 Fase 5): espelha a topologia ativa do grafo no Redis
+    # deste worker — o `builder` lê Redis→Postgres→default.json ao compilar.
+    try:
+        from src.application.orchestration import loader as graph_loader
+        run_in_worker_loop(graph_loader.hydrate_redis())
+    except Exception as e:
+        logger.warning("⚠️ [CELERY] Falha ao hidratar graph_spec: %s", e)
+
     if os.environ.get("CELERY_PRELOAD_RERANKER", "false").lower() != "true":
         return
     try:

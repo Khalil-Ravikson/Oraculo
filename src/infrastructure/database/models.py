@@ -377,6 +377,39 @@ class RouteRegistryHistorico(Base):
     atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class GraphSpec(Base):
+    """Topologia do grafo de orquestração como dado (migration 024, ADR 0008
+    Fase 5). `spec` é a `GraphSpec` JSON inteira. Uma linha (`tenant_id` NULL);
+    vazio = grafo usa `orchestration/specs/default.json`."""
+    __tablename__ = "graph_spec"
+    __table_args__ = (
+        Index(
+            "ux_graph_spec_tenant", "tenant_id",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id             = Column(Integer, primary_key=True)
+    spec           = Column(JSONB, nullable=False)
+    versao         = Column(Integer, server_default="1", nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por = Column(String(100), nullable=True)
+
+
+class GraphSpecHistorico(Base):
+    """Histórico append-only de `graph_spec` (migration 024). Snapshot da spec
+    inteira por versão — o botão "reverter" do Hub restaura o snapshot."""
+    __tablename__ = "graph_spec_historico"
+
+    id             = Column(Integer, primary_key=True)
+    versao         = Column(Integer, nullable=False, index=True)
+    snapshot       = Column(JSONB, nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_por = Column(String(100), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class AgenteTool(Base):
     """Vínculo agente↔capability (migration 012, Plano A / Fase 5). Substitui
     `agentes_catalogo.permissions`. Sem FK física (mesma decisão de

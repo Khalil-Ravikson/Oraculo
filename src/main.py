@@ -110,11 +110,17 @@ async def _startup(settings) -> None:
         await dynamic_config.hydrate_redis()
 
         # Route/Workflow Registry (Plano A / Fase 2): espelha `route_registry`
-        # no Redis para o Supervisor / semantic_cache / dispatcher lerem no
-        # caminho quente. Nunca crítico — cai em `route_registry._DEFAULTS`.
+        # no Redis para o Supervisor / semantic_cache lerem no caminho quente.
+        # Nunca crítico — cai em `route_registry._DEFAULTS`.
         from src.infrastructure import route_registry
         await route_registry.hydrate_redis()
-        
+
+        # GraphSpec (ADR 0008 Fase 5): espelha a topologia ativa do grafo no
+        # Redis. Nunca crítico — o grafo cai no `specs/default.json` embutido.
+        from src.application.orchestration import loader as graph_loader
+        await graph_loader.hydrate_redis()
+
+
     except Exception as exc:
         logger.error("❌ Falha crítica no Redis/Seeder: %s", exc)
         if not settings.DEV_MODE:

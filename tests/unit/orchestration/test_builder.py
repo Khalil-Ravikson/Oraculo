@@ -2,7 +2,7 @@
 tests/unit/orchestration/test_builder.py
 ========================================
 Trava a topologia do grafo de orquestração (`src/application/orchestration/
-builder.py::build_graph`).
+builder.py`).
 
 Este teste congela o conjunto de nós e arestas do grafo de orquestração —
 rede de segurança contra mudanças acidentais de topologia. Toda alteração
@@ -11,10 +11,14 @@ desta baseline deve ser DELIBERADA, num commit que também explica a mudança.
 Histórico:
 - Fase 0: baseline igual a `langgraph_experiment/graph.py`.
 - Fase 2: + nó `human_handoff` (rota ESCALAR_HUMANO) e suas 2 arestas.
+- Fase 5: topologia vem de `GraphSpec` (`specs/default.json`). O
+  `test_spec_default_equivale_a_baseline` prova que a spec produz o MESMO
+  grafo compilado que a baseline congelada aqui.
 """
 from __future__ import annotations
 
-from src.application.orchestration.builder import build_graph
+from src.application.orchestration.builder import build_graph, build_graph_from_spec
+from src.application.orchestration.loader import default_spec
 
 NODES_ESPERADOS = {
     "__start__", "__end__",
@@ -71,8 +75,8 @@ EDGES_ESPERADAS = {
 }
 
 
-def _topologia():
-    g = build_graph().get_graph()
+def _topologia(app=None):
+    g = (app or build_graph()).get_graph()
     nodes = {n.id for n in g.nodes.values()}
     edges = {(e.source, e.target, e.conditional) for e in g.edges}
     return nodes, edges
@@ -85,6 +89,17 @@ def test_conjunto_de_nos_igual_a_baseline():
 
 def test_conjunto_de_arestas_igual_a_baseline():
     _, edges = _topologia()
+    assert edges == EDGES_ESPERADAS
+
+
+def test_spec_default_equivale_a_baseline():
+    """`specs/default.json` compila para EXATAMENTE o mesmo grafo que a
+    baseline congelada — é o teste de equivalência da Fase 5 (a topologia
+    virou dado sem mudar de forma)."""
+    spec = default_spec()
+    assert spec.validate_topology() == []
+    nodes, edges = _topologia(build_graph_from_spec(spec))
+    assert nodes == NODES_ESPERADOS
     assert edges == EDGES_ESPERADAS
 
 
