@@ -775,68 +775,24 @@ document.getElementById('import-file').onchange = (e) => {
   e.target.value = '';
 };
 
-// ── Aba "Fluxos de produção" (somente leitura) ────────────────────────────
-const REF_NODE_W = 150, REF_NODE_H = 34;
-let refCarregado = false;
-
-function svgFluxo(f) {
-  const maxX = Math.max(...f.nodes.map(n => n.x)) + REF_NODE_W + 20;
-  const maxY = Math.max(...f.nodes.map(n => n.y)) + REF_NODE_H + 20;
-  const pos = Object.fromEntries(f.nodes.map(n => [n.id, n]));
-  const arestas = f.edges.map(e => {
-    const a = pos[e.de], b = pos[e.para];
-    const x1 = a.x + REF_NODE_W, y1 = a.y + REF_NODE_H / 2;
-    const x2 = b.x, y2 = b.y + REF_NODE_H / 2;
-    const mx = (x1 + x2) / 2;
-    const label = e.rotulo
-      ? `<text x="${mx}" y="${(y1 + y2) / 2 - 4}" fill="#7b8394" font-size="9" text-anchor="middle">${fmt.esc(e.rotulo)}</text>` : '';
-    return `<path d="M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" fill="none" stroke="#d97a3f" stroke-width="1.4" marker-end="url(#ref-arrow)"/>${label}`;
-  }).join('');
-  const caixas = f.nodes.map(n => `
-    <g transform="translate(${n.x} ${n.y})">
-      <rect width="${REF_NODE_W}" height="${REF_NODE_H}" rx="6" fill="#12151a" stroke="#262b33"/>
-      <text x="${REF_NODE_W / 2}" y="${REF_NODE_H / 2 + 3}" fill="#e8eaed" font-size="10" text-anchor="middle">${fmt.esc(n.label)}</text>
-    </g>`).join('');
-  return `<div class="ref-flow">
-    <div class="ref-flow__head">
-      <strong>${fmt.esc(f.nome)}</strong>
-      <span class="caption" data-tech="${fmt.esc(f.fonte)}">${fmt.esc(f.descricao)}</span>
-    </div>
-    <div class="ref-flow__canvas">
-      <svg viewBox="0 0 ${maxX} ${maxY}" width="${maxX}" height="${maxY}">
-        <defs><marker id="ref-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M0 0 L10 5 L0 10 z" fill="#d97a3f"/></marker></defs>
-        ${arestas}${caixas}
-      </svg>
-    </div>
-  </div>`;
-}
-
-async function carregarReferencia() {
-  if (refCarregado) return;
-  const box = document.getElementById('ref-flows');
-  try {
-    const r = await fetch('/hub/graph-studio/reference', { credentials: 'same-origin' });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    box.innerHTML = (d.fluxos || []).map(svgFluxo).join('');
-    refCarregado = true;
-  } catch (e) {
-    box.innerHTML = `<span style="color:var(--danger)">${fmt.esc(e.message)}</span>`;
-  }
-}
-
+let studioIniciado = false;
 window.studioPane = function (pane) {
   document.getElementById('pane-editor').hidden = pane !== 'editor';
-  document.getElementById('pane-ref').hidden = pane !== 'ref';
-  if (pane === 'ref') carregarReferencia();
+  document.getElementById('pane-prod').hidden = pane !== 'prod';
+  if (pane === 'editor' && !studioIniciado) {
+    studioIniciado = true;
+    initLaboratorio();
+  }
+  if (pane === 'prod' && window.graphSpecPane) window.graphSpecPane();
 };
 
-(async function init() {
+async function initLaboratorio() {
   initStage();
   await loadPalette();
   await loadTopologiesList();
   atualizarValidade();
   renderMinimap();
   pushHistory();
-})();
+}
+// "Grafo de produção" é a aba inicial (graph-spec.js se auto-carrega);
+// o canvas Konva do Laboratório só monta quando a aba é aberta.

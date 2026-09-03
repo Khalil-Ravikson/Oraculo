@@ -28,12 +28,26 @@ logger = logging.getLogger(__name__)
 
 _PREFIXO_REDIS = "route:"
 
-# Valores válidos de `entrypoint_node` = as chaves do dict de conditional edges
-# em `src/application/orchestration/builder.py::build_graph()` (o que vira `state.route`).
+# Nós de entrada do CORE do grafo (o esqueleto fixo — ver
+# `orchestration/specs/default.json`). O que vira `state.route`. Rotas
+# personalizadas podem apontar pra um nó novo adicionado à `GraphSpec` no
+# Graph Studio — `nodes_entrypoint_validos()` une este core com os ids da
+# spec ativa.
 NODES_ENTRYPOINT: frozenset[str] = frozenset({
     "rag", "ticket", "crud", "greeting", "sigaa", "media_download", "check_status",
     "human_handoff",
 })
+
+
+def nodes_entrypoint_validos() -> frozenset[str]:
+    """CORE ∪ ids de nó da `GraphSpec` ativa. Usado pela validação de escrita
+    de rota (`validar_campos`) e pelo Hub. Nunca levanta — se a spec não
+    carregar, devolve só o core."""
+    try:
+        from src.application.orchestration.loader import carregar_spec_ativa
+        return NODES_ENTRYPOINT | carregar_spec_ativa().node_ids()
+    except Exception:  # noqa: BLE001
+        return NODES_ENTRYPOINT
 
 # ADR 0008 Fase 3: `dispatcher.py` legado foi deletado — todo assunto roda
 # no grafo. `owner` fica só como registro (todas as rotas = "langgraph").
@@ -274,10 +288,12 @@ def validar_campos(campos: dict) -> dict:
     if "owner" in out and out["owner"] not in OWNERS_VALIDOS:
         raise CamposInvalidos(f"owner deve ser um de {sorted(OWNERS_VALIDOS)}")
 
-    if "entrypoint_node" in out and out["entrypoint_node"] not in NODES_ENTRYPOINT:
-        raise CamposInvalidos(
-            f"entrypoint_node deve ser um node real do grafo: {sorted(NODES_ENTRYPOINT)}"
-        )
+    if "entrypoint_node" in out:
+        validos = nodes_entrypoint_validos()
+        if out["entrypoint_node"] not in validos:
+            raise CamposInvalidos(
+                f"entrypoint_node deve ser um nó do grafo: {sorted(validos)}"
+            )
 
     if out.get("agente"):
         nomes = set()

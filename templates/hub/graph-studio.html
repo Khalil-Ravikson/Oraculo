@@ -14,20 +14,22 @@
     <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
   </button>
   <div class="info-banner__body" x-show="aberto" x-cloak>
-    <p>Um rascunho visual de como os componentes se conectam. Arraste um componente
-      da lista para a área de desenho, ligue a saída de um à entrada de outro
-      (clique numa porta e depois na outra) e salve.</p>
-    <p>Salvar apenas guarda o desenho — nenhum fluxo em produção lê isto ainda.
-      A validação (tipos de porta compatíveis + sem ciclos) roda ao salvar.</p>
+    <p><strong>Grafo de produção</strong> — a topologia REAL que uma mensagem
+      percorre depois de classificada. É dado versionado (não código): dá pra
+      criar um fluxo novo, ver o histórico e reverter. O esqueleto (classificação,
+      chamado, cadastro) fica travado; você adiciona <em>rotas terminais</em>.</p>
+    <p><strong>Laboratório</strong> — um rascunho visual livre com os componentes
+      de infraestrutura (LLM, STT, busca…). Não afeta produção; serve pra
+      esboçar e testar peças isoladas.</p>
   </div>
 </div>
 
-<div class="tabs" role="tablist" x-data="{ t: 'editor' }">
-  <button class="tab" role="tab" :aria-selected="t === 'editor'" @click="t = 'editor'; window.studioPane && window.studioPane('editor')">Editor</button>
-  <button class="tab" role="tab" :aria-selected="t === 'ref'" @click="t = 'ref'; window.studioPane && window.studioPane('ref')">Fluxos de produção</button>
+<div class="tabs" role="tablist" x-data="{ t: 'prod' }">
+  <button class="tab" role="tab" :aria-selected="t === 'prod'" @click="t = 'prod'; window.studioPane && window.studioPane('prod')">Grafo de produção</button>
+  <button class="tab" role="tab" :aria-selected="t === 'editor'" @click="t = 'editor'; window.studioPane && window.studioPane('editor')">Laboratório</button>
 </div>
 
-<div id="pane-editor">
+<div id="pane-editor" hidden>
 <div class="studio-toolbar">
   <input class="input" id="topo-name" placeholder="nome do fluxo" style="max-width:180px">
   <input class="input" id="topo-gatilho" placeholder="gatilho — frase de teste" style="max-width:220px">
@@ -100,15 +102,63 @@
 </section>
 </div><!-- /pane-editor -->
 
-<div id="pane-ref" hidden>
-  <p class="caption" style="margin-bottom:var(--space-4)">
-    O caminho real que uma mensagem percorre — gerado
-    <span data-tech="orchestration/builder.py">do código de produção</span>,
-    não é um desenho manual. Os processos passo-a-passo (chamado, cadastro)
-    aparecem agrupados. Somente leitura; para mudar o destino de um assunto,
-    use a tela de Rotas.
-  </p>
-  <div id="ref-flows" class="ref-flows"><span class="caption">Carregando…</span></div>
+<div id="pane-prod">
+  <div class="spec-head">
+    <div>
+      <span class="caption">Topologia
+        <span data-tech="orchestration/specs/default.json">do grafo de orquestração</span>
+        — versão <strong id="spec-versao">—</strong>
+        <span id="spec-por" class="caption"></span>
+      </span>
+    </div>
+    <div class="spec-head__actions">
+      <button class="btn btn--ghost btn--sm" id="spec-hist-btn">Histórico</button>
+    </div>
+  </div>
+
+  <div id="spec-diagram" class="ref-flows"><span class="caption">Carregando…</span></div>
+
+  <section class="spec-block">
+    <h3 class="spec-block__title">Fluxos personalizados</h3>
+    <p class="caption">Rotas terminais que você adicionou. O esqueleto do grafo
+      (classificação, chamado, cadastro) não aparece aqui — é travado.</p>
+    <div id="spec-custom-list"><span class="caption">—</span></div>
+  </section>
+
+  <section class="spec-block">
+    <h3 class="spec-block__title">Criar um fluxo novo</h3>
+    <p class="caption">Cria a rota (com gatilho de classificação) <em>e</em> o nó
+      terminal + as ligações no grafo, numa transação só. Entra em vigor no
+      próximo restart dos workers.</p>
+    <form id="spec-nova-rota" class="spec-form">
+      <label>Nome da rota
+        <input class="input" name="rota" placeholder="ex: FAQ_BIBLIOTECA" required
+               pattern="[A-Za-z][A-Za-z0-9_]{2,23}" title="3–24 caracteres, letras/dígitos/_">
+      </label>
+      <label>Tipo de nó
+        <select class="select" name="node_type" id="spec-node-type"></select>
+      </label>
+      <label>Gatilho (frase ou regex que aciona a rota)
+        <input class="input" name="gatilho" placeholder="ex: horário da biblioteca|funcionamento da biblioteca">
+      </label>
+      <div class="spec-form__rag" id="spec-rag-fields">
+        <label>Tipo de documento
+          <input class="input" name="doc_type" value="geral" placeholder="geral">
+        </label>
+        <label>Trechos (k)
+          <input class="input" type="number" name="k" value="6" min="1" max="20">
+        </label>
+        <label class="spec-form__check">
+          <input type="checkbox" name="cacheavel" checked> Cachear respostas
+        </label>
+      </div>
+      <div class="spec-form__actions">
+        <button type="submit" class="btn btn--primary btn--sm">Criar fluxo</button>
+        <span id="spec-nova-msg" class="caption"></span>
+      </div>
+    </form>
+    <div id="spec-nova-erros" class="studio-errors" hidden></div>
+  </section>
 </div>
 </div>
 {% endblock %}
@@ -116,4 +166,5 @@
 {% block scripts %}
 <script src="/static/js/vendor/konva.min.js"></script>
 <script type="module" src="/static/js/pages/graph-studio.js"></script>
+<script type="module" src="/static/js/pages/graph-spec.js"></script>
 {% endblock %}

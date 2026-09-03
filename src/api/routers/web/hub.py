@@ -1872,7 +1872,8 @@ async def graph_studio_spec(request: Request):
     if not payload:
         return _nao_autorizado()
 
-    from src.application.orchestration import node_manifest, routers
+    from src.application.orchestration import node_manifest, routers, spec_editor
+    from src.application.orchestration.builder import diagrama_producao
     from src.application.orchestration.loader import carregar_spec_ativa
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.repositories.graph_spec_repository import GraphSpecRepository
@@ -1891,6 +1892,9 @@ async def graph_studio_spec(request: Request):
         "spec": spec.model_dump(),
         "versao": versao,
         "atualizado_por": atualizado_por,
+        "diagrama": diagrama_producao(),
+        "rotas_editaveis": spec_editor.rotas_editaveis(spec),
+        "tipos_adicionaveis": list(spec_editor.TIPOS_ADICIONAVEIS),
         "tipos": node_manifest.manifest(),
         "routers": sorted(routers.nomes_registrados()),
     }
@@ -1998,6 +2002,144 @@ async def graph_studio_spec_reverter(request: Request, data: GraphSpecReverterRe
     except Exception as exc:  # noqa: BLE001
         logger.warning("⚠️  [HUB] Falha ao reverter graph_spec: %s", exc)
         return {"error": "Falha ao reverter."}
+
+    return {"ok": True, "versao": resultado["versao"]}
+
+
+class NovaRotaGrafoRequest(BaseModel):
+    rota:            str                 # nome da rota (MAIÚSCULAS) — vira o route_registry
+    node_type:       str = "rag"         # tipo de nó terminal (ver spec_editor.TIPOS_ADICIONAVEIS)
+    gatilho:         str = ""            # regex/frase que o classificador casa pra esta rota
+    doc_type:        str = "geral"       # RAG: taxonomia
+    k:               int = 6             # RAG: profundidade de retrieval
+    cacheavel:       bool = True
+    versao_esperada: int = 0             # versão do graph_spec que a tela tinha
+
+
+@router.post("/graph-studio/spec/nova-rota")
+async def graph_studio_nova_rota(request: Request, data: NovaRotaGrafoRequest):
+    """Cria um fluxo novo de ponta a ponta: a linha em `route_registry` (com
+    gatilho de classificação) + o nó terminal e as arestas na `GraphSpec`.
+    Valida a topologia ANTES de gravar qualquer coisa. Uma transação."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.application.orchestration import spec_editor
+    from src.application.orchestration.loader import carregar_spec_ativa
+    from src.infrastructure import route_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.graph_spec_repository import (
+        ConflitoDeVersao, GraphSpecRepository,
+    )
+    from src.infrastructure.repositories.route_registry_repository import RouteRegistryRepository
+
+    try:
+        rota = route_registry.validar_nome_rota(data.rota)
+    except route_registry.CamposInvalidos as exc:
+        return {"error": str(exc)}
+
+    node_id = spec_editor.node_id_de_rota(rota)
+    spec = carregar_spec_ativa()
+
+    try:
+        nova_spec_raw = spec_editor.adicionar_rota(
+            spec, node_id=node_id, node_type=data.node_type,
+            config={"doc_type": data.doc_type, "k": data.k} if data.node_type == "rag" else {},
+        )
+    except spec_editor.EdicaoInvalida as exc:
+        return {"error": str(exc)}
+
+    campos = {
+        "entrypoint_node": node_id, "owner": "langgraph", "agente": None,
+        "cacheavel": bool(data.cacheavel), "permite_detour": data.node_type == "rag",
+        "doc_type": data.doc_type if data.node_type == "rag" else None,
+        "k": data.k if data.node_type == "rag" else 0,
+    }
+    try:
+        campos = route_registry.validar_campos(campos)
+    except route_registry.CamposInvalidos as exc:
+        return {"error": str(exc)}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            rr_repo = RouteRegistryRepository(session)
+            if await rr_repo.obter(rota) is not None:
+                return {"error": f"A rota '{rota}' já existe."}
+            cfg = await rr_repo.upsert(rota, campos, versao_esperada=0, atualizado_por=payload.sub)
+
+            gs_repo = GraphSpecRepository(session)
+            atual = await gs_repo.obter()
+            resultado = await gs_repo.salvar(
+                nova_spec_raw,
+                versao_esperada=(atual["versao"] if atual else data.versao_esperada),
+                atualizado_por=f"{payload.sub} (+rota {rota})",
+            )
+
+            if data.gatilho.strip():
+                from src.api.routers.admin.admin_api import _aplicar_gatilho_rota
+                await _aplicar_gatilho_rota(
+                    session, rota, data.gatilho.strip(), [], campos.get("doc_type"), campos.get("k"),
+                )
+            await session.commit()
+            route_registry.espelhar_redis(cfg)
+            await gs_repo.espelhar_redis(nova_spec_raw)
+    except ConflitoDeVersao as exc:
+        return {"error": str(exc), "conflito": True}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao criar fluxo '%s': %s", data.rota, exc)
+        return {"error": "Falha ao criar o fluxo. Nada foi gravado."}
+
+    return {
+        "ok": True, "rota": rota, "node_id": node_id, "versao": resultado["versao"],
+        "aviso": "O fluxo novo entra em vigor no próximo restart dos workers.",
+    }
+
+
+class RemoverRotaGrafoRequest(BaseModel):
+    node_id: str
+
+
+@router.post("/graph-studio/spec/rota/remover")
+async def graph_studio_remover_rota(request: Request, data: RemoverRotaGrafoRequest):
+    """Remove um fluxo criado pela GUI: o nó + arestas da `GraphSpec` e a
+    linha de `route_registry` (só rotas personalizadas — as fixas não)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+    node_id = data.node_id
+
+    from src.application.orchestration import spec_editor
+    from src.application.orchestration.loader import carregar_spec_ativa
+    from src.infrastructure import route_registry
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.graph_spec_repository import GraphSpecRepository
+    from src.infrastructure.repositories.route_registry_repository import RouteRegistryRepository
+
+    spec = carregar_spec_ativa()
+    try:
+        nova_spec_raw = spec_editor.remover_rota(spec, node_id)
+    except spec_editor.EdicaoInvalida as exc:
+        return {"error": str(exc)}
+
+    rota_do_no = route_registry.rota_do_node(node_id)
+    try:
+        async with AsyncSessionLocal() as session:
+            gs_repo = GraphSpecRepository(session)
+            atual = await gs_repo.obter()
+            resultado = await gs_repo.salvar(
+                nova_spec_raw, versao_esperada=(atual["versao"] if atual else 0),
+                atualizado_por=f"{payload.sub} (-nó {node_id})",
+            )
+            if route_registry.pode_apagar(rota_do_no):
+                await RouteRegistryRepository(session).remover(rota_do_no)
+                from src.api.routers.admin.admin_api import _remover_gatilho_rota
+                await _remover_gatilho_rota(session, rota_do_no)
+            await session.commit()
+            await gs_repo.espelhar_redis(nova_spec_raw)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao remover fluxo '%s': %s", node_id, exc)
+        return {"error": "Falha ao remover."}
 
     return {"ok": True, "versao": resultado["versao"]}
 

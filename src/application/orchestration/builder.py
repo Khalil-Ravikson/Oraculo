@@ -147,11 +147,26 @@ _COLAPSA = {
 
 
 def diagrama_producao() -> dict:
-    """Diagrama pronto pra desenhar no Hub (`/hub/graph-studio/reference`).
-    Reflete `build_graph()` de verdade — não é dado hardcoded. Os funis de
+    """Diagrama pronto pra desenhar no Hub. Reflete `build_graph()` (a
+    `GraphSpec` ativa) de verdade — não é dado hardcoded. Os funis de
     ticket/CRUD aparecem colapsados num nó só (o passo-a-passo interno é
     detalhe). Layout em camadas por distância do START."""
     raw = describe()
+
+    tipo_por_id: dict[str, str] = {}
+    try:
+        from src.application.orchestration.loader import carregar_spec_ativa
+        tipo_por_id = {n.id: n.type for n in carregar_spec_ativa().nodes}
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _rotulo(nid: str) -> str:
+        if nid in _ROTULOS:
+            return _ROTULOS[nid]
+        tipo = tipo_por_id.get(nid)
+        if tipo and tipo in node_manifest.tipos_registrados():
+            return f"{node_manifest.get_tipo(tipo).display_name}: {nid}"
+        return nid
 
     def canon(nid: str) -> str:
         return _COLAPSA.get(nid, nid)
@@ -165,7 +180,7 @@ def diagrama_producao() -> dict:
             continue  # auto-loop dos funis (re-perguntar) — some no diagrama
         edges.add((s, t))
         if e["conditional"] and s == "classify":
-            rotulos_aresta[(s, t)] = _ROTULOS.get(t, t)
+            rotulos_aresta[(s, t)] = _rotulo(t)
 
     # camadas: BFS a partir de __start__
     camada = {"__start__": 0}
@@ -188,7 +203,7 @@ def diagrama_producao() -> dict:
     for c, ids in sorted(por_camada.items()):
         for i, nid in enumerate(ids):
             pos_nodes.append({
-                "id": nid, "label": _ROTULOS.get(nid, nid),
+                "id": nid, "label": _rotulo(nid),
                 "x": c * GAP_X, "y": i * GAP_Y,
             })
 

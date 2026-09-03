@@ -50,12 +50,13 @@ logger = logging.getLogger(__name__)
 # do processo, nunca atravessa uma fronteira de asyncio.run() — não há mais asyncio.run()
 # nenhum nos entry points que chegam aqui (process_message_task.py).
 _graph = None
+_graph_node_ids: frozenset[str] = frozenset()
 _saver_cm = None
 _setup_lock = asyncio.Lock()
 
 
 async def _get_graph():
-    global _graph, _saver_cm
+    global _graph, _saver_cm, _graph_node_ids
     if _graph is not None:
         return _graph
     async with _setup_lock:
@@ -82,6 +83,7 @@ async def _get_graph():
         saver = await _saver_cm.__aenter__()  # fechado explicitamente em on_worker_process_shutdown
         await saver.asetup()
         _graph = build_graph(saver)
+        _graph_node_ids = frozenset(n.id for n in _graph.get_graph().nodes.values())
         logger.info("🧭 [ORCH] Grafo compilado com AsyncRedisSaver — checkpoint compartilhado entre API/workers.")
     return _graph
 
@@ -90,7 +92,7 @@ async def aclose_graph() -> None:
     """Fecha o AsyncRedisSaver cacheado. Chamado por
     celery_app.py::on_worker_process_shutdown, rodando no mesmo loop persistente
     em que o saver foi aberto."""
-    global _graph, _saver_cm
+    global _graph, _saver_cm, _graph_node_ids
     if _saver_cm is not None:
         try:
             await _saver_cm.__aexit__(None, None, None)
@@ -99,6 +101,7 @@ async def aclose_graph() -> None:
         finally:
             _saver_cm = None
             _graph = None
+            _graph_node_ids = frozenset()
 
 
 def _thread_config(session_id: str) -> dict:
@@ -378,10 +381,11 @@ async def processar(
             )
 
     # Rota classificada mas cujo `entrypoint_node` não é um nó real do grafo
-    # (ex.: rota personalizada mal configurada no /hub/routes) → trata como
-    # `rag` (o `_UNKNOWN` já aponta pra lá; isto é só a rede de segurança).
+    # ATIVO (ex.: rota personalizada apontando pra um nó removido da spec) →
+    # trata como `rag` (rede de segurança). Checa contra os nós do grafo
+    # compilado, não uma lista estática — a topologia é dado (Fase 5).
     route = rr.entrypoint_node
-    if route not in route_registry.NODES_ENTRYPOINT:
+    if _graph_node_ids and route not in _graph_node_ids:
         logger.warning("⚠️  [ORCH] rota=%s tem entrypoint_node inválido '%s' — usando 'rag'",
                        decision.rota, route)
         route = "rag"

@@ -304,3 +304,34 @@
 .studio-view .studio-step__body { flex: 1; min-width: 0; }
 .studio-view .studio-step__name { color: var(--ink-400); text-transform: uppercase; letter-spacing: var(--tracking-eyebrow); }
 .studio-view .studio-step__meta { color: var(--ink-500); margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+/* ── Aba "Grafo de produção" (GraphSpec — ADR 0008 Fase 4) ──────────────── */
+.studio-view .spec-head {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: var(--space-3); margin-bottom: var(--space-3); flex-wrap: wrap;
+}
+.studio-view .spec-block {
+  margin-top: var(--space-5); padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+.studio-view .spec-block__title {
+  font-size: var(--text-sm); margin: 0 0 var(--space-1);
+}
+.studio-view .spec-form {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3); margin-top: var(--space-3);
+}
+.studio-view .spec-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-xs); color: var(--ink-400); }
+.studio-view .spec-form__rag {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3); grid-column: 1 / -1;
+}
+.studio-view .spec-form__check { flex-direction: row !important; align-items: center; gap: var(--space-2) !important; }
+.studio-view .spec-form__actions { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-3); }
+.studio-view .spec-custom-row, .studio-view .spec-hist-row {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--line);
+  font-size: var(--text-xs);
+}
+.studio-view .spec-custom-row .badge { margin: 0 var(--space-2); }
+.studio-view .spec-hist { display: flex; flex-direction: column; max-height: 320px; overflow: auto; }

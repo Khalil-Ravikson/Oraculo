@@ -764,7 +764,7 @@ async def get_route_registry(_: TokenPayload = Depends(require_admin_jwt)):
     route_registry.espelhar_varias(cfgs)
     return {
         "rotas": route_registry.snapshot(cfgs),
-        "nodes_validos": sorted(route_registry.NODES_ENTRYPOINT),
+        "nodes_validos": sorted(route_registry.nodes_entrypoint_validos()),
         "owners_validos": sorted(route_registry.OWNERS_VALIDOS),
     }
 

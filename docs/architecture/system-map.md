@@ -11,6 +11,7 @@
 | **Classificação de intenção (Supervisor)** | `src/router/supervisor.py`, `src/router/llm_fallback.py` |
 | **Orquestração (entrypoint único, ADR 0008)** | `src/application/orchestration/entrypoint.py` |
 | **Grafo de produção (nós, arestas)** | `src/application/orchestration/builder.py`, `nodes.py`, `state.py` |
+| **Topologia do grafo como dado (GraphSpec)** | `src/application/orchestration/spec.py`, `specs/default.json`, `loader.py` — ver `docs/architecture/graph-studio.md` |
 | **Agentes de domínio** | `src/agents/` (`academic_knowledge/` RAG, `sigaa/`, `tickets/`, `conversation/`) |
 | **Tools/integrações autodescobertas** | `src/capabilities/` (`rag/`, `sigaa/`, `messaging/`, `persistence/`, `tools/`) |
 | **RBAC / permissões** | `src/domain/permissions.py` |
