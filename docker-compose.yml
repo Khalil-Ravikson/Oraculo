@@ -288,7 +288,7 @@ services:
     # supervisor Celery).
     environment:
       CELERY_PRELOAD_RERANKER: "false"
-    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=1", "--max-tasks-per-child=200", "--queues=default,admin,notificacoes"]
+    command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=1", "--max-tasks-per-child=200", "--queues=default,admin"]
 
   worker_rag:
     <<: [*worker-base, *resources-heavy]

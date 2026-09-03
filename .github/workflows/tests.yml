@@ -68,13 +68,10 @@ jobs:
         run: alembic upgrade head
 
       - name: Rodar tests/unit
-        # test_registration_repository.py excluído: falha pré-existente,
-        # não relacionada a infra nem a esta rodada — ver .claude.md e
-        # notas.md. Documentado, não escondido; remover o --ignore quando
-        # alguém corrigir salvar_pessoa() ou o teste.
-        run: >
-          pytest tests/unit -v --tb=short
-          --ignore=tests/unit/capabilities/persistence/test_registration_repository.py
+        # TD-018 corrigido (ADR 0008 Fase 3): os testes de
+        # test_registration_repository.py agora forçam DEV_TEST_NO_DB_WRITE=False
+        # via fixture, então rodam de novo no CI.
+        run: pytest tests/unit -v --tb=short
 
       - name: Rodar eval do scraper wiki CTIC (fixtures congeladas)
         run: pytest tests/eval/test_ctic_wiki_eval.py -v --tb=short

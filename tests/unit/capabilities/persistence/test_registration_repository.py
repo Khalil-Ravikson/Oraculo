@@ -11,6 +11,16 @@ from unittest.mock import AsyncMock, MagicMock
 from src.capabilities.persistence.registration_repository import salvar_pessoa
 
 
+@pytest.fixture(autouse=True)
+def _escrita_real_no_db(monkeypatch):
+    """TD-018: `registration_repository.salvar_pessoa` retorna cedo (dump JSON,
+    sem `execute`/`commit`) quando `settings.DEV_TEST_NO_DB_WRITE` está ligada
+    — flag de teste manual via WhatsApp. Estes testes verificam o SQL, então
+    forçam a flag OFF independente do ambiente de execução."""
+    from src.infrastructure import settings as _sm
+    monkeypatch.setattr(_sm.settings, "DEV_TEST_NO_DB_WRITE", False)
+
+
 @pytest.mark.asyncio
 async def test_salvar_pessoa_inclui_email_sintetico_para_satisfazer_not_null(monkeypatch):
     session = MagicMock()

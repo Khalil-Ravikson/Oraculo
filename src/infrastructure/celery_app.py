@@ -9,7 +9,10 @@ MUDANÇAS vs versão anterior:
 
   MANTIDO:
     - Beat schedule (notificações diárias)
-    - Task routing (default / notificacoes / admin)
+    - Task routing: filas reais em `task_routes` abaixo são
+      default / admin / rag_search / synthesis / media / graph. NÃO existe
+      fila `notificacoes` — o `--queues=...,notificacoes` no comando do
+      worker em docker-compose.yml é vestigial (nenhuma task roteia pra lá).
     - Timezone America/Sao_Paulo
 """
 import asyncio

@@ -75,14 +75,20 @@ async def test_cognitive_os_sigaa_route_requires_auth_flow():
             assert res4.status == "ok"
             assert "Autenticação em andamento" in res4.answer
             assert not mock_redis.exists(f"hitl:session:{session_id}")
-            
-            # Verify dispatch arguments (login/senha in event)
+
+            # TD-017: a senha NÃO vai mais em texto plano no payload da task
+            # Celery — fica no Redis sob um `auth_token` de uso único
+            # (auth_flow.py, melhoria de segurança). O evento só carrega o token.
             mock_task.s.assert_called_once()
             args, kwargs = mock_task.s.call_args
             event_sent = args[0]
             assert event_sent["login"] == "12345678901"
-            assert event_sent["senha"] == "secret123"
+            assert "senha" not in event_sent
             assert event_sent["hitl_confirmed"] is True
+
+            auth_token = event_sent["auth_token"]
+            guardado = json.loads(mock_redis.get(f"hitl:auth_token:{auth_token}").decode())
+            assert guardado["senha"] == "secret123"
 
 @pytest.mark.asyncio
 async def test_cognitive_os_sigaa_route_with_active_session():
