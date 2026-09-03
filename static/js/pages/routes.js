@@ -30,11 +30,12 @@ function sel(id, val, opts, labelFn) {
     '</select>';
 }
 
-// rótulos legíveis dos campos, para o histórico
+// rótulos legíveis dos campos, para o histórico (planner_steps some da UI —
+// Planner em aposentadoria, ADR 0008 — mas fica aqui p/ histórico antigo)
 const CAMPO_LABEL = {
   entrypoint_node: 'Ponto de entrada', owner: 'Motor', agente: 'Agente',
   cacheavel: 'Cache', permite_detour: 'Desvio', doc_type: 'Tipo de documento',
-  k: 'Trechos', planner_steps: 'Passos do planejador',
+  k: 'Trechos', planner_steps: 'Passos do planejador (legado)',
 };
 function valorLegivel(campo, v) {
   if (v === null || v === undefined || v === '') return '—';
@@ -68,7 +69,6 @@ async function load() {
         <td class="col-center"><input type="checkbox" class="chk" id="${p('permite_detour')}" ${r.permite_detour ? 'checked' : ''}></td>
         <td><input class="input input--cell" id="${p('doc_type')}" value="${fmt.esc(r.doc_type || '')}" placeholder="—"></td>
         <td><input class="input input--cell input--num" id="${p('k')}" type="number" value="${r.k ?? ''}"></td>
-        <td><input class="input input--cell" id="${p('planner_steps')}" value="${fmt.esc((r.planner_steps || []).join(', '))}" placeholder="—"></td>
         <td class="col-actions">
           <button class="btn btn--primary btn--sm" data-save="${fmt.esc(r.rota)}">Salvar</button>
           <button class="btn btn--sm" data-hist="${fmt.esc(r.rota)}">Histórico</button>
@@ -87,7 +87,6 @@ async function load() {
         <th title="Pode desviar para outra rota no meio?">Desvio</th>
         <th>Tipo de documento</th>
         <th title="Quantos trechos de documento buscar">Trechos</th>
-        <th>Passos do planejador</th>
         <th></th>
       </tr></thead>
       <tbody>${rows}</tbody>
@@ -103,8 +102,9 @@ async function load() {
 
 function coletar(rota) {
   const g = (campo) => $(`f-${rota}-${campo}`);
-  const steps = g('planner_steps').value.trim();
   const k = g('k').value.trim();
+  // `planner_steps` não é mais editável aqui (Planner em aposentadoria) —
+  // o upsert do route_registry é parcial, então não mandar = manter o valor.
   return {
     entrypoint_node: g('entrypoint_node').value,
     owner: g('owner').value,
@@ -113,7 +113,6 @@ function coletar(rota) {
     permite_detour: g('permite_detour').checked,
     doc_type: g('doc_type').value.trim() || null,
     k: k === '' ? null : Number(k),
-    planner_steps: steps === '' ? null : steps.split(',').map((s) => s.trim()).filter(Boolean),
   };
 }
 

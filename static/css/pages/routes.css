@@ -4,7 +4,7 @@
    compactos na célula, checkbox com acento, item de histórico. */
 
 /* Tabela larga: rola dentro do .table-wrap em vez de espremer a coluna de ações */
-.routes-view .table--routes { min-width: 1180px; }
+.routes-view .table--routes { min-width: 1040px; }
 .routes-view .table--routes td { white-space: normal; vertical-align: middle; }
 .routes-view .table--routes .col-actions { white-space: nowrap; }
 .routes-view .rota-nome { font-weight: var(--weight-semi); }
