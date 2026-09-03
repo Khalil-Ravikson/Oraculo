@@ -88,13 +88,26 @@ def _override_do_agente(agente: str) -> tuple[str | None, str | None]:
         return None, None
 
 
-def get_llm_provider(agente: str | None = None, rota: str = "") -> "MonitoredLLMProvider":
+def get_llm_provider(
+    agente: str | None = None, rota: str = "", *, rapido: bool = False,
+) -> "MonitoredLLMProvider":
     """Resolve o provider ativo (global + override opcional por agente) e
     devolve envolvido em `MonitoredLLMProvider` — toda chamada feita
     através do retorno grava telemetria real automaticamente (Postgres +
-    Prometheus), sem o call site precisar fazer nada a mais."""
+    Prometheus), sem o call site precisar fazer nada a mais.
+
+    `rapido=True`: passo barato/alto-volume (classificação, transform de
+    query, resumo de memória, parsing) — usa `settings.LLM_MODEL_FAST` se
+    definido e o provider ativo for o Gemini. Ver ADR 0008 (model tiering).
+    Precedência de modelo: override do agente > tier rápido > default do provider.
+    """
     provider_name = _provider_global_ativo()
     modelo = None
+
+    if rapido and provider_name == "gemini":
+        from src.infrastructure.settings import settings
+        if settings.LLM_MODEL_FAST:
+            modelo = settings.LLM_MODEL_FAST
 
     if agente:
         override_provider, override_modelo = _override_do_agente(agente)

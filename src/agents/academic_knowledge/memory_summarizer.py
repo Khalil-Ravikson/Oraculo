@@ -31,7 +31,7 @@ async def summarize(session_id: str) -> dict:
             turns.append(f"{p}: {d['content'][:200]}")
         conversa = "\n".join(turns)
 
-        provider = get_llm_provider(rota="memoria_resumo")
+        provider = get_llm_provider(rota="memoria_resumo", rapido=True)
         resp = await provider.gerar_resposta_async(
             prompt=f"Resuma esta conversa em 3-5 bullet points preservando fatos importantes:\n{conversa}",
             temperatura=0.1, max_tokens=200,

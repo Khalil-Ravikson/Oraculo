@@ -193,7 +193,7 @@ async def _sintetizar_fatos_flash(session_id: str, conversas: str) -> list[str]:
     from src.infrastructure.adapters.llm_factory import get_llm_provider
 
     try:
-        provider = get_llm_provider(rota="memoria_noturna")
+        provider = get_llm_provider(rota="memoria_noturna", rapido=True)
         resp = await provider.gerar_resposta_async(
             prompt=_PROMPT_SINTETIZAR.format(conversas=conversas[:2000]),
             temperatura=0.05, max_tokens=200,

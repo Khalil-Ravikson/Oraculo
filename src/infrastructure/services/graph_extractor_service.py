@@ -59,7 +59,7 @@ class GraphExtractorService:
         try:
             from src.infrastructure.adapters.llm_factory import get_llm_provider
 
-            provider = get_llm_provider(rota="extracao_grafo")
+            provider = get_llm_provider(rota="extracao_grafo", rapido=True)
             resp = await provider.gerar_resposta_async(
                 prompt=_PROMPT.format(texto=text[:3000]),
                 temperatura=0.0, max_tokens=800,

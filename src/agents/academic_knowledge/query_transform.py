@@ -117,7 +117,7 @@ class QueryTransformService:
                 f"Query Reescrita:"
             )
 
-            provider = get_llm_provider(rota="query_transform")
+            provider = get_llm_provider(rota="query_transform", rapido=True)
             resp = await provider.gerar_resposta_async(prompt=prompt, temperatura=0.0, max_tokens=60)
             reescrita = (resp.conteudo or "").strip()
             # Remove aspas se o modelo adicionar

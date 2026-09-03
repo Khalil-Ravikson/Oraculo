@@ -203,7 +203,7 @@ Pergunta atual: "{query[:400]}"
 
 Gere o plano de execução:"""
 
-    provider = get_llm_provider(agente="academic_knowledge", rota="planner")
+    provider = get_llm_provider(agente="academic_knowledge", rota="planner", rapido=True)
     plano_schema = await provider.gerar_resposta_estruturada_async(
         prompt=prompt,
         response_schema=ExecutionPlanSchema,

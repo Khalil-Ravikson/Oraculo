@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     GEMINI_TEMP:       float = 0.2
     GEMINI_MAX_TOKENS: int   = 1024
 
+    # Model tiering (ADR 0008): passos baratos e de alto volume —
+    # classificação de rota (Supervisor L5), transformação de query, resumo/
+    # extração de memória, parsing estruturado — usam este modelo em vez do
+    # `GEMINI_MODEL` "forte". Vazio = usa o mesmo `GEMINI_MODEL` (zero mudança
+    # até o operador definir, ex.: `gemini-2.5-flash-lite`). Só vale quando o
+    # provider ativo é o Gemini. A síntese da resposta ao aluno SEMPRE usa o
+    # modelo forte. Ver `llm_factory.get_llm_provider(rapido=True)`.
+    LLM_MODEL_FAST:    str   = ""
+
     # ── Multimodal (STT/TTS/Vision) ─────────────────────────────────
     # Seleção de provider por capability — ver src/infrastructure/adapters/
     # {stt,tts}_factory.py. Trocar aqui não exige mudança de código.

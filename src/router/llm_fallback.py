@@ -106,7 +106,7 @@ async def _classificar_com_flash(query: str, ctx: dict, session_id: str | None =
     prompt = "\n\n".join(ctx_parts + [f"Mensagem: \"{query[:300]}\"\nClassifique:"])
 
     try:
-        provider = get_llm_provider(agente="router", rota="router_classify")
+        provider = get_llm_provider(agente="router", rota="router_classify", rapido=True)
         decision_validated = await provider.gerar_resposta_estruturada_async(
             prompt=prompt,
             response_schema=RoutingDecision,

@@ -52,7 +52,7 @@ Texto Bruto:
             logger.info("🤖 Iniciando estruturação LLM do Calendário Acadêmico...")
             from src.infrastructure.adapters.llm_factory import get_llm_provider
 
-            provider = get_llm_provider(rota="calendario_parser")
+            provider = get_llm_provider(rota="calendario_parser", rapido=True)
             resp = provider.gerar_resposta_sincrono(prompt=prompt, temperatura=0.0, max_tokens=8192)
 
             structured_text = (resp.conteudo or "").strip()
