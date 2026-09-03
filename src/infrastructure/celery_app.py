@@ -227,7 +227,7 @@ def on_worker_process_shutdown(**kwargs):
     if _worker_loop is None or _worker_loop.is_closed():
         return
     try:
-        from src.application.runtime.dispatcher_langgraph import aclose_graph
+        from src.application.orchestration.entrypoint import aclose_graph
         _worker_loop.run_until_complete(aclose_graph())
         _worker_loop.run_until_complete(_worker_loop.shutdown_asyncgens())
     except Exception as e:

@@ -165,3 +165,17 @@ def build_graph(checkpointer=None):
     graph.add_edge("crud_save", END)
 
     return graph.compile(checkpointer=checkpointer)
+
+
+def describe() -> dict:
+    """Nós + arestas do grafo de produção real, pro visualizador do Hub
+    (`/hub/graph/producao`, ADR 0008 Fase 4) — substitui `reference_flows.py`
+    hardcoded. Somente leitura; não instancia checkpointer nem chama nada."""
+    g = build_graph().get_graph()
+    return {
+        "nodes": sorted(n.id for n in g.nodes.values()),
+        "edges": [
+            {"source": e.source, "target": e.target, "conditional": e.conditional}
+            for e in g.edges
+        ],
+    }

@@ -1,16 +1,21 @@
 """
-src/application/runtime/dispatcher_langgraph.py
-====================================================
-Entry point de produção (ver Decisão 01/Fase 2d do plano de integração,
-docs/decisions/) — em migração progressiva pra assumir 100% das rotas.
-Nasceu como wrapper fino que intercepta só TICKET_ABERTURA/CRUD/RAG
-(GERAL/CALENDARIO/EDITAL/CONTATOS/WIKI) e delega o resto pro
-`application/runtime/dispatcher.py` original; SIGAA/MEDIA_DOWNLOAD/
-GREETING/CHECK_STATUS estão sendo portadas pra nodes nativos do grafo aqui,
-rota a rota. A decisão "grafo vs dispatcher.py" por rota vem do
-`route_registry` (coluna `owner` + FEATURE_LANGGRAPH_NATIVE_ROUTES, Fase 2).
-`dispatcher.py` deixa de ser chamado em produção quando a última rota
-migrar (fica só pra debug/eval).
+src/application/orchestration/entrypoint.py
+===========================================
+Entrypoint ÚNICO de processamento de mensagem (ADR 0008). Substitui os dois
+dispatchers — `dispatcher.py` (legado) e `dispatcher_langgraph.py`.
+
+Roda os fast-paths de front (STT, mídia sem legenda, labs REST/MCP),
+guardrails de input, continuação de HITL legado, e então classifica via
+`router/supervisor.py::rotear()` (o Supervisor real, 5 camadas — único ponto
+de classificação do sistema). A rota vira ou uma invocação do `StateGraph`
+(`builder.build_graph`) ou, enquanto `FEATURE_LANGGRAPH_NATIVE_ROUTES`
+estiver desligada, uma delegação pra `dispatcher.py` nas 4 rotas condicionais
+(GREETING/SIGAA/MEDIA_DOWNLOAD/CHECK_STATUS) — costura reversível da Fase 1
+(ADR 0008); a Fase 3 remove a delegação e deleta `dispatcher.py`.
+
+O circuit-breaker por agente (kill-switch de `/hub/agents`) roda aqui, uma
+vez, para TODAS as rotas — antes vivia só em `dispatcher.py` e não valia
+para as rotas nativas do grafo.
 
 Guardrails de input (prompt injection/rate limit) e a continuação de HITL
 legado (`handle_hitl_continuation`, SIGAA CPF/senha via
@@ -25,6 +30,10 @@ CLI). Isso evita reabrir o problema dos "três cérebros" documentado em
 `notas.md` item 5.1: aqui só tem UM classificador decidindo, o mesmo que
 already roda em produção.
 
+Classificação de rota reaproveita `router/supervisor.py::rotear()` (o
+Supervisor real, 5 camadas) — não o `classify_node` do grafo (regex
+simplificado, só usado no REPL `scripts/graph_repl.py`).
+
 Checkpointer: `AsyncRedisSaver` (não `MemorySaver`) — obrigatório porque a
 API e os workers Celery rodam em processos/containers diferentes; um
 funil de ticket/CRUD que pausa (`interrupt()`) num processo e retoma noutro
@@ -35,7 +44,7 @@ de múltiplos `interrupt()` pendentes no MESMO node (funciona no 1º resume,
 quebra no 2º): https://github.com/langchain-ai/langgraph/issues/5074 e
 https://github.com/redis-developer/langgraph-redis/issues/133. Reproduzido
 nesta branch com o funil de ticket antigo (4 interrupts num node só).
-Mitigado em `langgraph_experiment/nodes.py` quebrando cada funil em 1 node
+Mitigado em `orchestration/nodes.py` quebrando cada funil em 1 node
 por pergunta (1 interrupt por node) — ver docstring lá. Versão do pacote
 pinada em `requirements.txt` por isso (área comprovadamente instável).
 
@@ -46,11 +55,6 @@ depois de chegar em END. Por isso, ao INICIAR um funil novo (não ao
 retomar), o payload do `ainvoke()` precisa resetar explicitamente os campos
 daquele funil (`_reset_payload_para_rota`), senão dados de uma execução
 anterior (ex: um ticket já confirmado) vazam pra próxima. Ver notas.md.
-
-Ativado trocando o import em `process_message_task.py`:
-    from src.application.runtime.dispatcher import processar as cognitive_processar
-    →
-    from src.application.runtime.dispatcher_langgraph import processar as cognitive_processar
 """
 from __future__ import annotations
 
@@ -59,15 +63,16 @@ import logging
 import time
 
 from src.application.runtime.contracts import OSResult
+# Costura reversível da Fase 1 (ADR 0008): as 4 rotas condicionais
+# (GREETING/SIGAA/MEDIA_DOWNLOAD/CHECK_STATUS) delegam pra cá enquanto
+# `FEATURE_LANGGRAPH_NATIVE_ROUTES` estiver desligada. A Fase 3 remove este
+# import e deleta `dispatcher.py`.
 from src.application.runtime.dispatcher import processar as _processar_original
 
 logger = logging.getLogger(__name__)
 
-# Plano A / Fase 2: os frozensets/dicts de rota→execução que viviam aqui
-# (_ROTAS_DETOUR_RAG, _ROTAS_LANGGRAPH, _ROTAS_LANGGRAPH_NATIVAS_CONDICIONAIS,
-# _ROUTE_TO_ROTA, _ROTA_TO_ROUTE) foram colapsados na tabela `route_registry`
-# (migration 010) — lida via `src.infrastructure.route_registry`, com
-# `_DEFAULTS` hardcoded como fallback fiel ao estado pré-Fase-2.
+# A decisão "grafo vs dispatcher.py legado" por rota vem do `route_registry`
+# (coluna `owner` + FEATURE_LANGGRAPH_NATIVE_ROUTES, migration 010):
 #   owner="langgraph"              → tratada pelo grafo
 #   owner="langgraph_conditional"  → grafo só com FEATURE_LANGGRAPH_NATIVE_ROUTES
 #   owner="legacy"                 → sempre delegada pra dispatcher.py
@@ -397,13 +402,32 @@ async def processar(
 
     decision = await rotear(message, session_id, user_context)
 
-    # Fase 2: a decisão "grafo vs dispatcher.py legado" vem do `route_registry`
-    # (owner + FEATURE_LANGGRAPH_NATIVE_ROUTES). Flag desligada = comportamento
-    # idêntico a antes (as 4 rotas condicionais delegam pra dispatcher.py).
     from src.infrastructure import route_registry
     from src.infrastructure.settings import settings
 
     rr = route_registry.get(decision.rota)
+
+    # ── 1a. Circuit-breaker por agente (kill-switch de /hub/agents) ───────────
+    # ADR 0008 (Fase 1): antes vivia só em `dispatcher.py::processar()` e não
+    # valia pras rotas nativas do grafo (GERAL/CALENDARIO/EDITAL/CONTATOS/WIKI/
+    # TICKET_ABERTURA/CRUD) — desligar um agente em `/hub/agents` não bloqueava
+    # nada dessas. Aqui roda pra TODAS as rotas, antes de entrar no grafo ou
+    # delegar. GREETING/MEDIA_DOWNLOAD/CHECK_STATUS têm `agente=NULL` (fast-
+    # paths utilitários, sempre ligados). `dispatcher.py` mantém a mesma
+    # checagem enquanto existir — a checagem dupla nas rotas delegadas é
+    # inofensiva (mesmo resultado). Não roda no caminho de resume de funil
+    # pendente (acima), mantendo a paridade com o comportamento anterior.
+    if rr.agente:
+        from src.capabilities.persistence.agent_config import is_agent_enabled
+        if not await is_agent_enabled(r, rr.agente):
+            ms = int((time.monotonic() - t0) * 1000)
+            logger.info("🚧 [ORCH] Agente '%s' desativado — rota %s bloqueada (session=%s)",
+                        rr.agente, decision.rota, session_id)
+            return OSResult(
+                answer="🚧 Essa função está temporariamente desativada. Tente novamente mais tarde.",
+                plan_id="agent_disabled", rota=decision.rota,
+                cache_hit=False, total_ms=ms, status="ok",
+            )
 
     if rr.delega_para_legado(settings.FEATURE_LANGGRAPH_NATIVE_ROUTES) \
             or rr.entrypoint_node not in route_registry.NODES_ENTRYPOINT:

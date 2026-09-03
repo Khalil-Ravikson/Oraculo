@@ -271,7 +271,7 @@ async def chat_stream(request: Request, msg: str = "", thread_id: str = ""):
             yield _sse_step("pipeline", "running", "Processando via Cognitive OS (LangGraph)…")
             t0 = _t.monotonic()
 
-            from src.application.runtime.dispatcher_langgraph import processar as cognitive_processar
+            from src.application.orchestration.entrypoint import processar as cognitive_processar
             from src.memory.container import create_memory_service
 
             mem_svc = create_memory_service()
@@ -2548,7 +2548,7 @@ async def eval_query(request: Request):
     queue: asyncio.Queue = asyncio.Queue()
 
     async def _run():
-        from src.application.runtime.dispatcher_langgraph import processar
+        from src.application.orchestration.entrypoint import processar
         
         await queue.put(json.dumps({
             "tipo": "step_start", "step": "routing"

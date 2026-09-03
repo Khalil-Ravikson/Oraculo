@@ -123,10 +123,9 @@ async def _processar_async(task, identity: dict, stream_id: str) -> None:
         mem_svc = create_memory_service()
         mem_ctx = mem_svc.carregar_contexto(user_id=phone, session_id=phone, query=message)
         
-        # ── Executa a chain (COGNITIVE OS) ─────────────────────────────────────
-        # 🧪 EXPERIMENTO (branch langgraph): TICKET_ABERTURA/RAG desviados pro
-        # StateGraph do LangGraph — ver src/application/runtime/dispatcher_langgraph.py
-        from src.application.runtime.dispatcher_langgraph import processar as cognitive_processar
+        # ── Orquestrador único (ADR 0008) ─────────────────────────────────────
+        # ver src/application/orchestration/entrypoint.py
+        from src.application.orchestration.entrypoint import processar as cognitive_processar
 
         t0 = time.monotonic()
         
@@ -350,8 +349,20 @@ async def _handle_message_impl(**kwargs) -> None:
         allowed_group_jid=allowed_group, remote_jid=remote_jid,
     )
 
+    # TD-013 (ADR 0008 Fase 1): antes, TODA decisão IGNORE do gatekeeper era
+    # reescrita pra LLM incondicionalmente — os filtros de segurança
+    # (`nao_e_admin`, `admin_cmd_invalido`, `texto_vazio_apos_mention`,
+    # `mensagem_inutil`, `privado_bloqueado_no_beta`) não bloqueavam nada, só
+    # mudavam o motivo no log. O único IGNORE que o grupo de homologação
+    # realmente quer sobrescrever é `sem_trigger_grupo` (o bot responde a
+    # qualquer mensagem no grupo, com ou sem `@oraculo`/`$`/`!`). Os demais
+    # voltam a de fato descartar a mensagem.
     if decision.target == DispatchTarget.IGNORE:
-        decision.target = DispatchTarget.LLM
+        if decision.reason == "sem_trigger_grupo":
+            decision.target = DispatchTarget.LLM
+        else:
+            logger.info("🚫 [GATEKEEPER] Mensagem ignorada (%s) | sender=%s", decision.reason, sender)
+            return
 
     ctx = CommandContext(
         sender_jid=sender, chat_id=chat_id, text=decision.text, redis_text=r,
@@ -413,8 +424,8 @@ async def _handle_message_impl(**kwargs) -> None:
         mem_ctx = mem_svc.carregar_contexto(user_id=sender, session_id=sender, query=mensagem)
 
         # ── CognitiveOS: ───────────────────────────────────────────────────────
-        # 🧪 EXPERIMENTO (branch langgraph): ver dispatcher_langgraph.py
-        from src.application.runtime.dispatcher_langgraph import processar as cognitive_processar
+        # Orquestrador único (ADR 0008) — ver orchestration/entrypoint.py
+        from src.application.orchestration.entrypoint import processar as cognitive_processar
         result_os = await cognitive_processar(
             message=mensagem,
             session_id=sender,

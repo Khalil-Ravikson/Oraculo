@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import src.application.runtime.dispatcher_langgraph as dlg
+import src.application.orchestration.entrypoint as dlg
 
 
 @pytest.fixture(autouse=True)

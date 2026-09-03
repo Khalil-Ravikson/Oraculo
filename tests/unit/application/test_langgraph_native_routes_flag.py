@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import src.application.runtime.dispatcher_langgraph as dlg
+import src.application.orchestration.entrypoint as dlg
 
 
 @pytest.fixture(autouse=True)
@@ -66,11 +66,11 @@ async def test_flag_desligada_ainda_delega_pro_dispatcher_original(monkeypatch, 
 
     with patch("src.router.supervisor.rotear", new_callable=AsyncMock) as mock_rotear, \
          patch(
-             "src.application.runtime.dispatcher_langgraph._processar_original",
+             "src.application.orchestration.entrypoint._processar_original",
              new_callable=AsyncMock,
          ) as mock_original, \
          patch(
-             "src.application.runtime.dispatcher_langgraph._get_graph",
+             "src.application.orchestration.entrypoint._get_graph",
              new_callable=AsyncMock, return_value=fake_app,
          ):
         mock_rotear.return_value = _fake_decision(rota)
@@ -103,11 +103,11 @@ async def test_flag_ligada_roteia_pro_grafo(monkeypatch, rota, node_name):
 
     with patch("src.router.supervisor.rotear", new_callable=AsyncMock) as mock_rotear, \
          patch(
-             "src.application.runtime.dispatcher_langgraph._processar_original",
+             "src.application.orchestration.entrypoint._processar_original",
              new_callable=AsyncMock,
          ) as mock_original, \
          patch(
-             "src.application.runtime.dispatcher_langgraph._get_graph",
+             "src.application.orchestration.entrypoint._get_graph",
              new_callable=AsyncMock, return_value=fake_app,
          ):
         mock_rotear.return_value = _fake_decision(rota)

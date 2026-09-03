@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.application.orchestration.state import OraculoState
 from src.application.orchestration.nodes import responder_rag_direto, rag_node
-from src.application.runtime.dispatcher_langgraph import _reset_payload_para_rota
+from src.application.orchestration.entrypoint import _reset_payload_para_rota
 
 
 def _mock_rag_result(chunks=None):

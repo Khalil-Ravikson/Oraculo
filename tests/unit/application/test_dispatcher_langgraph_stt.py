@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.application.runtime.dispatcher_langgraph import processar
+from src.application.orchestration.entrypoint import processar
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +50,7 @@ async def test_audio_transcrito_antes_de_rotear_e_antes_do_grafo():
         new_callable=AsyncMock,
         return_value="estou com erro no sistema",
     ), patch(
-        "src.application.runtime.dispatcher_langgraph._get_graph",
+        "src.application.orchestration.entrypoint._get_graph",
         new_callable=AsyncMock,
         return_value=fake_app,
     ), patch(
@@ -81,7 +81,7 @@ async def test_transcricao_falha_retorna_erro_sem_chamar_grafo():
         new_callable=AsyncMock,
         return_value=None,
     ), patch(
-        "src.application.runtime.dispatcher_langgraph._get_graph",
+        "src.application.orchestration.entrypoint._get_graph",
         new_callable=AsyncMock,
     ) as mock_get_graph:
         result = await processar("", "session-1", user_context)
@@ -97,7 +97,7 @@ async def test_imagem_sem_legenda_retorna_mensagem_amigavel_sem_chamar_grafo():
     user_context = {"has_media": True, "media_type": "imageMessage"}
 
     with patch(
-        "src.application.runtime.dispatcher_langgraph._get_graph",
+        "src.application.orchestration.entrypoint._get_graph",
         new_callable=AsyncMock,
     ) as mock_get_graph, patch(
         "src.router.supervisor.rotear", new_callable=AsyncMock
@@ -127,13 +127,13 @@ async def test_delegacao_pra_dispatcher_original_recebe_media_type_limpo():
         new_callable=AsyncMock,
         return_value="quero consultar meu histórico",
     ), patch(
-        "src.application.runtime.dispatcher_langgraph._get_graph",
+        "src.application.orchestration.entrypoint._get_graph",
         new_callable=AsyncMock,
         return_value=fake_app,
     ), patch(
         "src.router.supervisor.rotear", new_callable=AsyncMock
     ) as mock_rotear, patch(
-        "src.application.runtime.dispatcher_langgraph._processar_original",
+        "src.application.orchestration.entrypoint._processar_original",
         new_callable=AsyncMock,
     ) as mock_original:
         mock_decision = MagicMock()
