@@ -63,3 +63,23 @@ def test_rotas_editaveis_lista_so_as_nao_travadas():
     editaveis = spec_editor.rotas_editaveis(GraphSpec.model_validate(raw))
     assert len(editaveis) == 1
     assert editaveis[0]["node_id"] == "faq" and editaveis[0]["node_type"] == "rag"
+
+
+def test_criar_rota_greeting_nao_esbarra_na_validacao_de_entrypoint():
+    """Regressão: o endpoint /nova-rota adiciona o nó na spec E cria a linha
+    de route_registry na mesma transação. `validar_campos` NÃO pode reprovar
+    o `entrypoint_node` só porque o nó ainda não está na spec ATIVA — a
+    topologia com ele já foi validada por `adicionar_rota`."""
+    from src.infrastructure import route_registry
+
+    node_id = spec_editor.node_id_de_rota("TESTE")
+    raw = spec_editor.adicionar_rota(default_spec(), node_id=node_id, node_type="greeting", config={})
+    assert node_id in {n["id"] for n in raw["nodes"]}
+
+    # o endpoint valida os campos SEM entrypoint_node e injeta depois
+    campos = route_registry.validar_campos({
+        "owner": "langgraph", "agente": None, "cacheavel": True,
+        "permite_detour": False, "doc_type": None, "k": 0,
+    })
+    campos["entrypoint_node"] = node_id
+    assert campos["entrypoint_node"] == "teste"

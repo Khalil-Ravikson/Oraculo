@@ -2050,8 +2050,12 @@ async def graph_studio_nova_rota(request: Request, data: NovaRotaGrafoRequest):
     except spec_editor.EdicaoInvalida as exc:
         return {"error": str(exc)}
 
+    # `entrypoint_node` fica FORA do validar_campos: o nó `node_id` ainda não
+    # está na spec ATIVA (é o que estamos criando), mas `adicionar_rota` já
+    # provou que a topologia com ele é válida. Os demais campos passam pela
+    # validação normal.
     campos = {
-        "entrypoint_node": node_id, "owner": "langgraph", "agente": None,
+        "owner": "langgraph", "agente": None,
         "cacheavel": bool(data.cacheavel), "permite_detour": data.node_type == "rag",
         "doc_type": data.doc_type if data.node_type == "rag" else None,
         "k": data.k if data.node_type == "rag" else 0,
@@ -2060,6 +2064,7 @@ async def graph_studio_nova_rota(request: Request, data: NovaRotaGrafoRequest):
         campos = route_registry.validar_campos(campos)
     except route_registry.CamposInvalidos as exc:
         return {"error": str(exc)}
+    campos["entrypoint_node"] = node_id
 
     try:
         async with AsyncSessionLocal() as session:
@@ -2069,10 +2074,9 @@ async def graph_studio_nova_rota(request: Request, data: NovaRotaGrafoRequest):
             cfg = await rr_repo.upsert(rota, campos, versao_esperada=0, atualizado_por=payload.sub)
 
             gs_repo = GraphSpecRepository(session)
-            atual = await gs_repo.obter()
             resultado = await gs_repo.salvar(
                 nova_spec_raw,
-                versao_esperada=(atual["versao"] if atual else data.versao_esperada),
+                versao_esperada=data.versao_esperada,
                 atualizado_por=f"{payload.sub} (+rota {rota})",
             )
 
