@@ -94,3 +94,22 @@ def test_build_graph_sem_checkpointer_usa_memorysaver():
 
     app = build_graph()
     assert isinstance(app.checkpointer, MemorySaver)
+
+
+def test_diagrama_producao_reflete_o_grafo_real():
+    from src.application.orchestration.builder import diagrama_producao
+
+    f = diagrama_producao()["fluxos"][0]
+    ids = {n["id"] for n in f["nodes"]}
+    # funis colapsados
+    assert "ticket" in ids and "crud" in ids
+    assert "ticket_ask_tipo" not in ids
+    # nós reais presentes, com rótulo humano (não o id cru)
+    assert "human_handoff" in ids
+    hh = next(n for n in f["nodes"] if n["id"] == "human_handoff")
+    assert "atendente" in hh["label"].lower() and hh["label"] != "human_handoff"
+    # arestas do classify rotuladas
+    labels_classify = {e["rotulo"] for e in f["edges"] if e["de"] == "classify"}
+    assert all(labels_classify)  # nenhuma vazia
+    # sem auto-loop dos funis
+    assert not any(e["de"] == e["para"] for e in f["edges"])

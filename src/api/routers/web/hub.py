@@ -1853,13 +1853,14 @@ async def graph_studio_nodes(request: Request):
 
 @router.get("/graph-studio/reference")
 async def graph_studio_reference(request: Request):
-    """Diagramas (somente leitura) do roteamento que já existe — reflete
-    `supervisor.py` + `route_registry`, não é editável nem executável."""
+    """Diagrama (somente leitura) do grafo de produção REAL — gerado de
+    `orchestration/builder.py::build_graph`, não é desenho manual (ADR 0008).
+    Não é editável nem executável aqui; para editar, use o mapa de rotas."""
     payload = _verificar_cookie(request)
     if not payload:
         return _nao_autorizado()
-    from src.graph_studio.reference_flows import como_json
-    return {"fluxos": como_json()}
+    from src.application.orchestration.builder import diagrama_producao
+    return diagrama_producao()
 
 
 @router.get("/graph-studio/topologies")

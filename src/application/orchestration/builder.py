@@ -172,9 +172,8 @@ def build_graph(checkpointer=None):
 
 
 def describe() -> dict:
-    """Nós + arestas do grafo de produção real, pro visualizador do Hub
-    (`/hub/graph/producao`, ADR 0008 Fase 4) — substitui `reference_flows.py`
-    hardcoded. Somente leitura; não instancia checkpointer nem chama nada."""
+    """Nós + arestas cruas do grafo compilado (sem instanciar checkpointer nem
+    chamar nada). Usado por testes e por `diagrama_producao()`."""
     g = build_graph().get_graph()
     return {
         "nodes": sorted(n.id for n in g.nodes.values()),
@@ -182,4 +181,89 @@ def describe() -> dict:
             {"source": e.source, "target": e.target, "conditional": e.conditional}
             for e in g.edges
         ],
+    }
+
+
+# Rótulo humano de cada nó do grafo (o painel nunca mostra `rag`/`sigaa`).
+_ROTULOS = {
+    "__start__": "Mensagem recebida",
+    "classify": "Descobrir o assunto (Supervisor)",
+    "rag": "Responder com base nos documentos",
+    "check_status": "Status de um pedido anterior",
+    "greeting": "Saudação",
+    "media_download": "Baixar vídeo/mídia",
+    "sigaa": "Consultar dados no SIGAA",
+    "human_handoff": "Encaminhar a um atendente humano",
+    "ticket": "Abrir um chamado (passo a passo)",
+    "crud": "Atualizar cadastro (passo a passo)",
+    "__end__": "Resposta ao usuário",
+}
+# Sub-nós dos funis colapsados num nó só no diagrama.
+_COLAPSA = {
+    "ticket_ask_tipo": "ticket", "ticket_ask_categoria": "ticket",
+    "ticket_ask_queixa": "ticket", "ticket_confirm": "ticket", "ticket_save": "ticket",
+    "crud_ask_campo": "crud", "crud_ask_valor": "crud",
+    "crud_confirm": "crud", "crud_save": "crud",
+}
+
+
+def diagrama_producao() -> dict:
+    """Diagrama pronto pra desenhar no Hub (`/hub/graph-studio/reference`).
+    Reflete `build_graph()` de verdade — não é dado hardcoded. Os funis de
+    ticket/CRUD aparecem colapsados num nó só (o passo-a-passo interno é
+    detalhe). Layout em camadas por distância do START."""
+    raw = describe()
+
+    def canon(nid: str) -> str:
+        return _COLAPSA.get(nid, nid)
+
+    nodes = {canon(n) for n in raw["nodes"]}
+    edges = set()
+    rotulos_aresta: dict[tuple[str, str], str] = {}
+    for e in raw["edges"]:
+        s, t = canon(e["source"]), canon(e["target"])
+        if s == t:
+            continue  # auto-loop dos funis (re-perguntar) — some no diagrama
+        edges.add((s, t))
+        if e["conditional"] and s == "classify":
+            rotulos_aresta[(s, t)] = _ROTULOS.get(t, t)
+
+    # camadas: BFS a partir de __start__
+    camada = {"__start__": 0}
+    fila = ["__start__"]
+    while fila:
+        atual = fila.pop(0)
+        for (s, t) in edges:
+            if s == atual and t not in camada:
+                camada[t] = camada[atual] + 1
+                fila.append(t)
+    for n in nodes:
+        camada.setdefault(n, max(camada.values(), default=0))
+
+    por_camada: dict[int, list[str]] = {}
+    for n in sorted(nodes):
+        por_camada.setdefault(camada[n], []).append(n)
+
+    NODE_W, NODE_H, GAP_X, GAP_Y = 200, 44, 240, 78
+    pos_nodes = []
+    for c, ids in sorted(por_camada.items()):
+        for i, nid in enumerate(ids):
+            pos_nodes.append({
+                "id": nid, "label": _ROTULOS.get(nid, nid),
+                "x": c * GAP_X, "y": i * GAP_Y,
+            })
+
+    return {
+        "fluxos": [{
+            "nome": "Fluxo de produção (grafo real)",
+            "descricao": "O que acontece com uma mensagem depois que o assunto é "
+                         "descoberto. Gerado do código (orchestration/builder.py), "
+                         "não é um desenho manual.",
+            "fonte": "src/application/orchestration/builder.py::build_graph",
+            "nodes": pos_nodes,
+            "edges": [
+                {"de": s, "para": t, "rotulo": rotulos_aresta.get((s, t), "")}
+                for (s, t) in sorted(edges)
+            ],
+        }]
     }
