@@ -1,6 +1,6 @@
 # ADR 0008 — Orquestrador único de mensagem sobre o StateGraph do LangGraph
 
-- **Status:** ativo — Fases 0-3 concluídas; 4-5 em andamento
+- **Status:** ativo — Fases 0-5 e B concluídas
 - **Data:** 2026-09-02
 - **Supera:** ADR 0001 (LangGraph aprovado como dispatcher definitivo — este
   ADR fecha a migração que o 0001 abriu). Complementa ADR 0007 (Hub v2).
@@ -37,9 +37,16 @@ escalonamento para atendente humano.
    `route_registry.planner_steps` (DAG do Planner) é removida.
 6. **Topologia do grafo como dado** (`GraphSpec`, Fase 5) — finaliza a
    metade "Workflow" da Fase 2 do Plano A. Funis de ticket/CRUD ficam em
-   código (subgrafos); só o fan-out simples vira spec.
-7. **Hub realinhado** para mostrar um só grafo — o de produção real, gerado
-   de `orchestration.builder.describe()`.
+   código como sequência de nós travados (`locked=True`); o fan-out simples
+   (o que `classify` decide) vira spec, editável pelo Graph Studio.
+7. **Hub realinhado** — Graph Studio mostra e edita a `GraphSpec` ATIVA
+   (não um desenho manual); "criar um fluxo novo" grava rota + nó + arestas
+   numa transação só (route_registry + graph_spec).
+8. **`classify` vira nó real** (Fase B) — antes o `entrypoint.py` chamava
+   `rotear()`/circuit-breaker como Python puro ANTES do grafo, e o
+   `classify_node` era passthrough. Agora a classificação e o
+   circuit-breaker rodam DENTRO do grafo, no próprio `classify_node` — o
+   diagrama do Hub mostra o pipeline real, não uma aproximação.
 
 ## Faseamento
 
@@ -48,9 +55,10 @@ escalonamento para atendente humano.
 | 0 | Pacote `orchestration/` + `src/graph_studio/` + limpeza | ✅ `33dbf25` |
 | 1 | Entrypoint único + circuit-breaker global + TD-013 | ✅ `a7f3d31` |
 | 2 | Rota/nó `human_handoff` (ESCALAR_HUMANO) + migration 022 | ✅ `b988ab2` |
-| 3 | Aposentar `dispatcher.py` + Planner + migration 023 | ✅ |
-| 4 | Realinhar o Hub | parcial (`c67a571`/`be77173`/`fdadc99`) |
-| 5 | `GraphSpec` declarativa | pendente |
+| 3 | Aposentar `dispatcher.py` + Planner + migration 023 | ✅ `c045299` |
+| 5 | `GraphSpec` declarativa + migration 024 | ✅ `d4ce577` |
+| 4 | Graph Studio edita a `GraphSpec` (criar fluxo novo) | ✅ `af20019` |
+| B | `classify_node` real (Supervisor + circuit-breaker dentro do grafo) | ✅ |
 
 ## Consequências
 
@@ -60,6 +68,39 @@ escalonamento para atendente humano.
   rotas — antes só para as delegadas.
 - `FEATURE_LANGGRAPH_NATIVE_ROUTES` não existe mais (nem em `settings.py`, nem
   em `dynamic_config`, nem no seed de `config_dinamica`).
+- O diagrama do Hub (`/hub/graph-studio`, aba "Grafo de produção") é a
+  `GraphSpec` de verdade — nós/arestas que a GUI mostra são os mesmos que o
+  `builder.build_graph()` compila em produção, sem tradução.
+
+### Dois bugs achados escrevendo os testes de regressão da Fase B
+
+A migração do circuit-breaker/classificação pra dentro de `classify_node`
+expôs dois bugs que ficavam mascarados pela forma como o código antigo
+mexia no payload — nenhum dos dois era visível olhando só o "novo" código
+isolado, só apareceu com testes de regressão fim-a-fim:
+
+1. **Namespace de `route_value` vs. id de nó do grafo.** A rede de
+   segurança ("`entrypoint_node` inválido cai em `rag`") comparava
+   `rr.entrypoint_node` (ex.: `"ticket"`) contra os IDS DE NÓ do grafo
+   compilado (ex.: `"ticket_ask_tipo"`) — namespaces diferentes, então
+   "ticket"/"crud" nunca validavam. Existia desde a Fase 5 mas nenhum teste
+   populava a checagem pra uma rota de funil (os testes de ticket/HITL
+   setam `dlg._graph` direto, contornando o único ponto — `_get_graph()` —
+   que calculava o conjunto antigo). Corrigido: `builder.route_values_ativos()`
+   deriva o conjunto certo dos `route_value` da spec, não dos ids de nó.
+2. **`route` stale sobrevivendo no checkpoint.** `_payload_mensagem_nova`
+   não resetava `route` (a decisão "fica pro `classify_node`"), mas como o
+   `thread_id` é fixo por sessão, o `route` do ÚLTIMO funil concluído
+   continuava no checkpoint — e o atalho de REPL de `classify_node`
+   (`if state.route: return {}`) tomava esse valor stale como "já
+   classificado", pulando a classificação de verdade numa mensagem nova (2º
+   funil na mesma sessão herdava as perguntas do 1º). Corrigido:
+   `_payload_mensagem_nova` volta a resetar `route=""` explicitamente.
+
+Achado por `test_dispatcher_nao_vaza_estado_entre_crud_e_ticket`
+(`tests/unit/application/test_langgraph_crud_hitl.py`) — o mesmo tipo de
+teste que já tinha pego o bug original do `cancelado` vazando (ver ATENÇÃO 2
+em `entrypoint.py`).
 
 ## Rollout
 

@@ -10,30 +10,85 @@ logger = logging.getLogger(__name__)
 
 from src.application.orchestration.state import OraculoState
 
-# Mesmo nível de heurística do L1 (regex) do Supervisor real
-# (src/router/supervisor.py) — versão reduzida só para rotear entre os dois
-# nodes deste experimento, não uma réplica das 5 camadas.
-_RE_TICKET = re.compile(
-    r"\b(ticket|chamado|abrir\s+chamado|problema\s+t[eé]cnico|suporte\s+t[eé]cnico)\b",
-    re.I,
-)
-_RE_CRUD = re.compile(
-    r"\b(atualizar|mudar|trocar|corrigir)\s+(meu|minha)?\s*(setor|centro|telefone|n[uú]mero|cadastro)\b",
-    re.I,
-)
 
+async def classify_node(state: OraculoState) -> dict:
+    """ÚNICO ponto de classificação do sistema (ADR 0008 Fase B) — chama o
+    Supervisor real (`router/supervisor.py::rotear()`, 5 camadas) e aplica o
+    circuit-breaker por agente (kill-switch de `/hub/agents`) na sequência.
+    Antes essas duas etapas eram funções Python chamadas por
+    `entrypoint.py::processar()` ANTES de invocar o grafo; agora são o
+    próprio nó de entrada do grafo — o diagrama do Hub mostra o que
+    realmente acontece, não uma aproximação.
 
-def classify_node(state: OraculoState) -> dict:
-    # Se quem chamou o grafo já decidiu a rota (o `entrypoint.py`, que
-    # reaproveita o Supervisor real de 5 camadas), respeita — em produção
-    # `state.route` SEMPRE chega preenchido. O regex abaixo só serve ao REPL
-    # `scripts/graph_repl.py` (invocação direta sem rota).
+    Roda só em mensagem NOVA: `Command(resume=...)` não reexecuta nós
+    upstream, e isso já era verdade na versão anterior (a classificação só
+    corria no branch de invocação nova de `processar()`, depois do check de
+    `state.next` — ver `entrypoint.py`).
+
+    `if state.route:` é só pro REPL (`scripts/graph_repl.py`) testar um nó
+    isolado sem passar pelo Supervisor completo — em produção `state.route`
+    nunca chega preenchido aqui (o `entrypoint.py` não classifica mais)."""
     if state.route:
         return {}
-    if _RE_CRUD.search(state.message):
-        return {"route": "crud"}
-    route = "ticket" if _RE_TICKET.search(state.message) else "rag"
-    return {"route": route}
+
+    from src.router.supervisor import rotear
+
+    decision = await rotear(state.message, state.session_id, state.user_context)
+
+    from src.infrastructure import route_registry
+
+    rr = route_registry.get(decision.rota)
+
+    # ── Circuit-breaker por agente — ADR 0008: vale pra TODAS as rotas,
+    # rodando ANTES do fan-out. GREETING/MEDIA_DOWNLOAD/CHECK_STATUS/
+    # ESCALAR_HUMANO têm `agente=NULL` (utilitários, sempre ligados).
+    if rr.agente:
+        from src.capabilities.persistence.agent_config import is_agent_enabled
+        from src.infrastructure.redis_client import get_redis_text
+
+        if not await is_agent_enabled(get_redis_text(), rr.agente):
+            logger.info("🚧 [ORCH] Agente '%s' desativado — rota %s bloqueada (session=%s)",
+                        rr.agente, decision.rota, state.session_id)
+            return {
+                "rota": decision.rota,
+                "answer": "🚧 Essa função está temporariamente desativada. Tente novamente mais tarde.",
+                "plan_id": "agent_disabled", "status": "ok", "early_exit": True,
+            }
+
+    # Rota classificada mas cujo `entrypoint_node` não é um destino válido do
+    # fan-out de `classify` na spec ATIVA (ex.: rota personalizada apontando
+    # pra um nó removido) → trata como `rag` (rede de segurança). Checa
+    # contra os `route_value`s da última spec compilada, não uma lista
+    # estática — a topologia é dado (Fase 5). NÃO é o conjunto de ids de nó
+    # do grafo: "ticket"/"crud" (route_value) nunca são id de nó (o id real é
+    # "ticket_ask_tipo"/"crud_ask_campo") — ver docstring de
+    # `builder.route_values_ativos`.
+    from src.application.orchestration.builder import route_values_ativos
+
+    route = rr.entrypoint_node
+    valores_validos = route_values_ativos()
+    if valores_validos and route not in valores_validos:
+        logger.warning("⚠️  [ORCH] rota=%s tem entrypoint_node inválido '%s' — usando 'rag'",
+                       decision.rota, route)
+        route = "rag"
+
+    logger.info("🧭 [ORCH] rota=%s → node=%s (session=%s)", decision.rota, route, state.session_id)
+
+    out = {"rota": decision.rota, "route": route, "cancelado": False}
+    # Reset explícito dos campos do funil que está sendo INICIADO agora —
+    # sem isso, dado de uma execução anterior no mesmo thread_id (ex.: um
+    # ticket já confirmado) vaza pro funil novo. `cancelado` acima é
+    # resetado SEMPRE, independente da rota: sem isso, uma sessão que saiu
+    # de um funil anterior ("sair"/RBAC bloqueado) fica com cancelado=True
+    # gravado no checkpoint pra sempre, e como as edges condicionais checam
+    # state.cancelado ANTES de qualquer outra regra, todo funil novo nessa
+    # mesma sessão aceita a 1ª resposta e vai direto pro __end__ (bug
+    # observado em teste real). Ver notas.md.
+    if route == "ticket":
+        out.update(ticket_data={}, ticket_error="", ticket_confirmed=None)
+    elif route == "crud":
+        out.update(crud_data={}, crud_error="", crud_confirmed=None)
+    return out
 
 
 def _rag_params_para_rota(rota: str, query: str) -> tuple[str, int]:

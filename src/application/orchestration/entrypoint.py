@@ -4,13 +4,17 @@ src/application/orchestration/entrypoint.py
 Entrypoint ÚNICO de processamento de mensagem (ADR 0008). Sucessor dos dois
 dispatchers, ambos deletados na Fase 3.
 
-Roda: mute de atendimento humano, fast-paths de front (STT, mídia sem
-legenda, labs REST/MCP), guardrails de input, continuação de HITL legado
-(SIGAA CPF/senha), classificação via `router/supervisor.py::rotear()` (o
-Supervisor real, 5 camadas — ÚNICO classificador do sistema), circuit-breaker
-por agente (kill-switch de `/hub/agents`, para TODAS as rotas), e então
-invoca o `StateGraph` (`builder.build_graph`). O `classify_node` do grafo é
-passthrough em produção (regex, só usado no REPL `scripts/graph_repl.py`).
+Roda, ANTES do grafo (precisa valer pra mensagem nova E pra resume de um
+funil, e `Command(resume=...)` não reexecuta nós upstream — por isso não dá
+pra virarem nó): mute de atendimento humano, fast-paths de front (STT, mídia
+sem legenda, labs REST/MCP), guardrails de input, continuação de HITL legado
+(SIGAA CPF/senha), e a decisão de retomar um `interrupt()` pendente.
+
+Classificação (`router/supervisor.py::rotear()`, o Supervisor real, 5
+camadas — ÚNICO classificador do sistema) e circuit-breaker por agente
+(kill-switch de `/hub/agents`) são o próprio `classify_node` do grafo (ADR
+0008 Fase B) — só rodam em mensagem nova, o que já era verdade quando essa
+lógica vivia aqui.
 
 Checkpointer: `AsyncRedisSaver` (não `MemorySaver`) — obrigatório porque a
 API e os workers Celery rodam em processos/containers diferentes; um
@@ -30,9 +34,17 @@ ATENÇÃO 2 — vazamento de estado entre execuções sucessivas do MESMO funil 
 MESMA sessão: como o `thread_id` é fixo por sessão (`_thread_config`), o
 LangGraph mantém o checkpoint indefinidamente entre invocações — inclusive
 depois de chegar em END. Por isso, ao INICIAR um funil novo (não ao
-retomar), o payload do `ainvoke()` precisa resetar explicitamente os campos
-daquele funil (`_reset_payload_para_rota`), senão dados de uma execução
-anterior (ex: um ticket já confirmado) vazam pra próxima. Ver notas.md.
+retomar), alguém precisa resetar explicitamente os campos daquele funil —
+hoje é `nodes.classify_node` (roda em toda mensagem nova, sabe a rota antes
+de qualquer nó do funil rodar), senão dados de uma execução anterior (ex: um
+ticket já confirmado) vazam pra próxima. Ver notas.md.
+
+`_payload_mensagem_nova` reseta `route=""` por esse MESMO motivo, um nível
+acima: sem isso, o `route` do funil ANTERIOR ficaria no checkpoint, e o
+atalho de `classify_node` pro REPL (`if state.route: return {}`) tomaria
+esse valor stale como "já classificado" — pulando a classificação de
+verdade e mantendo a rota velha numa mensagem nova (achado ao escrever o
+teste de regressão desta migração, Fase B).
 """
 from __future__ import annotations
 
@@ -50,13 +62,12 @@ logger = logging.getLogger(__name__)
 # do processo, nunca atravessa uma fronteira de asyncio.run() — não há mais asyncio.run()
 # nenhum nos entry points que chegam aqui (process_message_task.py).
 _graph = None
-_graph_node_ids: frozenset[str] = frozenset()
 _saver_cm = None
 _setup_lock = asyncio.Lock()
 
 
 async def _get_graph():
-    global _graph, _saver_cm, _graph_node_ids
+    global _graph, _saver_cm
     if _graph is not None:
         return _graph
     async with _setup_lock:
@@ -83,10 +94,6 @@ async def _get_graph():
         saver = await _saver_cm.__aenter__()  # fechado explicitamente em on_worker_process_shutdown
         await saver.asetup()
         _graph = build_graph(saver)
-        try:
-            _graph_node_ids = frozenset(n.id for n in _graph.get_graph().nodes.values())
-        except Exception:  # noqa: BLE001 — só a rede de segurança de rota inválida depende disso
-            _graph_node_ids = frozenset()
         logger.info("🧭 [ORCH] Grafo compilado com AsyncRedisSaver — checkpoint compartilhado entre API/workers.")
     return _graph
 
@@ -95,7 +102,7 @@ async def aclose_graph() -> None:
     """Fecha o AsyncRedisSaver cacheado. Chamado por
     celery_app.py::on_worker_process_shutdown, rodando no mesmo loop persistente
     em que o saver foi aberto."""
-    global _graph, _saver_cm, _graph_node_ids
+    global _graph, _saver_cm
     if _saver_cm is not None:
         try:
             await _saver_cm.__aexit__(None, None, None)
@@ -104,7 +111,6 @@ async def aclose_graph() -> None:
         finally:
             _saver_cm = None
             _graph = None
-            _graph_node_ids = frozenset()
 
 
 def _thread_config(session_id: str) -> dict:
@@ -116,40 +122,34 @@ def _rota_from_route(route: str) -> str:
     return route_registry.rota_do_node(route)
 
 
-def _reset_payload_para_rota(
-    session_id: str, message: str, route: str,
-    rota: str = "", history: str = "", fatos: list[str] | None = None,
+def _payload_mensagem_nova(
+    session_id: str, message: str,
+    history: str = "", fatos: list[str] | None = None,
     user_context: dict | None = None,
 ) -> dict:
-    """Payload inicial pro ainvoke() de um funil NOVO — reseta explicitamente
-    os campos daquele funil (não os do outro), pra não herdar dado de uma
-    execução anterior no mesmo thread_id (ver ATENÇÃO 2 na docstring do
-    módulo). `cancelado` é sempre resetado independente da rota: sem isso,
-    uma sessão que saiu de um funil anterior ("sair"/RBAC bloqueado) fica
-    com cancelado=True gravado no checkpoint pra sempre — e como as edges
-    condicionais checam state.cancelado ANTES de qualquer outra regra
-    (orchestration/nodes.py), todo funil novo nessa mesma sessão
-    aceita a 1ª resposta e vai direto pro __end__, sem nunca perguntar o
-    resto (reproduzido em teste real: 1x "sair", todo ticket seguinte
-    quebrado).
+    """Payload inicial pro `ainvoke()` de uma mensagem NOVA.
 
-    `rota`/`history`/`fatos`: contexto que antes se perdia ao
-    entrar no grafo — só faz sentido pra `route == "rag"` (ticket/crud não
-    usam RAG), mas incluir sempre é inofensivo (nodes.py só lê quando
-    relevante).
+    `route=""` é OBRIGATÓRIO aqui (não só um default cosmético): o
+    `thread_id` é fixo por sessão, então sem isso o `route`/`rota` de um
+    funil ANTERIOR já concluído nesse mesmo `thread_id` continuaria no
+    checkpoint, e `classify_node.if state.route: return {}` (o atalho pro
+    REPL) tomaria esse valor STALE como se já tivesse sido decidido AGORA —
+    pulando a classificação de verdade e mantendo a rota velha numa mensagem
+    nova (bug real: 2º funil numa sessão herdava as perguntas do 1º). Ver
+    ATENÇÃO 2 na docstring do módulo — `classify_node` reseta os DEMAIS
+    campos do funil que estiver iniciando, mas só depois de classificar de
+    verdade, o que exige chegar lá com `route` vazio.
+
+    `history`/`fatos`: contexto que antes se perdia ao entrar no grafo — só
+    faz sentido pra `route == "rag"` (ticket/crud não usam RAG), mas incluir
+    sempre é inofensivo (nodes.py só lê quando relevante).
 
     `user_context`: usado pelos nós check_status/greeting/media_download/
     sigaa (ex.: chat_id de entrega), inofensivo pros demais."""
-    payload = {
-        "session_id": session_id, "message": message, "route": route, "cancelado": False,
-        "rota": rota, "history": history, "fatos": fatos or [],
-        "user_context": user_context or {},
+    return {
+        "session_id": session_id, "message": message, "route": "", "cancelado": False,
+        "history": history, "fatos": fatos or [], "user_context": user_context or {},
     }
-    if route == "ticket":
-        payload.update(ticket_data={}, ticket_error="", ticket_confirmed=None)
-    elif route == "crud":
-        payload.update(crud_data={}, crud_error="", crud_confirmed=None)
-    return payload
 
 
 def _to_os_result(result: dict, rota: str, t0: float) -> OSResult:
@@ -167,9 +167,13 @@ def _to_os_result(result: dict, rota: str, t0: float) -> OSResult:
     # explícito no dict do node — sem __interrupt__ nenhum, porque o grafo
     # roda o node do início ao fim numa invocação só. rag/ticket/crud nunca
     # setam essa chave, então continuam caindo no default "ok" de sempre.
+    #
+    # `plan_id`: `classify_node` seta um valor específico ("agent_disabled")
+    # quando resolve a mensagem sem passar pelo fan-out (ADR 0008 Fase B) —
+    # sem isso, cai no "langgraph_final" de sempre.
     return OSResult(
-        answer=result.get("answer", ""), plan_id="langgraph_final", rota=rota,
-        cache_hit=False, total_ms=ms, status=result.get("status", "ok"),
+        answer=result.get("answer", ""), plan_id=result.get("plan_id") or "langgraph_final",
+        rota=rota, cache_hit=False, total_ms=ms, status=result.get("status", "ok"),
     )
 
 
@@ -357,47 +361,15 @@ async def processar(
         result = await app.ainvoke(Command(resume=message), config=config)
         return _to_os_result(result, rota, t0)
 
-    # ── 1. Classificação (reaproveita o Supervisor real, não duplica regra) ────
-    from src.router.supervisor import rotear
-
-    decision = await rotear(message, session_id, user_context)
-
-    from src.infrastructure import route_registry
-
-    rr = route_registry.get(decision.rota)
-
-    # ── 1a. Circuit-breaker por agente (kill-switch de /hub/agents) ───────────
-    # ADR 0008: roda pra TODAS as rotas antes de entrar no grafo (antes vivia
-    # só no `dispatcher.py` legado). GREETING/MEDIA_DOWNLOAD/CHECK_STATUS/
-    # ESCALAR_HUMANO têm `agente=NULL` (utilitários, sempre ligados). Não roda
-    # no caminho de resume de funil pendente — só numa mensagem nova.
-    if rr.agente:
-        from src.capabilities.persistence.agent_config import is_agent_enabled
-        if not await is_agent_enabled(r, rr.agente):
-            ms = int((time.monotonic() - t0) * 1000)
-            logger.info("🚧 [ORCH] Agente '%s' desativado — rota %s bloqueada (session=%s)",
-                        rr.agente, decision.rota, session_id)
-            return OSResult(
-                answer="🚧 Essa função está temporariamente desativada. Tente novamente mais tarde.",
-                plan_id="agent_disabled", rota=decision.rota,
-                cache_hit=False, total_ms=ms, status="ok",
-            )
-
-    # Rota classificada mas cujo `entrypoint_node` não é um nó real do grafo
-    # ATIVO (ex.: rota personalizada apontando pra um nó removido da spec) →
-    # trata como `rag` (rede de segurança). Checa contra os nós do grafo
-    # compilado, não uma lista estática — a topologia é dado (Fase 5).
-    route = rr.entrypoint_node
-    if _graph_node_ids and route not in _graph_node_ids:
-        logger.warning("⚠️  [ORCH] rota=%s tem entrypoint_node inválido '%s' — usando 'rag'",
-                       decision.rota, route)
-        route = "rag"
-
-    logger.info("🧭 [ORCH] rota=%s → node=%s (session=%s)", decision.rota, route, session_id)
-
-    payload = _reset_payload_para_rota(
-        session_id, message, route,
-        rota=decision.rota, history=history, fatos=fatos, user_context=user_context,
+    # ── 1. Mensagem nova ──────────────────────────────────────────────────────
+    # Classificação (Supervisor real) e circuit-breaker por agente são o
+    # próprio `classify_node` do grafo (ADR 0008 Fase B) — o entrypoint só
+    # monta o payload inicial e invoca. `result.get("rota")` (posto por
+    # `classify_node`) é a rota de verdade; "GERAL" é só o fallback de log
+    # pro caso (não deveria acontecer) do grafo devolver sem classificar.
+    payload = _payload_mensagem_nova(
+        session_id, message, history=history, fatos=fatos, user_context=user_context,
     )
     result = await app.ainvoke(payload, config=config)
-    return _to_os_result(result, decision.rota, t0)
+    rota = result.get("rota") or "GERAL"
+    return _to_os_result(result, rota, t0)

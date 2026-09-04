@@ -52,10 +52,12 @@ class NodeType:
 _TIPOS: dict[str, NodeType] = {
     "classify": NodeType(
         "classify", nodes.classify_node,
-        "Descobrir o assunto", "Passthrough do Supervisor: o `entrypoint` já "
-        "classificou a rota; aqui só confirma o `state.route` (regex de reserva "
-        "usada só no REPL).", "sistema", "git-branch",
-        ("message", "route"), ("route",), fixo=True, terminal=False,
+        "Descobrir o assunto", "Chama o Supervisor real (5 camadas) e aplica "
+        "o circuit-breaker por agente (kill-switch de /hub/agents) — ÚNICO "
+        "ponto de classificação do sistema.", "sistema", "git-branch",
+        ("message", "session_id", "user_context"),
+        ("rota", "route", "cancelado", "answer", "status", "early_exit"),
+        fixo=True, terminal=False,
     ),
     "rag": NodeType(
         "rag", nodes.rag_node,

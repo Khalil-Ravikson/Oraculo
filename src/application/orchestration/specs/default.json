@@ -28,6 +28,7 @@
     { "source": "classify", "when": "by_state_route", "route_value": "media_download", "target": "media_download",  "locked": true },
     { "source": "classify", "when": "by_state_route", "route_value": "sigaa",          "target": "sigaa",           "locked": true },
     { "source": "classify", "when": "by_state_route", "route_value": "human_handoff",  "target": "human_handoff",   "locked": true },
+    { "source": "classify", "when": "by_state_route", "route_value": "__end__",        "target": "__end__",         "locked": true },
 
     { "source": "rag",            "target": "__end__", "locked": true },
     { "source": "check_status",    "target": "__end__", "locked": true },

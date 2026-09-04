@@ -51,7 +51,14 @@ def _by_state_route(state: OraculoState) -> str:
     """`state.route` — o `entrypoint_node` da rota classificada
     (`route_registry.get(rota).entrypoint_node`), posto no state pelo
     `classify_node`. Vale "rag" | "ticket" | "crud" | "greeting" | "sigaa" |
-    "media_download" | "check_status" | "human_handoff"."""
+    "media_download" | "check_status" | "human_handoff".
+
+    `early_exit` tem prioridade (ADR 0008 Fase B): `classify_node` também
+    aplica o circuit-breaker por agente ali dentro — se ele bloquear a rota,
+    não há `state.route` válido pra seguir, e a spec mapeia
+    `route_value="__end__"` pra esse caso."""
+    if state.early_exit:
+        return "__end__"
     return state.route
 
 

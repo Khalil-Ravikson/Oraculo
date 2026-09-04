@@ -3,8 +3,11 @@ tests/unit/orchestration/test_entrypoint.py
 ===========================================
 `src/application/orchestration/entrypoint.py::processar` — o entrypoint único.
 
-Fase 1 (ADR 0008): cobre o circuit-breaker por agente que passou a rodar aqui
-(antes só em `dispatcher.py`, sem valer pras rotas nativas do grafo).
+ADR 0008 Fase B: classificação e circuit-breaker por agente viraram
+`classify_node` (dentro do grafo) — cobertos em `test_classify_node.py`. O
+que sobra aqui pro entrypoint testar é o que ele ainda faz de verdade: montar
+o payload de mensagem nova sem `route`/`rota` pré-decididos, e ler `rota`/
+`plan_id`/`status` de volta do resultado do grafo.
 """
 from __future__ import annotations
 
@@ -36,75 +39,86 @@ def _reset_graph_singleton():
     ep._graph = None
 
 
-def _fake_decision(rota: str):
-    from src.router.contracts import RouterDecision
-
-    return RouterDecision(
-        rota=rota, confianca=1.0, motivo="teste", cache_hit=False,
-        cache_layer="miss", latencia_ms=0, dag_hint={},
-    )
-
-
-def _fake_app():
+def _fake_app(retorno):
     app = MagicMock()
     app.aget_state = AsyncMock(return_value=MagicMock(next=()))
-    app.ainvoke = AsyncMock(return_value={"answer": "resposta do grafo"})
+    app.ainvoke = AsyncMock(return_value=retorno)
     return app
 
 
 @pytest.mark.asyncio
-async def test_agente_desativado_bloqueia_rota_nativa(monkeypatch):
-    """GERAL (owner=langgraph, agente=academic_knowledge) — desligar o agente
-    em /hub/agents agora bloqueia mesmo as rotas nativas do grafo."""
-    app = _fake_app()
+async def test_mensagem_nova_nao_pre_decide_rota():
+    """`classify_node` decide `route`/`rota` DENTRO do grafo (Fase B) — o
+    entrypoint não escolhe o destino. `route` vai explicitamente vazio (não
+    ausente): regressão real — sem isso, `route` de um funil ANTERIOR no
+    mesmo `thread_id` sobrevivia no checkpoint e o atalho de REPL de
+    `classify_node` (`if state.route:`) tomava esse valor stale como já
+    decidido, pulando a classificação numa mensagem nova."""
+    app = _fake_app({"answer": "resposta do grafo", "rota": "GERAL"})
 
-    async def _desativado(_r, nome):
-        assert nome == "academic_knowledge"
-        return False
+    with patch("src.application.orchestration.entrypoint._get_graph",
+               new_callable=AsyncMock, return_value=app):
+        result = await ep.processar("quando é a matrícula?", "sess-1", {})
 
-    with patch("src.router.supervisor.rotear", new_callable=AsyncMock) as mock_rotear, \
-         patch("src.application.orchestration.entrypoint._get_graph",
-               new_callable=AsyncMock, return_value=app), \
-         patch("src.capabilities.persistence.agent_config.is_agent_enabled", _desativado):
-        mock_rotear.return_value = _fake_decision("GERAL")
-        result = await ep.processar("quando é a matrícula?", "sess-cb-1", {})
+    app.ainvoke.assert_awaited_once()
+    payload = app.ainvoke.call_args.args[0]
+    assert payload["route"] == ""
+    assert "rota" not in payload
+    assert payload["message"] == "quando é a matrícula?"
+    assert payload["cancelado"] is False
+    assert result.answer == "resposta do grafo"
+    assert result.rota == "GERAL"
+    assert result.plan_id == "langgraph_final"
+
+
+@pytest.mark.asyncio
+async def test_resultado_sem_rota_cai_no_fallback_geral():
+    """Nunca deveria acontecer (classify_node sempre seta `rota`), mas se o
+    grafo devolver sem ela o entrypoint não pode quebrar."""
+    app = _fake_app({"answer": "x"})
+
+    with patch("src.application.orchestration.entrypoint._get_graph",
+               new_callable=AsyncMock, return_value=app):
+        result = await ep.processar("oi", "sess-2", {})
+
+    assert result.rota == "GERAL"
+
+
+@pytest.mark.asyncio
+async def test_plan_id_do_no_de_front_e_respeitado():
+    """`classify_node` bloqueado pelo circuit-breaker devolve
+    plan_id="agent_disabled" — `_to_os_result` tem que propagar, não
+    sobrescrever com "langgraph_final"."""
+    app = _fake_app({
+        "answer": "🚧 Essa função está temporariamente desativada. Tente novamente mais tarde.",
+        "rota": "SIGAA", "status": "ok", "plan_id": "agent_disabled",
+    })
+
+    with patch("src.application.orchestration.entrypoint._get_graph",
+               new_callable=AsyncMock, return_value=app):
+        result = await ep.processar("notas do sigaa", "sess-3", {})
 
     assert result.plan_id == "agent_disabled"
+    assert result.rota == "SIGAA"
     assert result.status == "ok"
-    assert "desativada" in result.answer.lower()
-    app.ainvoke.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_agente_ativo_segue_pro_grafo(monkeypatch):
-    app = _fake_app()
+async def test_interrupt_no_resultado_vira_hitl_pending():
+    interrupt_mock = MagicMock()
+    interrupt_mock.value = {"question": "Qual seu CPF?"}
+    app = _fake_app({"__interrupt__": [interrupt_mock], "rota": "TICKET_ABERTURA"})
 
-    async def _ativo(_r, _nome):
-        return True
+    with patch("src.application.orchestration.entrypoint._get_graph",
+               new_callable=AsyncMock, return_value=app):
+        result = await ep.processar("abrir chamado", "sess-4", {})
 
-    with patch("src.router.supervisor.rotear", new_callable=AsyncMock) as mock_rotear, \
-         patch("src.application.orchestration.entrypoint._get_graph",
-               new_callable=AsyncMock, return_value=app), \
-         patch("src.capabilities.persistence.agent_config.is_agent_enabled", _ativo):
-        mock_rotear.return_value = _fake_decision("GERAL")
-        result = await ep.processar("quando é a matrícula?", "sess-cb-2", {})
-
-    app.ainvoke.assert_awaited_once()
-    assert result.answer == "resposta do grafo"
+    assert result.status == "hitl_pending"
+    assert result.plan_id == "langgraph_hitl"
+    assert result.answer == "Qual seu CPF?"
 
 
-@pytest.mark.asyncio
-async def test_rota_sem_agente_nao_checa_breaker(monkeypatch):
-    """GREETING tem agente=NULL — não deve nem tentar checar o breaker."""
-    app = _fake_app()
-    sentinel = MagicMock(side_effect=AssertionError("breaker não deve ser consultado"))
-
-    with patch("src.router.supervisor.rotear", new_callable=AsyncMock) as mock_rotear, \
-         patch("src.application.orchestration.entrypoint._get_graph",
-               new_callable=AsyncMock, return_value=app), \
-         patch("src.capabilities.persistence.agent_config.is_agent_enabled", sentinel):
-        mock_rotear.return_value = _fake_decision("GREETING")
-        await ep.processar("oi", "sess-cb-3", {"chat_id": "x@s.whatsapp.net"})
-
-    sentinel.assert_not_called()
-    app.ainvoke.assert_awaited_once()
+def test_entrypoint_nao_tem_mais_delegacao_pro_legado():
+    """ADR 0008 Fase 3: `dispatcher.py` legado foi deletado — sem regressão
+    de trazer de volta um caminho de delegação."""
+    assert not hasattr(ep, "_processar_original")

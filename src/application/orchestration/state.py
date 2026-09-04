@@ -36,6 +36,12 @@ class OraculoState(BaseModel):
     early_exit: bool = False
     blocked: bool = False
     handoff: bool = False
+    # `plan_id` da resposta final (`_to_os_result` lê daqui, default
+    # "langgraph_final" se vazio) — nós de front que resolvem a mensagem sem
+    # passar pelo fan-out (ex.: classify_node com circuit-breaker acionado)
+    # marcam um id específico ("agent_disabled") pro dashboard/eval saberem
+    # POR QUE a resposta saiu curta, sem reprocessar heurística nenhuma.
+    plan_id: str = ""
 
     # ── Funil de ticket ──────────────────────────────────────────────────────
     # dict simples (não um BaseModel aninhado): LangGraph serializa o estado

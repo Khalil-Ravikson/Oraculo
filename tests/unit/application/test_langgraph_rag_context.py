@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.application.orchestration.state import OraculoState
 from src.application.orchestration.nodes import responder_rag_direto, rag_node
-from src.application.orchestration.entrypoint import _reset_payload_para_rota
+from src.application.orchestration.entrypoint import _payload_mensagem_nova
 
 
 @pytest.fixture(autouse=True)
@@ -48,23 +48,26 @@ def test_oraculo_state_tem_campos_de_contexto_com_default_vazio():
     assert state.fatos == []
 
 
-def test_reset_payload_para_rota_inclui_contexto():
-    payload = _reset_payload_para_rota(
-        "sess-1", "qual o edital?", "rag",
-        rota="EDITAL", history="hist", fatos=["fato1"],
-    )
-    assert payload["rota"] == "EDITAL"
+def test_payload_mensagem_nova_inclui_contexto():
+    """A DECISÃO de rota fica de fora — quem decide é `classify_node`, ADR
+    0008 Fase B (ver test_classify_node.py pro reset dos campos de funil, que
+    também migrou pra lá). `route` vai explicitamente vazio (não ausente) —
+    regressão real: sem isso o valor do funil ANTERIOR no mesmo thread_id
+    sobrevivia no checkpoint e o atalho de REPL de classify_node
+    (`if state.route:`) tomava esse stale como "já classificado"."""
+    payload = _payload_mensagem_nova("sess-1", "qual o edital?", history="hist", fatos=["fato1"])
+    assert payload["route"] == ""
+    assert "rota" not in payload
     assert payload["history"] == "hist"
     assert payload["fatos"] == ["fato1"]
 
 
-def test_reset_payload_para_rota_defaults_retrocompativeis():
-    """Chamada só com os 3 args posicionais originais (ticket/crud, sem
-    contexto de RAG) continua funcionando sem quebrar."""
-    payload = _reset_payload_para_rota("sess-1", "abrir chamado", "ticket")
-    assert payload["rota"] == ""
+def test_payload_mensagem_nova_defaults():
+    payload = _payload_mensagem_nova("sess-1", "abrir chamado")
     assert payload["history"] == ""
     assert payload["fatos"] == []
+    assert payload["user_context"] == {}
+    assert payload["cancelado"] is False
 
 
 @pytest.mark.asyncio

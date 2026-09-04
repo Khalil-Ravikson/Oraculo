@@ -27,31 +27,40 @@ def _sem_redis_hitl_legado(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_audio_transcrito_antes_de_rotear_e_antes_do_grafo():
+async def test_audio_transcrito_antes_de_rotear_e_antes_do_grafo(monkeypatch):
     """
     Bug real encontrado em produção (2026-08-12): a interceptação de áudio
     ficava num fast-path que não rodava pro caso mais comum (voice note →
     GERAL). `rotear("", ...)` reclassificava a mensagem vazia e o RAG ia pro
     embedding com query vazia. Este teste garante que a transcrição acontece
-    ANTES de `rotear()` e ANTES de `_get_graph()`.
-    """
-    user_context = {"media_type": "audioMessage", "msg_key_id": "MSG123", "chat_id": "5598@g.us"}
+    ANTES do grafo — `classify_node` (ADR 0008 Fase B, dentro do grafo) recebe
+    o texto transcrito, não a mensagem vazia original.
 
-    fake_app = MagicMock()
-    fake_app.aget_state = AsyncMock(return_value=MagicMock(next=()))
-    fake_app.ainvoke = AsyncMock(return_value={"answer": "resposta do RAG"})
+    Usa o grafo REAL (`build_graph()`, MemorySaver) em vez de mockar
+    `_get_graph()`: como a classificação agora roda DENTRO do `ainvoke()`
+    (era uma chamada direta do entrypoint antes da Fase B), só dá pra
+    observar o texto que `rotear()` recebeu deixando o `classify_node`
+    executar de verdade."""
+    import src.application.orchestration.entrypoint as ep
+    from src.application.orchestration.builder import build_graph
+
+    monkeypatch.setattr(ep, "_graph", build_graph())
+
+    user_context = {"media_type": "audioMessage", "msg_key_id": "MSG123", "chat_id": "5598@g.us"}
 
     with patch(
         "src.application.runtime.audio_intake._transcrever_audio_recebido",
         new_callable=AsyncMock,
         return_value="estou com erro no sistema",
     ), patch(
-        "src.application.orchestration.entrypoint._get_graph",
-        new_callable=AsyncMock,
-        return_value=fake_app,
-    ), patch(
         "src.router.supervisor.rotear", new_callable=AsyncMock
-    ) as mock_rotear:
+    ) as mock_rotear, patch(
+        "src.capabilities.persistence.agent_config.is_agent_enabled",
+        new_callable=AsyncMock, return_value=True,
+    ), patch(
+        "src.application.orchestration.nodes.responder_rag_direto",
+        new_callable=AsyncMock, return_value="resposta do RAG",
+    ):
         mock_decision = MagicMock()
         mock_decision.rota = "GERAL"
         mock_rotear.return_value = mock_decision
@@ -61,10 +70,6 @@ async def test_audio_transcrito_antes_de_rotear_e_antes_do_grafo():
     # rotear() precisa ter recebido o texto transcrito, não a mensagem vazia original.
     mock_rotear.assert_awaited_once()
     assert mock_rotear.call_args.args[0] == "estou com erro no sistema"
-    # E o grafo LangGraph precisa ter sido invocado com o mesmo texto transcrito.
-    fake_app.ainvoke.assert_awaited_once()
-    invoke_payload = fake_app.ainvoke.call_args.args[0]
-    assert invoke_payload["message"] == "estou com erro no sistema"
     assert result.answer == "resposta do RAG"
 
 

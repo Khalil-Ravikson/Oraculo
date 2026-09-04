@@ -14,6 +14,10 @@ Histórico:
 - Fase 5: topologia vem de `GraphSpec` (`specs/default.json`). O
   `test_spec_default_equivale_a_baseline` prova que a spec produz o MESMO
   grafo compilado que a baseline congelada aqui.
+- Fase B: `classify_node` passa a classificar de verdade (Supervisor real) e
+  aplicar o circuit-breaker por agente — antes vivia em `entrypoint.py`. A
+  única mudança de topologia é a aresta nova `classify -> __end__` (o
+  circuit-breaker bloqueando a rota é um caso de saída do fan-out).
 """
 from __future__ import annotations
 
@@ -40,6 +44,7 @@ EDGES_ESPERADAS = {
     ("classify", "media_download", True),
     ("classify", "sigaa", True),
     ("classify", "human_handoff", True),
+    ("classify", "__end__", True),  # circuit-breaker bloqueou a rota (Fase B)
     # terminais simples
     ("rag", "__end__", False),
     ("check_status", "__end__", False),

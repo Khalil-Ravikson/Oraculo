@@ -103,11 +103,42 @@ def build_graph_from_spec(spec: GraphSpec, checkpointer=None):
     return graph.compile(checkpointer=checkpointer)
 
 
+_ULTIMO_ROUTE_VALUES: frozenset[str] = frozenset()
+
+
+def route_values_ativos() -> frozenset[str]:
+    """`route_value`s que o fan-out de `classify` (router `by_state_route`)
+    sabe resolver na ÚLTIMA spec compilada por `build_graph()` — usado por
+    `nodes.classify_node` como rede de segurança (rota classificada cujo
+    `entrypoint_node` não é mais um destino válido do fan-out cai em `rag`).
+
+    NÃO é o conjunto de ids de nó do grafo compilado — `route_value` (ex.:
+    "ticket", "crud") e id de nó (ex.: "ticket_ask_tipo", "crud_ask_campo")
+    vivem em namespaces DIFERENTES pros funis; comparar `entrypoint_node`
+    contra ids de nó rejeitaria "ticket"/"crud" sempre (bug achado ao migrar
+    o circuit-breaker pra dentro do grafo, Fase B — mascarado até então
+    porque nenhum teste populava essa checagem pra rota de funil).
+
+    Vazio até o primeiro `build_graph()` da vida do processo — nesse caso a
+    checagem do lado de quem chama fica leniente (nunca bloqueia por falta
+    de dado). Deliberadamente só `build_graph()` (a spec ATIVA) atualiza isto
+    — specs arbitrárias montadas via `build_graph_from_spec()` em
+    teste/preview não devem vazar pra essa checagem em produção."""
+    return _ULTIMO_ROUTE_VALUES
+
+
 def build_graph(checkpointer=None):
     """Compila a `GraphSpec` ATIVA (Redis → Postgres → `specs/default.json`).
     Ponto de entrada usado por `entrypoint.py::_get_graph`."""
+    global _ULTIMO_ROUTE_VALUES
     from src.application.orchestration.loader import carregar_spec_ativa
-    return build_graph_from_spec(carregar_spec_ativa(), checkpointer)
+    spec = carregar_spec_ativa()
+    app = build_graph_from_spec(spec, checkpointer)
+    _ULTIMO_ROUTE_VALUES = frozenset(
+        e.route_value for e in spec.edges
+        if e.when == "by_state_route" and e.route_value not in (None, END_ID)
+    )
+    return app
 
 
 def describe() -> dict:
@@ -126,7 +157,7 @@ def describe() -> dict:
 # Rótulo humano de cada nó do grafo (o painel nunca mostra `rag`/`sigaa`).
 _ROTULOS = {
     "__start__": "Mensagem recebida",
-    "classify": "Descobrir o assunto (Supervisor)",
+    "classify": "Descobrir o assunto e checar se a função está ativa",
     "rag": "Responder com base nos documentos",
     "check_status": "Status de um pedido anterior",
     "greeting": "Saudação",
