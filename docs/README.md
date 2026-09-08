@@ -12,6 +12,7 @@ documentos parecerem cobrir o mesmo tema, este índice decide qual vale.
 | Regras de negócio (RBAC, HITL, escopo de agentes) — para liderança não-técnica | [`business/regras_negocio_oraculo.md`](business/regras_negocio_oraculo.md) | Citações `arquivo:linha` do código real |
 | Por que uma decisão foi tomada (não só o quê) | [`decisions/`](decisions/) | ADRs — ver índice abaixo |
 | Problemas conhecidos, não resolvidos de propósito | [`technical-debt.md`](technical-debt.md) | TD-001 a TD-014, cada um com evidência |
+| Diagnóstico do estado real + plano de recuperação (2026-09-08) | [`diagnostico_2026-09_estado_e_plano.md`](diagnostico_2026-09_estado_e_plano.md) | Laudo contra o código. ⚠️ Auditado em `ca818e1`, parcialmente superado pelo ADR 0008 — ver a tabela de divergência no topo do próprio doc |
 | Contexto/regras operacionais para agentes de IA (Claude) | [`.claude.md`](../.claude.md) (raiz) | Curto de propósito — aponta pra cá quando precisa de detalhe |
 | Log cronológico de sessões de engenharia (bugs reais, testes, descobertas) | [`../notas.md`](../notas.md) (raiz) | Cresce por sessão — não é para ficar pequeno |
 | `langgraph_experiment/` — grafo usado pelo dispatcher de produção (não é mais lab isolado, ver ADR 0001) | [`../langgraph_experiment/README.md`](../langgraph_experiment/README.md) | Nome do diretório é histórico |
