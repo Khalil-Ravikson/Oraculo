@@ -1,5 +1,5 @@
 """
-src/graph/graph_executor.py — execução de uma topologia salva (Hub v2 Sprint 8, MVP)
+src/graph_studio/graph_executor.py — execução de uma topologia salva (Hub v2 Sprint 8, MVP)
 ==================================================================================
 Pega uma topologia de `graph_topology` (nós posicionados + arestas entre
 portas), resolve os nós pelo `NodeRegistry`, calcula a ordem topológica e
@@ -19,6 +19,12 @@ e as arestas que saem dele não entregam dado a jusante.
 Este NÃO é o dispatcher de produção — é o degrau que prova que
 `NodeRegistry` + `graph_topology` + `graph_node_config` podem executar um
 trecho real de ponta a ponta.
+
+⛔ CONGELADO (2026-09-09, item C2). Este executor NÃO é o motor de
+produção — quem executa o grafo de mensagens é
+`application/orchestration/builder.py` sobre o LangGraph. Roda atrás de
+`FEATURE_GRAPH_EXECUTOR_PILOTO`, desligada, e nada no caminho de uma
+mensagem o chama. Ver `docs/architecture/graph-studio-sandbox.md`.
 """
 from __future__ import annotations
 

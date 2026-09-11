@@ -244,7 +244,7 @@ def _criar_chunks(
 def _notificar_admin(chat_id: str, result: dict) -> None:
     import asyncio
     try:
-        from src.services.evolution_service import EvolutionService
+        from src.infrastructure.services.evolution_service import EvolutionService
         svc = EvolutionService()
         if result.get("bypassed"):
             msg = (

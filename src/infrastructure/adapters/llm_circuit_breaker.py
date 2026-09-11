@@ -117,6 +117,64 @@ def _alertar(provider: str, falhas: int, limite: int) -> None:
     except Exception:
         pass
 
+    _avisar_suporte(provider, falhas, limite)
+
+
+def _avisar_suporte(provider: str, falhas: int, limite: int) -> None:
+    """Manda o alerta para uma PESSOA, por WhatsApp (item B7).
+
+    Até aqui o circuito abrir produzia um `logger.error` e uma linha de
+    auditoria no Redis — as duas coisas que ninguém olha às 3 da manhã. Um
+    alerta que não chega a alguém não é alerta.
+
+    Por WhatsApp e não por Prometheus porque o Prometheus **não coleta os
+    workers** (nem `oraculo_api` cobre este código, que roda no worker) — ver
+    `docs/ESTADO_ATUAL.md` §4. Reusa exatamente o caminho que o
+    `human_handoff_node` já usa: `SUPPORT_GROUP_JID`, caindo no primeiro
+    `ADMIN_NUMBERS` quando não configurado.
+
+    Silencioso por 30 minutos por provider: o circuito abre sob uma rajada de
+    falhas, e um alerta por falha viraria spam — o que faz a equipe silenciar
+    o grupo, que é o mesmo que não ter alerta."""
+    import asyncio
+
+    from src.infrastructure.settings import settings
+
+    destino = settings.SUPPORT_GROUP_JID or (
+        (settings.ADMIN_NUMBERS or "").split(",")[0].strip()
+    )
+    if not destino:
+        logger.warning("⚠️  [LLM_CB] Sem SUPPORT_GROUP_JID nem ADMIN_NUMBERS — alerta não enviado.")
+        return
+
+    try:
+        # SET NX com TTL: o primeiro alerta da janela passa, os seguintes não.
+        if not _r().set(_k(provider, "alerta_enviado"), "1", nx=True, ex=1800):
+            return
+    except Exception:  # noqa: BLE001 — sem Redis, prefira alertar demais a não alertar
+        pass
+
+    texto = (
+        f"🔴 *Oráculo — provider de IA fora do ar*\n\n"
+        f"O circuito do provider `{provider}` ABRIU "
+        f"({falhas} falhas, limite {limite}).\n\n"
+        f"O bot continua respondendo, mas as respostas com IA podem falhar.\n"
+        f"Troque o provider em /hub/llm-custo se persistir."
+    )
+
+    async def _enviar() -> None:
+        from src.infrastructure.adapters.evolution_adapter import EvolutionAdapter
+
+        await EvolutionAdapter().enviar_mensagem(destino, texto)
+
+    try:
+        try:
+            asyncio.get_running_loop().create_task(_enviar())
+        except RuntimeError:
+            asyncio.run(_enviar())
+    except Exception as exc:  # noqa: BLE001 — alertar não pode derrubar o pipeline
+        logger.warning("⚠️  [LLM_CB] Falha ao avisar suporte (%s): %s", destino, exc)
+
 
 def status() -> list[dict]:
     """Visão pro Hub."""

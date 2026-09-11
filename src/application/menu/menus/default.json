@@ -1,0 +1,154 @@
+{
+  "version": 1,
+  "raiz": "principal",
+  "pos_resposta": "pos_resposta",
+  "rodape": "Digite o número. Para voltar ao início, escreva menu.",
+  "fallback": "Não entendi. Digite o número da opção, ou 0 para falar com uma pessoa.",
+  "nos": {
+    "principal": {
+      "titulo": "Menu principal",
+      "abertura": "Olá! 👋 Sou o Oráculo, o assistente virtual da CTIC/UEMA.\nPosso te ajudar com o acesso e os sistemas da universidade.\n\nDigite o número:",
+      "opcoes": [
+        { "tecla": "1", "label": "Senha, e-mail e Wi-Fi", "acao": "submenu", "destino": "acesso" },
+        { "tecla": "2", "label": "Dúvidas sobre os sistemas (SIGAA e SIPAC)", "acao": "submenu", "destino": "sistemas" },
+        { "tecla": "3", "label": "Telefones e setores da UEMA", "acao": "submenu", "destino": "contatos" },
+        { "tecla": "0", "label": "Falar com um atendente da CTIC", "acao": "handoff" }
+      ]
+    },
+
+    "acesso": {
+      "titulo": "Senha, e-mail e Wi-Fi",
+      "abertura": "🔑 Senha, e-mail e Wi-Fi",
+      "opcoes": [
+        {
+          "tecla": "1",
+          "label": "Esqueci ou quero trocar a senha",
+          "acao": "texto_fixo",
+          "texto": "Estamos organizando esse conteúdo — digite 0 para falar com a CTIC.",
+          "fecho": "Conseguiu?\n1  Sim\n2  Não, quero um atendente"
+        },
+        {
+          "tecla": "2",
+          "label": "Ativar meu usuário (primeiro acesso)",
+          "acao": "texto_fixo",
+          "texto": "Estamos organizando esse conteúdo — digite 0 para falar com a CTIC.",
+          "fecho": "Conseguiu?\n1  Sim\n2  Não, quero um atendente"
+        },
+        {
+          "tecla": "3",
+          "label": "E-mail institucional (@uema.br)",
+          "acao": "texto_fixo",
+          "texto": "Estamos organizando esse conteúdo — digite 0 para falar com a CTIC.",
+          "fecho": "Conseguiu?\n1  Sim\n2  Não, quero um atendente"
+        },
+        {
+          "tecla": "4",
+          "label": "Wi-Fi da UEMA",
+          "acao": "texto_fixo",
+          "texto": "Estamos organizando esse conteúdo — digite 0 para falar com a CTIC.",
+          "fecho": "Conseguiu?\n1  Sim\n2  Não, quero um atendente"
+        },
+        {
+          "tecla": "5",
+          "label": "Outra dúvida de acesso",
+          "acao": "pergunta",
+          "rota": "WIKI",
+          "doc_type": "wiki_ctic",
+          "prompt": "Escreva sua dúvida de acesso.\nEx.: \"não consigo entrar no meu e-mail da UEMA\"."
+        },
+        { "tecla": "9", "label": "Voltar", "acao": "voltar" },
+        { "tecla": "0", "label": "Falar com um atendente", "acao": "handoff" }
+      ]
+    },
+
+    "sistemas": {
+      "titulo": "Dúvidas sobre os sistemas",
+      "abertura": "💻 Dúvidas sobre os sistemas",
+      "opcoes": [
+        {
+          "tecla": "1",
+          "label": "SIGAA — parte acadêmica (turmas, notas, declarações)",
+          "acao": "pergunta",
+          "rota": "WIKI",
+          "doc_type": "wiki_ctic",
+          "filtros": { "sistema": "sigaa" },
+          "prompt": "Escreva sua pergunta sobre o SIGAA.\nEx.: \"como emito minha declaração de vínculo?\"."
+        },
+        {
+          "tecla": "2",
+          "label": "SIPAC — parte administrativa (material, patrimônio, processos)",
+          "acao": "pergunta",
+          "rota": "WIKI",
+          "doc_type": "wiki_ctic",
+          "filtros": { "sistema": "sipac" },
+          "prompt": "Escreva sua pergunta sobre o SIPAC.\nEx.: \"como faço uma requisição de material?\"."
+        },
+        {
+          "tecla": "3",
+          "label": "Não sei qual sistema / outro assunto",
+          "acao": "pergunta",
+          "rota": "WIKI",
+          "doc_type": "wiki_ctic",
+          "prompt": "Pode escrever sua pergunta do jeito que preferir."
+        },
+        { "tecla": "9", "label": "Voltar", "acao": "voltar" },
+        { "tecla": "0", "label": "Falar com um atendente", "acao": "handoff" }
+      ]
+    },
+
+    "contatos": {
+      "titulo": "Telefones e setores",
+      "abertura": "📞 Telefones e setores",
+      "opcoes": [
+        {
+          "tecla": "1",
+          "label": "CTIC — suporte de tecnologia",
+          "acao": "texto_fixo",
+          "texto": "Estamos organizando esse conteúdo — digite 0 para falar com a CTIC.",
+          "fecho": "Conseguiu?\n1  Sim\n2  Não, quero um atendente"
+        },
+        {
+          "tecla": "2",
+          "label": "Secretaria do meu curso",
+          "acao": "pergunta",
+          "rota": "CONTATOS",
+          "doc_type": "contatos",
+          "prompt": "Qual é o seu curso?\nEx.: \"secretaria de engenharia civil\"."
+        },
+        {
+          "tecla": "3",
+          "label": "Procurar outro setor",
+          "acao": "pergunta",
+          "rota": "CONTATOS",
+          "doc_type": "contatos",
+          "prompt": "Qual setor você procura?\nEx.: \"telefone da biblioteca central\"."
+        },
+        { "tecla": "9", "label": "Voltar", "acao": "voltar" },
+        { "tecla": "0", "label": "Falar com um atendente", "acao": "handoff" }
+      ]
+    },
+
+    "pos_resposta": {
+      "titulo": "Depois da resposta",
+      "abertura": "Isso ajudou?",
+      "opcoes": [
+        {
+          "tecla": "1",
+          "label": "Sim",
+          "acao": "texto_fixo",
+          "texto": "Que bom! 😊 Se precisar de outra coisa, escreva menu."
+        },
+        { "tecla": "2", "label": "Não — falar com um atendente", "acao": "handoff" },
+        {
+          "tecla": "3",
+          "label": "Fazer outra pergunta",
+          "acao": "pergunta",
+          "rota": "WIKI",
+          "doc_type": "wiki_ctic",
+          "prompt": "Pode escrever sua próxima pergunta."
+        },
+        { "tecla": "9", "label": "Voltar ao menu", "acao": "voltar", "destino": "principal" }
+      ]
+    }
+  }
+}

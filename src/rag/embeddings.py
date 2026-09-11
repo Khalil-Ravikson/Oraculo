@@ -25,6 +25,41 @@ class TenacityEmbeddingWrapper(Embeddings):
             return self._base.embed_query(text)
         return _exec()
 
+# Dimensão do vetor por provedor. Mantida AQUI, ao lado de quem instancia o
+# modelo, para não voltar a divergir do índice — a constante vivia em
+# `redis_client.py`, longe de quem escolhe o modelo, e por isso nunca
+# acompanhou a troca de provedor.
+#
+# Ao adicionar um provedor novo (ex.: um modelo multimodal do Google),
+# acrescente a dimensão dele aqui na mesma mudança.
+_DIMENSOES: dict[str, int] = {
+    "google": 3072,   # models/gemini-embedding-001
+    "local":  1024,   # BAAI/bge-m3
+}
+
+
+def dimensao_do_provedor(provider: str | None = None) -> int:
+    """Dimensão do vetor do provedor ativo.
+
+    `settings.EMBEDDING_DIM` vence quando definido — é a saída para um modelo
+    novo cuja dimensão ainda não está nesta tabela."""
+    from src.infrastructure.settings import settings
+
+    if settings.EMBEDDING_DIM:
+        return settings.EMBEDDING_DIM
+
+    nome = (provider or os.getenv("EMBEDDING_PROVIDER", "google")).lower()
+    dim = _DIMENSOES.get(nome)
+    if dim is None:
+        raise ValueError(
+            f"Dimensão desconhecida para EMBEDDING_PROVIDER={nome!r}. "
+            f"Acrescente-a em `rag/embeddings.py::_DIMENSOES` ou defina "
+            f"EMBEDDING_DIM no .env."
+        )
+    return dim
+
+
+
 # O Singleton perfeito que você já usava!
 @lru_cache(maxsize=1)
 def get_embeddings():

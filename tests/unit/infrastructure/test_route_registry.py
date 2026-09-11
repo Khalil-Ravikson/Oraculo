@@ -29,7 +29,7 @@ def _carregar_seed(nome: str) -> dict:
 # removido.
 _SEED_BRUTO = {
     **_carregar_seed("010_route_registry"),
-    **_carregar_seed("022_route_registry_escalar_humano"),
+    **_carregar_seed("022_route_registry_escalar"),
 }
 SEED_010 = {
     rota: {**{k: v for k, v in row.items() if k != "planner_steps"}, "owner": "langgraph"}

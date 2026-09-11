@@ -18,7 +18,7 @@ retestado a fundo, principalmente via WhatsApp real.
 Manter o experimento isolado em `langgraph_experiment/` (branch/worktree
 própria) até que os pontos "não testado ainda" sejam fechados. Só depois
 disso reabrir a conversa sobre migrar `router/`, `application/runtime/dispatcher.py`
-ou `agents/sigaa/auth_flow.py` para o runtime `StateGraph`.
+ou `domain_services/sigaa/auth_flow.py` para o runtime `StateGraph`.
 
 ## O que já foi validado (não descartar em retestes futuros)
 
@@ -26,7 +26,7 @@ ou `agents/sigaa/auth_flow.py` para o runtime `StateGraph`.
 - Comando de saída explícito do HITL (match exato de "sair"/"cancelar"/
   "desistir"/"abortar"/"encerrar"/"parar") funciona — ver `_eh_saida()` em
   `langgraph_experiment/nodes.py`.
-- RBAC portado do fluxo real (`agents/tickets/rbac.py::checar_permissao_chamado`).
+- RBAC portado do fluxo real (`domain_services/tickets/rbac.py::checar_permissao_chamado`).
 - Dedup de webhook por `msg_key_id` — necessário porque a Evolution API
   reentrega o mesmo evento com frequência alta.
 - Dois testes direcionados (múltiplos `interrupt()` no mesmo node; carga
@@ -40,11 +40,11 @@ ou `agents/sigaa/auth_flow.py` para o runtime `StateGraph`.
 
 RBAC completo não estava testado — lacuna preexistente do fluxo atual (não
 era sobre o LangGraph em si), zero testes existiam pra `domain/permissions.py`
-nem pra `agents/tickets/rbac.py::checar_permissao_chamado` antes desta
+nem pra `domain_services/tickets/rbac.py::checar_permissao_chamado` antes desta
 sessão. Fechado como parte da Fase 2 do plano de integração:
 `tests/unit/domain/test_permissions.py` (matriz completa role × status,
 `pode()`, `mensagem_sem_permissao()`, `lista_tools_permitidas()`) e
-`tests/unit/agents/tickets/test_rbac.py` (pessoa autorizada/bloqueada por
+`tests/unit/domain_services/tickets/test_rbac.py` (pessoa autorizada/bloqueada por
 status/role/flag administrativa, fallback de `DEV_TEST_SKIP_REGISTRATION`).
 
 Achado ao escrever a suíte, registrado mas **não alterado** (é decisão de

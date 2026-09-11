@@ -82,8 +82,8 @@ async def test_responder_rag_direto_propaga_rota_history_fatos():
     cache_instance.get = AsyncMock(return_value=None)
     cache_instance.set = AsyncMock(return_value=None)
 
-    with patch("src.agents.academic_knowledge.service.RAGSearchService", return_value=rag_instance), \
-         patch("src.agents.academic_knowledge.synthesis.SynthesisService", return_value=synth_instance), \
+    with patch("src.rag.knowledge.service.RAGSearchService", return_value=rag_instance), \
+         patch("src.rag.knowledge.synthesis.SynthesisService", return_value=synth_instance), \
          patch("src.infrastructure.semantic_cache.SemanticCache", return_value=cache_instance):
 
         answer = await responder_rag_direto(
@@ -120,8 +120,8 @@ async def test_responder_rag_direto_cache_hit_pula_rag_e_sintese():
     rag_cls = MagicMock()
     synth_cls = MagicMock()
 
-    with patch("src.agents.academic_knowledge.service.RAGSearchService", rag_cls), \
-         patch("src.agents.academic_knowledge.synthesis.SynthesisService", synth_cls), \
+    with patch("src.rag.knowledge.service.RAGSearchService", rag_cls), \
+         patch("src.rag.knowledge.synthesis.SynthesisService", synth_cls), \
          patch("src.infrastructure.semantic_cache.SemanticCache", return_value=cache_instance):
 
         answer = await responder_rag_direto("qual o calendário?", rota="CALENDARIO")
@@ -141,8 +141,8 @@ async def test_responder_rag_direto_nao_consulta_cache_pra_rota_excluida():
     synth_instance.sintetizar = AsyncMock(return_value=_mock_synth_result())
     cache_cls = MagicMock()
 
-    with patch("src.agents.academic_knowledge.service.RAGSearchService", return_value=rag_instance), \
-         patch("src.agents.academic_knowledge.synthesis.SynthesisService", return_value=synth_instance), \
+    with patch("src.rag.knowledge.service.RAGSearchService", return_value=rag_instance), \
+         patch("src.rag.knowledge.synthesis.SynthesisService", return_value=synth_instance), \
          patch("src.infrastructure.semantic_cache.SemanticCache", cache_cls):
 
         await responder_rag_direto("qual minha nota?", rota="SIGAA")

@@ -13,7 +13,7 @@ seção 2.5). Duas mudanças em relação ao original:
      tool-calling futuramente embrulha isso, não o contrário.
   2. Sem consumidor vivo hoje (só `oracle_chain.bak` importava). Migrado
      porque a lógica é válida e reaproveitável para um futuro
-     `agents/conversation/` ou `agents/administration/` que precise buscar/
+     `domain_services/conversation/` ou `agents/administration/` que precise buscar/
      cadastrar usuário administrativamente.
 """
 from __future__ import annotations

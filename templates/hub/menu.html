@@ -1,0 +1,90 @@
+{% extends "hub/_shell.html" %}
+{% block nav_active %}menu{% endblock %}
+{% block page_title %}Menu do bot{% endblock %}
+
+{% block extra_css %}<link rel="stylesheet" href="/static/css/pages/menu.css">{% endblock %}
+
+{% block content %}
+<div class="menu-view">
+
+<div class="info-banner" x-data="infoBanner('menu')" :data-open="aberto">
+  <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+    O que é esta página
+    <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div class="info-banner__body" x-show="aberto" x-cloak>
+    <p>Aqui você edita <strong>o que o assistente responde no WhatsApp</strong> —
+      o texto de cada tela, as opções numeradas e as respostas prontas. A
+      pré-visualização à direita é exatamente o que a pessoa recebe.</p>
+    <p><strong>Vale na hora.</strong> Depois de salvar, a próxima mensagem de
+      qualquer pessoa já usa o texto novo. Não precisa reiniciar nada.</p>
+    <p>Cada opção faz uma de quatro coisas: <em>abrir outra tela</em>,
+      <em>mostrar uma resposta pronta</em>, <em>pedir uma pergunta</em> (a única
+      que consulta a base de conhecimento) ou <em>chamar um atendente</em>.</p>
+  </div>
+</div>
+
+<div class="menu-bar">
+  <div class="menu-bar__status">
+    <span class="badge" id="menu-versao" data-tech="menu_config.versao">—</span>
+    <span class="caption" id="menu-autoria"></span>
+  </div>
+  <div class="menu-bar__acoes">
+    <button class="btn btn--ghost" id="btn-historico">Histórico</button>
+    <button class="btn btn--ghost" id="btn-padrao">Restaurar o texto original</button>
+    <button class="btn btn--primary" id="btn-salvar" disabled>Salvar</button>
+  </div>
+</div>
+
+<div id="menu-erros" class="alert alert--erro" hidden></div>
+
+<div id="painel-historico" class="painel-historico" hidden></div>
+
+<div class="menu-grid">
+
+  <aside class="menu-telas">
+    <div class="menu-telas__head">
+      <span class="caption">Telas</span>
+    </div>
+    <ul id="lista-telas" class="menu-telas__lista"><li class="caption">Carregando…</li></ul>
+  </aside>
+
+  <section class="menu-editor">
+    <div id="editor-vazio" class="caption">Escolha uma tela à esquerda.</div>
+
+    <div id="editor" hidden>
+      <label class="campo">
+        <span class="campo__label">Texto de abertura</span>
+        <textarea class="input" id="tela-abertura" rows="4"
+                  placeholder="A saudação ou o título que aparece antes das opções."></textarea>
+        <span class="campo__ajuda caption">As opções numeradas são montadas
+          automaticamente a partir da lista abaixo — não digite os números aqui.</span>
+      </label>
+
+      <div class="menu-opcoes__head">
+        <span class="campo__label">Opções</span>
+        <button class="btn btn--ghost btn--sm" id="btn-add-opcao">Adicionar opção</button>
+      </div>
+      <div id="lista-opcoes"></div>
+    </div>
+  </section>
+
+  <aside class="menu-preview">
+    <div class="menu-preview__head">
+      <span class="caption">Como a pessoa vê no WhatsApp</span>
+    </div>
+    <div class="zap">
+      <div class="zap__balao" id="preview-balao">—</div>
+    </div>
+    <p class="caption" id="preview-custo"></p>
+  </aside>
+
+</div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/menu.js"></script>
+{% endblock %}

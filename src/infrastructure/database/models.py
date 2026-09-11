@@ -331,8 +331,13 @@ class ConfigDinamicaHistorico(Base):
 
 class RouteRegistry(Base):
     """Mapa rota→EXECUÇÃO (migration 010, Plano A / Fase 2). Colapsa os
-    dicts/frozensets hardcoded de `contracts.py` / `dispatcher.py` /
-    `dispatcher_langgraph.py` / `supervisor.py::_HINTS`.
+    dicts/frozensets que antes viviam hardcoded em `contracts.py` e
+    `supervisor.py::_HINTS`.
+
+    A versão anterior desta docstring citava também `dispatcher.py` e
+    `dispatcher_langgraph.py` — ambos deletados pela ADR 0008 Fase 3
+    (corrigido em 2026-09-09, item A9). A coluna `planner_steps` (o DAG do
+    Planner) foi removida pela migration 023.
 
     Fonte de verdade é o Postgres; `route_registry.py` espelha no Redis para
     o caminho quente. `versao` = optimistic lock (§N). `tenant_id` sempre
@@ -401,6 +406,47 @@ class GraphSpecHistorico(Base):
     """Histórico append-only de `graph_spec` (migration 024). Snapshot da spec
     inteira por versão — o botão "reverter" do Hub restaura o snapshot."""
     __tablename__ = "graph_spec_historico"
+
+    id             = Column(Integer, primary_key=True)
+    versao         = Column(Integer, nullable=False, index=True)
+    snapshot       = Column(JSONB, nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_por = Column(String(100), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MenuConfig(Base):
+    """O menu do bot como dado (migration 025, item C2.5).
+
+    `config` é o documento inteiro do menu — telas, opções, textos fixos — no
+    formato validado por `application/menu/spec.py`. Uma linha só
+    (`tenant_id` NULL); tabela vazia significa que o bot usa o menu embutido
+    em `application/menu/menus/default.json`.
+
+    Mesma disciplina da `graph_spec`: `versao` é optimistic lock, e toda
+    escrita deixa um snapshot no histórico. A razão é a mesma nos dois casos —
+    quem edita isto pelo painel está mudando o que milhares de pessoas veem no
+    WhatsApp, e precisa de um botão de desfazer."""
+    __tablename__ = "menu_config"
+    __table_args__ = (
+        Index(
+            "ux_menu_config_tenant", "tenant_id",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id             = Column(Integer, primary_key=True)
+    config         = Column(JSONB, nullable=False)
+    versao         = Column(Integer, server_default="1", nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por = Column(String(100), nullable=True)
+
+
+class MenuConfigHistorico(Base):
+    """Histórico append-only de `menu_config` (migration 025). Um snapshot do
+    menu inteiro por versão — é o que o botão "reverter" restaura."""
+    __tablename__ = "menu_config_historico"
 
     id             = Column(Integer, primary_key=True)
     versao         = Column(Integer, nullable=False, index=True)

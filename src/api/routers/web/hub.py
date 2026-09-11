@@ -490,14 +490,17 @@ async def agents_data(request: Request):
     if not payload:
         return _nao_autorizado()
 
-    from src.agents.registry import registry
     from src.capabilities.persistence.agent_config import status_de_todos
+    from src.domain import agentes as dominio_agentes
     from src.infrastructure.redis_client import get_redis_text
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.repositories.agent_catalog_repository import AgentCatalogRepository
 
-    agentes = registry.all()
-    status = await status_de_todos(get_redis_text(), [a.name for a in agentes])
+    # A lista de agentes é o conjunto fechado do domínio, não um registro em
+    # memória montado no boot (o `AgentRegistry` saiu em 2026-09-10 — ver
+    # `domain/agentes.py`). A descrição editável vem do catálogo em Postgres.
+    nomes = sorted(dominio_agentes.NOMES)
+    status = await status_de_todos(get_redis_text(), nomes)
 
     catalogo: dict[str, dict] = {}
     try:
@@ -509,19 +512,19 @@ async def agents_data(request: Request):
     return {
         "agentes": [
             {
-                "name": a.name,
-                "description": catalogo.get(a.name, {}).get("descricao") or a.description,
-                "tools": list(getattr(a, "tools", [])),
-                "enabled": status[a.name],
-                "llm_provider": catalogo.get(a.name, {}).get("llm_provider"),
-                "llm_model": catalogo.get(a.name, {}).get("llm_model"),
+                "name": nome,
+                "description": catalogo.get(nome, {}).get("descricao") or dominio_agentes.descricao(nome),
+                "tools": [],
+                "enabled": status[nome],
+                "llm_provider": catalogo.get(nome, {}).get("llm_provider"),
+                "llm_model": catalogo.get(nome, {}).get("llm_model"),
                 "atualizado_em": (
-                    catalogo.get(a.name, {}).get("atualizado_em").isoformat()
-                    if catalogo.get(a.name, {}).get("atualizado_em") else None
+                    catalogo.get(nome, {}).get("atualizado_em").isoformat()
+                    if catalogo.get(nome, {}).get("atualizado_em") else None
                 ),
-                "atualizado_por": catalogo.get(a.name, {}).get("atualizado_por"),
+                "atualizado_por": catalogo.get(nome, {}).get("atualizado_por"),
             }
-            for a in agentes
+            for nome in nomes
         ]
     }
 
@@ -537,13 +540,11 @@ async def agents_toggle(request: Request, name: str, data: AgentToggleRequest):
     if not payload:
         return _nao_autorizado()
 
-    from src.agents.registry import registry
     from src.capabilities.persistence.agent_config import set_agent_enabled
+    from src.domain import agentes as dominio_agentes
     from src.infrastructure.redis_client import get_redis_text
 
-    try:
-        registry.resolve(name)
-    except KeyError:
+    if not dominio_agentes.existe(name):
         return {"error": f"Agente '{name}' não encontrado."}
 
     await set_agent_enabled(get_redis_text(), name, data.enabled, admin=payload.sub)
@@ -561,13 +562,11 @@ async def agents_set_descricao(request: Request, name: str, data: AgentDescricao
     if not payload:
         return _nao_autorizado()
 
-    from src.agents.registry import registry
+    from src.domain import agentes as dominio_agentes
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.repositories.agent_catalog_repository import AgentCatalogRepository
 
-    try:
-        registry.resolve(name)
-    except KeyError:
+    if not dominio_agentes.existe(name):
         return {"error": f"Agente '{name}' não encontrado."}
 
     try:
@@ -611,15 +610,13 @@ async def agents_set_llm(request: Request, name: str, data: AgentLLMRequest):
     if data.llm_provider and data.llm_provider not in _validos:
         return {"error": f"Provedor inválido: {data.llm_provider}. Use um de {_validos}."}
 
-    from src.agents.registry import registry
+    from src.domain import agentes as dominio_agentes
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.repositories.agent_catalog_repository import AgentCatalogRepository
     from src.infrastructure.repositories.observability_repository import ObservabilityRepository
     from src.infrastructure.redis_client import get_redis_text
 
-    try:
-        registry.resolve(name)
-    except KeyError:
+    if not dominio_agentes.existe(name):
         return {"error": f"Agente '{name}' não encontrado."}
 
     try:
@@ -893,7 +890,7 @@ async def channels_listar(request: Request):
     if not payload:
         return _nao_autorizado()
 
-    from src.services import channel_store
+    from src.infrastructure.services import channel_store
     from src.infrastructure.database.session import AsyncSessionLocal
 
     canais = []
@@ -929,7 +926,7 @@ async def channels_criar(request: Request, data: CanalCriarRequest):
     if not payload:
         return _nao_autorizado()
 
-    from src.services import channel_store
+    from src.infrastructure.services import channel_store
     from src.infrastructure.security.ssrf_validator import URLInseguraError
     from src.infrastructure.database.session import AsyncSessionLocal
 
@@ -962,7 +959,7 @@ async def channels_toggle(request: Request, data: CanalToggleRequest):
     payload = _verificar_cookie(request)
     if not payload:
         return _nao_autorizado()
-    from src.services import channel_store
+    from src.infrastructure.services import channel_store
     from src.infrastructure.database.session import AsyncSessionLocal
     try:
         async with AsyncSessionLocal() as session:
@@ -984,7 +981,7 @@ async def channels_remover(request: Request, data: CanalRemoverRequest):
     payload = _verificar_cookie(request)
     if not payload:
         return _nao_autorizado()
-    from src.services import channel_store
+    from src.infrastructure.services import channel_store
     from src.infrastructure.database.session import AsyncSessionLocal
     try:
         async with AsyncSessionLocal() as session:
@@ -1007,7 +1004,7 @@ async def channels_reconnect(request: Request, data: CanalIdRequest):
     payload = _verificar_cookie(request)
     if not payload:
         return _nao_autorizado()
-    from src.services import channel_store
+    from src.infrastructure.services import channel_store
     from src.infrastructure.database.session import AsyncSessionLocal
     async with AsyncSessionLocal() as session:
         canal = await channel_store.obter(session, data.canal_id)
@@ -1027,7 +1024,7 @@ async def channels_webhook(request: Request, data: CanalWebhookRequest):
     payload = _verificar_cookie(request)
     if not payload:
         return _nao_autorizado()
-    from src.services import channel_store
+    from src.infrastructure.services import channel_store
     from src.infrastructure.security.ssrf_validator import URLInseguraError
     from src.infrastructure.database.session import AsyncSessionLocal
     try:
@@ -1107,6 +1104,19 @@ async def llm_custo_page(request: Request):
     )
 
 
+def _estado_catalogo_precos() -> dict:
+    """Quando o catálogo do OpenRouter foi atualizado pela última vez.
+
+    Mostrado no painel porque preço vindo de catálogo velho é uma fonte de
+    erro silenciosa — o número aparece, parece exato, e está desatualizado."""
+    try:
+        from src.infrastructure.observability import openrouter_catalog
+
+        return openrouter_catalog.estado()
+    except Exception:  # noqa: BLE001
+        return {"modelos": 0, "atualizado_em": None}
+
+
 @router.get("/llm-custo/data")
 async def llm_custo_data(request: Request, horas: int = 24):
     payload = _verificar_cookie(request)
@@ -1125,6 +1135,7 @@ async def llm_custo_data(request: Request, horas: int = 24):
             por_rota   = await repo.get_metricas_por_rota(horas)
             por_provider = await repo.get_metricas_por_provider(horas)
             serie      = await repo.get_serie_horaria(horas)
+            qualidade  = await repo.get_qualidade_custo(horas)
     except Exception as exc:
         logger.warning("⚠️  [HUB] Falha ao ler telemetria de custo: %s", exc)
         return {"error": "Falha ao consultar métricas."}
@@ -1164,6 +1175,11 @@ async def llm_custo_data(request: Request, horas: int = 24):
         "custo_brl_total": round(custo_usd_total * taxa_brl, 4),
         "provider_registry": provider_registry,
         "circuit_breaker": circuit_breaker,
+        # Confiança do número acima: quanto do gasto é medido, quanto é
+        # estimativa e quanto é desconhecido. Sem isto, o total do painel
+        # parecia igualmente confiável em todos os casos.
+        "qualidade_custo": qualidade,
+        "catalogo_precos": _estado_catalogo_precos(),
     }
 
 
@@ -1273,19 +1289,17 @@ async def agent_prompt_data(request: Request, name: str):
     if not payload:
         return _nao_autorizado()
 
-    from src.agents.registry import registry
+    from src.domain import agentes as dominio_agentes
     from src.capabilities.persistence.prompt_config import historico, obter_prompt_ativo
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.redis_client import get_redis_text
 
-    try:
-        agente = registry.resolve(name)
-    except KeyError:
+    if not dominio_agentes.existe(name):
         return {"error": f"Agente '{name}' não encontrado."}
 
     fallback = "(este agente não tem prompt de LLM próprio)"
     if name == "academic_knowledge":
-        from src.agents.academic_knowledge.prompts import SYSTEM_SYNTHESIS
+        from src.rag.knowledge.prompts import SYSTEM_SYNTHESIS
         fallback = SYSTEM_SYNTHESIS
     try:
         async with AsyncSessionLocal() as session:
@@ -1321,13 +1335,11 @@ async def agent_prompt_publicar(request: Request, name: str, data: AgentPromptRe
     if not payload:
         return _nao_autorizado()
 
-    from src.agents.registry import registry
+    from src.domain import agentes as dominio_agentes
     from src.capabilities.persistence.prompt_config import publicar_novo_prompt
     from src.infrastructure.database.session import AsyncSessionLocal
 
-    try:
-        registry.resolve(name)
-    except KeyError:
+    if not dominio_agentes.existe(name):
         return {"error": f"Agente '{name}' não encontrado."}
 
     if len(data.prompt.strip()) < 20:
@@ -1350,13 +1362,11 @@ async def agent_prompt_resetar(request: Request, name: str):
     if not payload:
         return _nao_autorizado()
 
-    from src.agents.registry import registry
+    from src.domain import agentes as dominio_agentes
     from src.capabilities.persistence.prompt_config import resetar_para_padrao
     from src.infrastructure.database.session import AsyncSessionLocal
 
-    try:
-        registry.resolve(name)
-    except KeyError:
+    if not dominio_agentes.existe(name):
         return {"error": f"Agente '{name}' não encontrado."}
 
     try:
@@ -2292,6 +2302,545 @@ async def graph_studio_test(request: Request, data: GraphTestRequest):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Wiki da CTIC — descobrir e ingerir a base de conhecimento do v1.
+#
+# Todas as peças existiam e nenhuma tinha gatilho: a descoberta em massa
+# (`?do=index` do DokuWiki), a resolução de `sistema`/`modulo` pelo grafo de
+# links, e a ingestão no RAG com a taxonomia certa. Enquanto faltou quem as
+# chamasse em sequência, o índice ficou com material de teste marcado como
+# `geral` e nenhuma pergunta do menu encontrava resposta.
+#
+# Descobrir e ingerir são ações SEPARADAS de propósito: ver a lista antes de
+# gravar é a diferença entre uma ação revisável e uma surpresa de centenas de
+# páginas.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/wiki", response_class=HTMLResponse)
+async def wiki_page(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/wiki.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/wiki/descobrir")
+async def wiki_descobrir(request: Request):
+    """Lista as páginas da wiki SEM ingerir nada."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.application.tasks.wiki_ingest_tasks import descobrir
+    from src.infrastructure.settings import settings
+
+    try:
+        page_ids = await descobrir()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao descobrir páginas da wiki: %s", exc)
+        return {"paginas": [], "error": f"Não deu para ler a wiki: {str(exc)[:160]}"}
+
+    return {"paginas": page_ids, "total": len(page_ids), "origem": settings.WIKI_CTIC_URL}
+
+
+class WikiIngerirRequest(BaseModel):
+    # Vazio = tudo o que a descoberta encontrar.
+    paginas: list[str] = Field(default_factory=list)
+    # Ignora o cache e rebaixa toda página, mesmo inalterada. Caro — só
+    # quando o formato do chunk ou a taxonomia mudarem.
+    forcar: bool = False
+
+
+@router.post("/wiki/ingerir")
+async def wiki_ingerir(request: Request, data: WikiIngerirRequest):
+    """Dispara a ingestão em lote. Devolve na hora; o progresso vem do
+    endpoint de status, porque centenas de páginas levam minutos."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.application.tasks.wiki_ingest_tasks import ingerir_wiki_ctic_task
+
+    try:
+        tarefa = ingerir_wiki_ctic_task.apply_async(
+            kwargs={"page_ids": data.paginas or None, "forcar": data.forcar},
+            queue="admin",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao enfileirar ingestão da wiki: %s", exc)
+        return {"error": "Não deu para iniciar a ingestão."}
+
+    logger.info(
+        "📚 [WIKI] ingestão disparada por %s (%s páginas, forcar=%s)",
+        payload.sub, len(data.paginas) or "todas", data.forcar,
+    )
+    return {"ok": True, "task_id": tarefa.id,
+            "aviso": "A ingestão roda em segundo plano. Acompanhe o progresso aqui."}
+
+
+@router.get("/wiki/status")
+async def wiki_status(request: Request):
+    """Progresso da ingestão em andamento (ou da última concluída)."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.application.tasks.wiki_ingest_tasks import ler_status
+
+    return {"status": ler_status()}
+
+
+class WikiLimparRequest(BaseModel):
+    # Qual assunto remover. Só `geral` é aceito — ver a nota no endpoint.
+    doc_type: str = "geral"
+    # Sem isto, o endpoint apenas CONTA o que removeria.
+    confirmar: bool = False
+
+
+@router.post("/wiki/limpar")
+async def wiki_limpar(request: Request, data: WikiLimparRequest):
+    """Remove do índice os trechos de um assunto.
+
+    **Só aceita `geral`.** A restrição é deliberada: este endpoint existe para
+    limpar o que foi ingerido SEM assunto definido (antes de `/hub/chunkviz`
+    ganhar o seletor, todo documento entrava assim). Permitir apagar
+    `wiki_ctic` ou `contatos` por aqui transformaria um botão de higiene num
+    botão de apagar a base de conhecimento do bot — e este projeto já teve um
+    "Limpar cache" que fez `FLUSHDB` e levou junto os índices e os chunks do
+    RAG (ADR 0007, "Consequências").
+
+    Sem `confirmar`, só conta. A contagem é a mesma consulta da remoção, então
+    o número que você vê é o número que sai.
+    """
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    if data.doc_type != "geral":
+        return {"error": "Só é possível limpar o que está sem assunto definido."}
+
+    try:
+        from src.infrastructure.redis_client import get_redis
+
+        r = get_redis()
+        # `LIMIT 0 0` devolve só a contagem; para apagar precisamos dos ids.
+        res = r.execute_command(
+            "FT.SEARCH", "idx:rag:chunks", "@doc_type:{geral}",
+            "NOCONTENT", "LIMIT", "0", "10000",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao consultar o índice para limpeza: %s", exc)
+        return {"error": "Não deu para ler o índice."}
+
+    total = res[0] if res else 0
+    chaves = [k.decode() if isinstance(k, (bytes, bytearray)) else k for k in (res[1:] if res else [])]
+
+    if not data.confirmar:
+        return {"total": total, "removidos": 0, "confirmado": False,
+                "aviso": f"{total} trecho(s) sem assunto definido seriam removidos."}
+
+    removidos = 0
+    try:
+        for chave in chaves:
+            removidos += r.delete(chave)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao remover trechos: %s", exc)
+        return {"error": f"Removidos {removidos} antes de falhar.", "removidos": removidos}
+
+    logger.info("🧹 [WIKI] %s removeu %d trecho(s) sem assunto definido.", payload.sub, removidos)
+    return {"ok": True, "removidos": removidos, "total": total, "confirmado": True}
+
+
+@router.get("/wiki/indice")
+async def wiki_indice(request: Request):
+    """Quantos chunks existem por assunto, hoje, no índice de busca.
+
+    É a resposta para "a ingestão funcionou?" — e foi medindo isto que se
+    descobriu que a base inteira estava como `geral`, fora do alcance do
+    menu."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    try:
+        from src.infrastructure.redis_client import get_redis
+
+        bruto = get_redis().execute_command(
+            "FT.AGGREGATE", "idx:rag:chunks", "*",
+            "GROUPBY", "1", "@doc_type", "REDUCE", "COUNT", "0", "AS", "n",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao medir o índice: %s", exc)
+        return {"por_assunto": {}, "error": "Não deu para ler o índice."}
+
+    def _txt(v):
+        return v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+
+    # O `FT.AGGREGATE` volta em DUAS formas conforme o protocolo negociado
+    # pelo cliente: lista plana no RESP2 e dicionário no RESP3. Tratar só uma
+    # delas devolvia contagem vazia com o índice cheio — e sem erro nenhum,
+    # porque a lista simplesmente não tinha o que iterar.
+    linhas = []
+    if isinstance(bruto, dict):
+        for resultado in bruto.get("results") or bruto.get(b"results") or []:
+            atributos = (
+                resultado.get("extra_attributes")
+                or resultado.get(b"extra_attributes")
+                or {}
+            )
+            linhas.append({_txt(k): _txt(v) for k, v in atributos.items()})
+    elif isinstance(bruto, list):
+        for linha in bruto[1:]:
+            if not isinstance(linha, (list, tuple)):
+                continue
+            itens = [_txt(x) for x in linha]
+            linhas.append(dict(zip(itens[::2], itens[1::2])))
+
+    por_assunto: dict[str, int] = {}
+    for campos in linhas:
+        try:
+            por_assunto[campos.get("doc_type", "?")] = int(campos.get("n", 0))
+        except (TypeError, ValueError):
+            continue
+
+    return {"por_assunto": por_assunto, "total": sum(por_assunto.values())}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Atendimento humano — ver e encerrar as conversas que o bot pausou.
+#
+# Por que esta página existe: quando alguém pede um atendente, o bot silencia
+# aquela conversa por 24h (`handoff:session:*`). Até 2026-09-10 a ÚNICA saída
+# era o comando `$voltar <jid>` pelo WhatsApp, o que criava dois becos:
+#
+#   · quem testava pelo simulador de chat do painel ficava presa sem saída
+#     nenhuma — o simulador não passa pelo gatekeeper de comandos;
+#   · a instrução de saída viajava dentro do aviso mandado ao suporte, então
+#     quem não recebeu o aviso não sabia como voltar.
+#
+# O comando continua existindo para quem está no WhatsApp. Esta página é a
+# saída que não depende de decorar um identificador de sessão.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_HANDOFF_PREFIX = "handoff:session:"
+
+
+@router.get("/handoffs", response_class=HTMLResponse)
+async def handoffs_page(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/handoffs.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/handoffs/data")
+async def handoffs_data(request: Request):
+    """Conversas pausadas agora, com quanto falta para voltarem sozinhas."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        r = get_redis_text()
+        sessoes = []
+        cursor = 0
+        while True:
+            cursor, chaves = r.scan(cursor, match=f"{_HANDOFF_PREFIX}*", count=200)
+            for chave in chaves:
+                sid = chave.split(_HANDOFF_PREFIX, 1)[-1]
+                ttl = r.ttl(chave)
+                sessoes.append({
+                    "session_id": sid,
+                    # `web_session_*` é o simulador do painel; o resto vem do
+                    # WhatsApp. A distinção importa porque só o segundo tem
+                    # alguém de verdade esperando do outro lado.
+                    "origem": "painel" if sid.startswith("web_session_") else "whatsapp",
+                    "expira_em_s": ttl if ttl and ttl > 0 else None,
+                })
+            if cursor == 0:
+                break
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao listar atendimentos humanos: %s", exc)
+        return {"sessoes": [], "error": "Não deu para ler o estado das conversas."}
+
+    sessoes.sort(key=lambda s: (s["origem"] != "whatsapp", s["session_id"]))
+    return {"sessoes": sessoes}
+
+
+class HandoffDevolverRequest(BaseModel):
+    session_id: str
+
+
+@router.post("/handoffs/devolver")
+async def handoffs_devolver(request: Request, data: HandoffDevolverRequest):
+    """Devolve uma conversa ao assistente automático, antes do prazo.
+
+    Mesmo efeito do `$voltar <jid>` do WhatsApp: apaga a chave de pausa. A
+    próxima mensagem daquela pessoa volta a ser respondida pelo bot."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    sid = (data.session_id or "").strip()
+    if not sid:
+        return {"error": "Informe a conversa."}
+
+    from src.infrastructure.redis_client import get_redis_text
+
+    try:
+        removidos = get_redis_text().delete(f"{_HANDOFF_PREFIX}{sid}")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao devolver %s ao bot: %s", sid, exc)
+        return {"error": "Não deu para devolver a conversa. Tente novamente."}
+
+    if not removidos:
+        return {"error": "Essa conversa já não estava pausada."}
+
+    logger.info("🙋 [HANDOFF] %s devolvida ao bot por %s (painel).", sid, payload.sub)
+    return {"ok": True, "session_id": sid}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Menu do bot (item C2.5) — a página configurável que importa no v1.
+#
+# É aqui que se muda o que milhares de pessoas leem no WhatsApp, sem deploy.
+# Duas travas, pelo mesmo motivo que a GraphSpec tem: `validate_menu()` antes
+# de gravar (menu com tela órfã ou tecla duplicada prende o usuário numa
+# conversa sem botão de voltar) e optimistic lock por versão (dois servidores
+# editando o mesmo menu é cenário real).
+#
+# Diferente da GraphSpec, o efeito é IMEDIATO: o menu é lido por mensagem, do
+# espelho Redis. Não precisa de restart de worker.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/menu", response_class=HTMLResponse)
+async def menu_page(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/menu.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/menu/data")
+async def menu_data(request: Request):
+    """O menu ATIVO + a pré-visualização de cada tela exatamente como o usuário
+    a recebe no WhatsApp.
+
+    A pré-visualização vem de `menu.spec.render()`, a MESMA função que o bot
+    usa — não de um template paralelo. Uma segunda implementação de "como a
+    tela fica" divergiria da real no primeiro ajuste, e o painel passaria a
+    mentir sobre o produto."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.application.menu.loader import carregar_menu, menu_default
+    from src.application.menu.spec import render
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.menu_config_repository import MenuConfigRepository
+
+    config = await carregar_menu()
+
+    versao, atualizado_por, atualizado_em = 0, None, None
+    try:
+        async with AsyncSessionLocal() as session:
+            linha = await MenuConfigRepository(session).obter()
+        if linha:
+            versao = linha["versao"]
+            atualizado_por = linha["atualizado_por"]
+            atualizado_em = linha["atualizado_em"].isoformat() if linha["atualizado_em"] else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao ler versão de menu_config: %s", exc)
+
+    previews = {}
+    for no_id in config.nos:
+        try:
+            previews[no_id] = render(config, no_id)
+        except Exception:  # noqa: BLE001
+            previews[no_id] = ""
+
+    # Rotas que uma opção de "tirar dúvida" pode usar. Só as ATIVAS no v1 —
+    # oferecer CALENDARIO aqui seria montar uma tela que o kill-switch de
+    # `classify_node` recusa depois, e o usuário levaria a mensagem de "ainda
+    # não sei responder sobre isso" por culpa do painel.
+    from src.infrastructure.settings import settings
+
+    rotas_ativas = [r.strip().upper() for r in settings.ROTAS_ATIVAS.split(",") if r.strip()]
+    rotas_de_conteudo = [r for r in rotas_ativas if r in ("WIKI", "CONTATOS", "GERAL")]
+
+    return {
+        "config": config.model_dump(),
+        "versao": versao,
+        "atualizado_por": atualizado_por,
+        "atualizado_em": atualizado_em,
+        "previews": previews,
+        "rotas_de_conteudo": rotas_de_conteudo or ["WIKI", "CONTATOS"],
+        "usando_default": versao == 0,
+    }
+
+
+class MenuSaveRequest(BaseModel):
+    config:          dict
+    versao_esperada: int = 0
+
+
+@router.post("/menu")
+async def menu_save(request: Request, data: MenuSaveRequest):
+    """Valida o menu inteiro ANTES de gravar. Menu inválido não grava nada e
+    volta com a lista de problemas."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.application.menu.spec import MenuConfig, validate_menu
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.menu_config_repository import (
+        ConflitoDeVersao, MenuConfigRepository,
+    )
+
+    try:
+        config = MenuConfig.model_validate(data.config)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": "Formato de menu inválido.", "detalhes": [str(exc)]}
+
+    try:
+        validate_menu(config)
+    except ValueError as exc:
+        return {"error": "Menu inválido — nada foi gravado.", "detalhes": [str(exc)]}
+
+    normalizado = config.model_dump()
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = MenuConfigRepository(session)
+            resultado = await repo.salvar(
+                normalizado, versao_esperada=data.versao_esperada, atualizado_por=payload.sub,
+            )
+            await session.commit()
+            await repo.espelhar_redis(normalizado)
+    except ConflitoDeVersao as exc:
+        return {"error": str(exc), "conflito": True, "versao_atual": exc.atual}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao gravar menu_config: %s", exc)
+        return {"error": "Falha ao gravar. Tente novamente."}
+
+    return {"ok": True, "versao": resultado["versao"],
+            "aviso": "Já valendo — a próxima mensagem de qualquer usuário usa o menu novo."}
+
+
+@router.get("/menu/historico")
+async def menu_historico(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.menu_config_repository import MenuConfigRepository
+
+    try:
+        async with AsyncSessionLocal() as session:
+            hist = await MenuConfigRepository(session).historico()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao ler histórico de menu_config: %s", exc)
+        return {"historico": []}
+
+    return {"historico": [
+        {**h, "atualizado_em": h["atualizado_em"].isoformat() if h["atualizado_em"] else None}
+        for h in hist
+    ]}
+
+
+class MenuReverterRequest(BaseModel):
+    versao: int
+
+
+@router.post("/menu/reverter")
+async def menu_reverter(request: Request, data: MenuReverterRequest):
+    """Restaura um snapshot antigo como versão NOVA — reverter é reversível.
+
+    O snapshot é revalidado contra as regras de hoje antes de aplicar: um menu
+    que era válido há três versões pode ter virado inválido se as regras
+    apertaram no meio."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.application.menu.spec import MenuConfig, validate_menu
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.menu_config_repository import MenuConfigRepository
+
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = MenuConfigRepository(session)
+            snapshot = await repo.snapshot_da_versao(data.versao)
+            if snapshot is None:
+                return {"error": f"Versão {data.versao} não existe no histórico."}
+
+            try:
+                validate_menu(MenuConfig.model_validate(snapshot))
+            except Exception as exc:  # noqa: BLE001
+                return {"error": f"A versão {data.versao} não é mais válida hoje.",
+                        "detalhes": [str(exc)]}
+
+            atual = await repo.obter()
+            resultado = await repo.salvar(
+                snapshot, versao_esperada=atual["versao"] if atual else 0,
+                atualizado_por=f"{payload.sub} (revert v{data.versao})",
+            )
+            await session.commit()
+            await repo.espelhar_redis(snapshot)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao reverter menu_config: %s", exc)
+        return {"error": "Falha ao reverter."}
+
+    return {"ok": True, "versao": resultado["versao"]}
+
+
+@router.post("/menu/restaurar-padrao")
+async def menu_restaurar_padrao(request: Request):
+    """Volta ao menu embutido no código (`menus/default.json`).
+
+    Grava o default como versão nova em vez de apagar a linha: assim a versão
+    editada continua no histórico e dá para voltar a ela. Apagar a linha
+    também funcionaria — o loader cairia no arquivo — mas perderia o rastro de
+    quem desfez o quê."""
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.application.menu.loader import menu_default
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.repositories.menu_config_repository import MenuConfigRepository
+
+    padrao = menu_default().model_dump()
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = MenuConfigRepository(session)
+            atual = await repo.obter()
+            resultado = await repo.salvar(
+                padrao, versao_esperada=atual["versao"] if atual else 0,
+                atualizado_por=f"{payload.sub} (restaurou o padrão)",
+            )
+            await session.commit()
+            await repo.espelhar_redis(padrao)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao restaurar menu padrão: %s", exc)
+        return {"error": "Falha ao restaurar."}
+
+    return {"ok": True, "versao": resultado["versao"]}
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Infraestrutura — Armazenamento & Cache (Hub v2 Sprint 5)
 # "RedisInsight light": só o que o Oráculo usa. Ações destrutivas com dry-run.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2530,10 +3079,28 @@ async def cv_ingest(request: Request, body: IngestReq):
 
         from src.application.tasks.ingestion_tasks import processar_documento
         
-        # Junta o doc_type básico com a nova Taxonomia (Eixo, Setor, Ano)
+        # Junta o doc_type básico com a Taxonomia (Eixo, Setor, Ano).
         final_metadata = {"doc_type": body.doc_type}
+
+        # `sistema`/`modulo` da wiki: resolvidos no scraping (pelo grafo de
+        # links entre páginas, ver scraping/.../dokuwiki/hierarchy.py) e
+        # gravados no meta temporário por `cv_extract_url`.
+        #
+        # Até 2026-09-11 essa informação era resolvida e DESCARTADA aqui — o
+        # índice tinha os campos `sistema`/`modulo` e nenhum documento os
+        # preenchia. Sem eles, as opções "SIGAA" e "SIPAC" do menu não têm
+        # como filtrar, que é justamente o que as torna precisas e baratas.
+        wiki_meta = meta.get("wiki_metadata") or {}
+        for campo in ("sistema", "modulo", "setor", "tipo_doc"):
+            if wiki_meta.get(campo):
+                final_metadata[campo] = wiki_meta[campo]
+
+        # O que a tela mandou vence o que veio do scraping: quem está olhando
+        # a página pode estar corrigindo uma taxonomia mal resolvida.
         if body.metadata_override:
-            final_metadata.update(body.metadata_override)
+            final_metadata.update(
+                {k: v for k, v in body.metadata_override.items() if v not in (None, "")}
+            )
 
         # Usamos os valores dinâmicos do 'body', que vieram do slider do HTML!
         result = processar_documento.apply_async(
@@ -2617,6 +3184,10 @@ async def cv_extract_url(
             "total_chars": len(doc.content),
             "word_count": doc.word_count,
             "wiki_metadata": doc.metadata if doc_type == "wiki_ctic" else None,
+            # O assunto já foi decidido aqui, pelo domínio da URL. Antes ele
+            # não voltava no JSON, então a tela não tinha como se ajustar e o
+            # operador precisava adivinhar à mão o que o servidor já sabia.
+            "doc_type": doc_type,
         }
     except Exception as e:
         logger.exception("Scraping fail")

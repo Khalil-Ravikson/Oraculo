@@ -95,6 +95,82 @@ class Settings(BaseSettings):
     # Fase 4: mcp_lab passa a rodar atrás de uma camada de Application
     # própria, sem acesso direto a adapters de produção (EvolutionAdapter).
     FEATURE_MCP_PRODUCT: bool = False
+    # v1 — bot de menu (item B2). Ligada: o menu determinístico
+    # (`application/menu/`) decide a rota no entrypoint e o classificador LLM
+    # (camada L5 do Supervisor) nunca roda. Desligada: volta ao Supervisor
+    # completo, o comportamento anterior ao v1.
+    #
+    # Existe como interruptor de ROLLBACK, não como configuração permanente —
+    # se a validação por WhatsApp (checklist B8) passar, ela sai junto com o
+    # código do Supervisor que ela desliga. Não construa nada novo em cima
+    # do caminho `False`.
+    FEATURE_MENU_BOT: bool = True
+    # v1 — reescrita da query de busca por Gemini Flash antes do RAG
+    # (`QueryTransformService.transformar_com_flash`). Desligada: a pergunta
+    # do usuário vai para a busca como ele escreveu, enriquecida só pelas
+    # estratégias locais (regex, sinônimos, step-back), que custam zero.
+    # Ligada, era uma 2ª chamada de LLM em praticamente toda resposta — ver
+    # a docstring do método. Item B6.
+    FEATURE_QUERY_TRANSFORM_LLM: bool = False
+    # v1 — rotas ligadas (item B3). Lista separada por vírgula; vazia = sem
+    # restrição (comportamento anterior ao v1).
+    #
+    # Por que não o kill-switch de `/hub/agents`: aquele desliga por AGENTE, e
+    # WIKI/CONTATOS/CALENDARIO/EDITAL/GERAL compartilham o mesmo agente
+    # (`academic_knowledge`) — desligar CALENDARIO por lá derrubaria a wiki
+    # junto. MEDIA_DOWNLOAD/CHECK_STATUS/GREETING nem têm agente, então o
+    # breaker nunca os alcançou. O kill-switch do v1 precisa ser por ROTA.
+    #
+    # Com o menu ligado, as rotas fora desta lista já são inalcançáveis (o
+    # menu nunca as escolhe). Esta lista é a segunda tranca, para o caminho
+    # de degradação (menu falhou → Supervisor classificou CALENDARIO) e para
+    # os fast-paths que não passam pelo menu.
+    #
+    # **Default VAZIO de propósito.** A restrição do v1 é configuração de
+    # deploy (`.env`), não default de código: um default restritivo
+    # desligaria, dentro da suíte de testes, funis que os testes exercitam —
+    # e uma suíte que roda numa configuração que produção não usa deixa de
+    # ser prova de nada. O valor do v1 está no `.env.example` e no checklist
+    # de produção (`docs/ESTADO_ATUAL.md` §5).
+    ROTAS_ATIVAS: str = ""
+    # v1 — higiene dos checkpoints do LangGraph (item B10). Horas de TTL a
+    # aplicar em chave de checkpoint que ainda não tem TTL nenhum. 0 =
+    # desligado (default). A task NUNCA apaga chave: só marca o TTL e deixa o
+    # Redis expirar — ver `tasks/beat_checkpoint_gc.py`. Escolha um valor bem
+    # maior que a conversa mais longa que você espera (48h+).
+    CHECKPOINT_TTL_HORAS: int = 0
+
+    # Wiki da CTIC — a base de conhecimento do v1. Aponta para o endpoint
+    # `doku.php` do DokuWiki; a descoberta em massa usa `?do=index` e o
+    # scraping de cada página usa `?id=<page_id>&do=export_raw`.
+    #
+    # Estava como literal espalhado pelo código ("ctic.uema.br" em `hub.py`,
+    # exemplos nas docstrings). Vira config para poder apontar para homologação
+    # sem editar código.
+    WIKI_CTIC_URL: str = "https://ctic.uema.br/wiki/doku.php"
+    # Quantas páginas raspar em paralelo na ingestão em lote. Baixo de
+    # propósito: a wiki é um servidor da própria universidade, e a lista de
+    # páginas costuma ter centenas de itens — `asyncio.gather` em cima de
+    # tudo de uma vez é um pequeno ataque de negação de serviço no próprio
+    # cliente.
+    WIKI_INGEST_CONCORRENCIA: int = 4
+
+    # ── Telemetria de custo de LLM ───────────────────────────────────────
+    # Catálogo público do OpenRouter: usado SÓ para consultar preço, nunca
+    # para inferência. Atualizado por tarefa periódica e lido do cache no
+    # caminho quente — nenhuma chamada de rede por requisição de usuário.
+    OPENROUTER_CATALOG_URL: str = "https://openrouter.ai/api/v1/models"
+    OPENROUTER_CATALOG_TTL_H: int = 12
+    # Camadas de fallback de preço, desligadas por padrão. Ver
+    # `observability/pricing_resolver.py` para o que cada uma exige.
+    FEATURE_PRICING_LITELLM: bool = False
+    FEATURE_PRICING_PRICEPERTOKEN: bool = False
+
+    # Limite de mensagens por pessoa (guardrail de entrada). No v1 vale só
+    # para mensagem que vira PERGUNTA — navegar o menu não conta, porque não
+    # custa token. Ajustável em runtime pelo painel (`config_dinamica`).
+    RATE_LIMIT_MSGS:     int = 8
+    RATE_LIMIT_WINDOW_S: int = 60
 
     # Workers config
     RAG_SEARCH_TIMEOUT_S:  float = 10.0
@@ -161,6 +237,19 @@ class Settings(BaseSettings):
     OTEL_EXPORTER_ENDPOINT: str = "http://jaeger:4317"
     # ── Embedding ─────────────────────────────────────────────────
     EMBEDDING_PROVIDER: str = "google"
+    # Dimensão do vetor do índice de busca. 0 = deriva do provedor
+    # (`rag/embeddings.py::dimensao_do_provedor`), que é o normal.
+    #
+    # Existe como override explícito porque trocar de modelo de embedding
+    # muda a dimensão, e a dimensão do índice NÃO pode divergir da do modelo:
+    # vetores de modelos diferentes não vivem no mesmo espaço, e a busca
+    # passa a devolver lixo sem erro nenhum. Era constante fixa em
+    # `redis_client.py` até 2026-09-11, então virar `EMBEDDING_PROVIDER=local`
+    # quebrava a busca em silêncio.
+    #
+    # Trocar de modelo exige recriar o índice e reingerir tudo — ver o aviso
+    # que `inicializar_indices()` emite quando detecta divergência.
+    EMBEDDING_DIM: int = 0
     ENV: str = "production"
     
     @property

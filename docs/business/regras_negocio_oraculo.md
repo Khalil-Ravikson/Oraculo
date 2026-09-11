@@ -1,5 +1,20 @@
 # Regras de Negócio do Oráculo — documento-base para discussão com a liderança
 
+> **Como ler este documento** (revisado em 2026-09-09, item A7).
+>
+> **A seção §0 é a que vale para a liderança.** Ela descreve o produto do v1
+> — um bot de menu — o que entra, o que fica para depois e o que ainda
+> impede o uso com dados reais.
+>
+> **As seções §1 em diante são anexo técnico histórico.** Foram escritas
+> sobre o código de 2026-07-28 e descrevem `dispatcher.py`, o Planner e
+> `langgraph_experiment/`, todos deletados pela ADR 0008 — as citações
+> `arquivo:linha` desses trechos apontam para arquivos que não existem mais.
+> As regras de RBAC, guardrails, cache e memória continuam corretas no
+> essencial; a arquitetura em volta delas, não. Ver §0.4.
+>
+> Fonte do estado atual: [`docs/ESTADO_ATUAL.md`](../ESTADO_ATUAL.md).
+
 > **Metodologia:** todo item abaixo foi extraído lendo o código que roda hoje
 > (branch `langgraph`, 2026-07-28) — não é uma visão aspiracional de "como
 > deveria ser". Cada regra tem uma citação `arquivo:linha` pra qualquer
@@ -13,27 +28,84 @@
 
 ---
 
-## 0. Alerta de risco imediato — ler antes de qualquer outra coisa
+## 0. O que o Oráculo é hoje — resumo para a liderança
 
-Duas variáveis de ambiente estão **ativas agora** neste ambiente e mudam
-comportamento de forma material:
+> Escrito em 2026-09-09 (item A7). Substitui o alerta de risco anterior, que
+> continua válido no essencial e está em §0.3.
 
-| Flag | Valor atual | Efeito |
+### 0.1 O produto do v1: um bot de menu
+
+O Oráculo é um assistente da CTIC no WhatsApp que funciona por **menu
+numérico**. O usuário manda "oi", recebe um menu, digita um número e o bot
+responde. Não é um chatbot que tenta adivinhar a intenção da frase.
+
+Isso é uma escolha, não uma limitação de prazo. Três razões:
+
+1. **Custo previsível.** Navegar o menu, ler uma resposta pronta e pedir
+   atendente **não consomem nada de inteligência artificial**. A IA é acionada
+   só quando o usuário chega numa opção de "tirar dúvida", e uma pergunta
+   repetida é servida do cache, sem custo novo.
+2. **Erro baixo.** Um menu não interpreta errado o que o usuário quis dizer.
+3. **Crescimento sem retrabalho.** Cada assunto novo é um item de menu novo,
+   não uma reengenharia.
+
+### 0.2 O que entra e o que fica para depois
+
+| O bot faz hoje | Como |
+|---|---|
+| Responde sobre SIGAA e SIPAC | Busca na wiki da CTIC e escreve a resposta com base nela |
+| Responde sobre senha, usuário, e-mail e Wi-Fi | Texto pronto, ou a wiki |
+| Informa telefones e setores da UEMA | Base de contatos |
+| Encaminha para um atendente da CTIC | O bot silencia e a equipe assume a conversa |
+
+| Fica para depois | Por quê |
+|---|---|
+| Calendário acadêmico e edital PAES | Fora do escopo acordado para o primeiro corte; o conteúdo existe, a rota está desligada |
+| Notas e histórico no SIGAA | Exige que o aluno faça login durante a conversa. Risco e complexidade que o v1 não precisa correr |
+| Abertura de chamado formal no GLPI | Não há integração real com o GLPI. Hoje "falar com um atendente" cobre a necessidade |
+| Atualização de cadastro pelo bot | Depende de escrita no banco, ainda desligada (§0.3) |
+
+Nenhum desses foi apagado. Cada um está desligado por interruptor e volta
+como um item de menu novo.
+
+**Cadastro não é exigido no v1** (decisão de 2026-09-09). O usuário manda
+"oi" e já vê o menu. Menos atrito, e nenhuma informação pessoal é pedida para
+responder uma dúvida da wiki.
+
+### 0.3 O que ainda impede o uso com dados reais
+
+| Item | Situação | Efeito enquanto estiver assim |
 |---|---|---|
-| `DEV_TEST_NO_DB_WRITE` | `True` (`.env:12`, default `True` no código) | Cadastro, abertura de chamado e atualização cadastral **não gravam no Postgres real** — tudo vira arquivo JSON local em `dados/tmp/*_dev/`. |
-| `DEV_TEST_SKIP_REGISTRATION` | `True` (`.env:14`) | **Qualquer remetente é tratado como já cadastrado**, mesmo sem nunca ter passado pelo funil — o "cadastro obrigatório" está desligado na prática. |
+| `DEV_TEST_NO_DB_WRITE` | **Ainda ligada** | Nada é gravado no Postgres. Chamados e cadastros viram arquivo local. Nenhuma regra de persistência deste documento tem efeito real. |
+| `DEV_TEST_SKIP_REGISTRATION` | Ligada, **agora por decisão** | Qualquer pessoa é atendida sem cadastro. Deixou de ser um atalho de teste e passou a ser o comportamento oficial do v1. |
+| Conteúdo dos menus | **Placeholder** | As respostas prontas ainda dizem "estamos organizando esse conteúdo". Precisam dos textos reais da CTIC. |
+| Base de conhecimento | **Não reindexada** | A wiki e os contatos precisam ser reingeridos antes de ir ao ar. |
 
-Fontes: `src/infrastructure/settings.py:21-33`, `.env:12,14`,
-`src/agents/conversation/registration.py:132-134`,
-`src/agents/tickets/ticket_flow.py:14-18`, `src/agents/tickets/crud_tool.py:119-124`,
-`langgraph_experiment/nodes.py:357-361`, `src/application/tasks/process_message_task.py:329`,
-`src/agents/tickets/rbac.py:22-31`.
+A lista completa do que precisa acontecer antes de ligar para usuários reais
+está no checklist de produção em
+[`docs/ESTADO_ATUAL.md`](../ESTADO_ATUAL.md) §5.
 
-**Isso precisa ser revertido antes de qualquer uso com dados reais de
-usuários.** Enquanto essas flags estiverem ligadas, nenhuma das regras de
-persistência descritas abaixo tem efeito real no banco.
+### 0.4 O que mudou desde a versão anterior deste documento
+
+O texto das seções seguintes foi escrito sobre o código de **2026-07-28** e
+descreve coisas que deixaram de existir. Vale como registro, não como estado
+atual:
+
+| A versão anterior dizia | Hoje |
+|---|---|
+| "Orquestrador que sobrescreve o Supervisor" | Existe **um** orquestrador. A duplicidade acabou (ADR 0008). |
+| "Chamado tem duas implementações paralelas" | O funil de chamado é um só, e está **fora do v1**. |
+| "Supervisor de 5 camadas classifica a mensagem" | Quem decide a rota é o **menu**. O classificador só roda se o menu falhar. |
+| "Planner gera um plano de execução" | O Planner foi **deletado**. |
 
 ---
+
+
+# Anexo técnico — base 2026-07-28
+
+> ⚠️ Daqui para baixo, leia com o §0.4 em mente. As regras de negócio
+> (RBAC, guardrails, cache, memória) seguem válidas; a arquitetura descrita e
+> boa parte das citações `arquivo:linha` não.
 
 ## 1. Admissão e roteamento de mensagens
 
@@ -134,7 +206,7 @@ persistência descritas abaixo tem efeito real no banco.
 >   **não é checada** na entrada do fluxo de grupo nem no `MessageRouter`;
 >   só corta a chamada ao Gemini dentro do agente acadêmico.
 >   `src/application/commands/cmd_maintenance.py:7-19`,
->   `src/agents/academic_knowledge/synthesis.py:13-31,92`
+>   `src/rag/knowledge/synthesis.py:13-31,92`
 >
 > **Consequência:** um admin que digita `$M` no grupo pensando estar
 > ativando a manutenção do painel na verdade liga um interruptor diferente,
@@ -173,7 +245,7 @@ persistência descritas abaixo tem efeito real no banco.
 
 27. Funil de 2 perguntas: nome completo, depois curso. Nome e curso exigem
     mínimo de 3 caracteres, normalizados em Title Case.
-    `src/agents/conversation/registration.py:27-31,59-72`
+    `src/domain_services/conversation/registration.py:27-31,59-72`
 28. Rascunho do funil expira em **10 minutos** de inatividade (Redis) — se
     o usuário some, reinicia do zero na próxima mensagem. `registration.py:14-18,55-56`
 29. Falha técnica na gravação não limpa o estado — tenta salvar de novo a
@@ -211,7 +283,7 @@ persistência descritas abaixo tem efeito real no banco.
     versão nova ainda não tem caminho de escrita real em banco pra tickets.
     É 100% stub hoje. `langgraph_experiment/nodes.py:268-277`
 38. Ambas exigem RBAC (`Recurso.CHAMADO_GLPI` + flag `pode_abrir_chamado`
-    da pessoa) antes de iniciar/finalizar. `src/agents/tickets/rbac.py:13-52`
+    da pessoa) antes de iniciar/finalizar. `src/domain_services/tickets/rbac.py:13-52`
 
 ## 7. CRUD de cadastro (autoatendimento)
 
@@ -234,7 +306,7 @@ persistência descritas abaixo tem efeito real no banco.
 44. Via scraping (Playwright, fallback Selenium) — consulta notas, CR/IRA,
     histórico, horas complementares, estrutura curricular, turmas,
     calendário, biblioteca, extensão, processos seletivos.
-    `src/agents/sigaa/service.py:59-320`
+    `src/domain_services/sigaa/service.py:59-320`
 45. Consultas pessoais (notas, índice, histórico) exigem **CPF e senha do
     próprio SIGAA do aluno**, coletados por conversa (HITL). Consultas
     públicas (biblioteca, extensão) não exigem login.
@@ -253,7 +325,7 @@ persistência descritas abaixo tem efeito real no banco.
     `WIKI`→wiki CTIC, `GERAL`→sem filtro. `src/router/supervisor.py:266-269`
 50. Se a busca filtrada não retorna nada, usa o resultado geral em vez de
     devolver vazio — evita "não encontrei" desnecessário.
-    `src/agents/academic_knowledge/service.py:200-203`
+    `src/rag/knowledge/service.py:200-203`
 51. Cada chunk carrega taxonomia institucional (eixo, setor, tipo_doc, ano,
     campus, sistema, módulo), com padrões seguros quando o documento não
     informa. `src/infrastructure/redis_client.py:79-86,238-246`

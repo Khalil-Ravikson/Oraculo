@@ -6,7 +6,16 @@
 > definição declarativa (JSON/YAML), com nós descobertos automaticamente e
 > descritos por metadados, no estilo n8n / Langflow / LangGraph Studio.
 >
-> **Status: proposta, não implementada.** Nada aqui foi codificado.
+> ⚠️ **Status corrigido em 2026-09-09 (item A6): ISTO FOI IMPLEMENTADO.**
+> O banner anterior dizia "proposta, não implementada — nada aqui foi
+> codificado", e isso deixou de ser verdade na Fase 5 da ADR 0008. A
+> topologia do grafo é dado: `application/orchestration/spec.py`
+> (`GraphSpec`), `specs/default.json`, `loader.py`, e o Graph Studio edita a
+> spec ativa. Ver `docs/architecture/graph-studio.md`.
+>
+> O que NÃO se concretizou foi o enquadramento "estilo n8n / Langflow": o
+> caminho que venceu é `GraphSpec` validada, com routers versionados em
+> código, não um canvas livre. Ver `docs/ESTADO_ATUAL.md`.
 
 ---
 

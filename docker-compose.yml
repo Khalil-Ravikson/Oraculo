@@ -125,7 +125,11 @@ services:
     container_name: oraculo_redis
     <<: [*restart, *logging]
     profiles: ["core"]
-    mem_limit: 1024m
+    # 2 GB (era 1 GB): o índice do RAG é o que ocupa memória aqui, e a wiki
+    # da CTIC inteira são ~16.500 trechos. Com o vetor em binário isso dá
+    # ~355 MB de documentos + ~230 MB de índice vetorial; o limite antigo
+    # deixaria isso em 75% do teto, sem folga para cache nem checkpoints.
+    mem_limit: 2048m
     cpus: 1.0
     networks:
       oraculo_net:
@@ -138,9 +142,16 @@ services:
       # chaves sem TTL — índice RediSearch dos chunks (RAG) e checkpoints do
       # LangGraph (AsyncRedisSaver, db0) — ficam protegidas; allkeys-lru
       # evictava essas em silêncio, corrompendo busca e perdendo estado de
-      # funil/HITL. maxmemory 768mb: folga sobre os 512mb antigos (o
-      # container tem mem_limit 1024m; redis-stack usa ~120-150mb de base).
-      REDIS_ARGS: "--appendonly yes --maxmemory 768mb --maxmemory-policy volatile-lru"
+      # funil/HITL.
+      #
+      # maxmemory 1536mb (era 768mb): em 2026-09-11 a ingestão da wiki
+      # estourou o teto antigo com ~600 das 1383 páginas, e o Redis passou a
+      # RECUSAR ESCRITA — o bot parou de responder, de guardar posição de menu
+      # e de gravar telemetria. A causa raiz era o formato do vetor (ver
+      # `docs/architecture/arquitetura_oraculo.md` §8.1); corrigido isso, a
+      # wiki inteira cabe em ~585mb, e este teto dá a folga que faltava.
+      # O container tem mem_limit 2048m; redis-stack usa ~120-150mb de base.
+      REDIS_ARGS: "--appendonly yes --maxmemory 1536mb --maxmemory-policy volatile-lru"
     ports:
       - "8001:8001"
     healthcheck:
@@ -288,6 +299,17 @@ services:
     # supervisor Celery).
     environment:
       CELERY_PRELOAD_RERANKER: "false"
+      # Métricas do worker (TD-019): o modo multiprocesso do
+      # prometheus_client agrega os contadores dos processos filhos,
+      # que é onde toda métrica do Oráculo é de fato incrementada.
+      #
+      # /dev/shm e NÃO /tmp: o `/tmp` do worker é um bind mount 9p para o
+      # C:\ do Windows (ver `x-worker-base`), e o `mmap` compartilhado que o
+      # prometheus_client usa não funciona nesse sistema de arquivos — os
+      # arquivos eram criados com o tamanho certo e ficavam com zero
+      # entradas, silenciosamente. /dev/shm é tmpfs de verdade.
+      PROMETHEUS_MULTIPROC_DIR: /dev/shm/prometheus_oraculo_worker
+      METRICS_PORT: "9101"
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=1", "--max-tasks-per-child=200", "--queues=default,admin"]
 
   worker_rag:
@@ -303,6 +325,17 @@ services:
     # dispararia em todos sem esse gate).
     environment:
       CELERY_PRELOAD_RERANKER: "true"
+      # Métricas do worker (TD-019): o modo multiprocesso do
+      # prometheus_client agrega os contadores dos processos filhos,
+      # que é onde toda métrica do Oráculo é de fato incrementada.
+      #
+      # /dev/shm e NÃO /tmp: o `/tmp` do worker é um bind mount 9p para o
+      # C:\ do Windows (ver `x-worker-base`), e o `mmap` compartilhado que o
+      # prometheus_client usa não funciona nesse sistema de arquivos — os
+      # arquivos eram criados com o tamanho certo e ficavam com zero
+      # entradas, silenciosamente. /dev/shm é tmpfs de verdade.
+      PROMETHEUS_MULTIPROC_DIR: /dev/shm/prometheus_oraculo_worker_rag
+      METRICS_PORT: "9102"
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=1", "--max-tasks-per-child=100", "--queues=rag_search"]
 
   worker_synthesis:
@@ -314,6 +347,17 @@ services:
     # então o fork só pagaria overhead de import duplicado à toa.
     environment:
       CELERY_PRELOAD_RERANKER: "false"
+      # Métricas do worker (TD-019): o modo multiprocesso do
+      # prometheus_client agrega os contadores dos processos filhos,
+      # que é onde toda métrica do Oráculo é de fato incrementada.
+      #
+      # /dev/shm e NÃO /tmp: o `/tmp` do worker é um bind mount 9p para o
+      # C:\ do Windows (ver `x-worker-base`), e o `mmap` compartilhado que o
+      # prometheus_client usa não funciona nesse sistema de arquivos — os
+      # arquivos eram criados com o tamanho certo e ficavam com zero
+      # entradas, silenciosamente. /dev/shm é tmpfs de verdade.
+      PROMETHEUS_MULTIPROC_DIR: /dev/shm/prometheus_oraculo_worker_synthesis
+      METRICS_PORT: "9103"
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo", "--queues=synthesis"]
 
   worker_media:
@@ -327,13 +371,24 @@ services:
     # resources-solo padrão por causa de buffers de download de vídeo.
     environment:
       CELERY_PRELOAD_RERANKER: "false"
+      # Métricas do worker (TD-019): o modo multiprocesso do
+      # prometheus_client agrega os contadores dos processos filhos,
+      # que é onde toda métrica do Oráculo é de fato incrementada.
+      #
+      # /dev/shm e NÃO /tmp: o `/tmp` do worker é um bind mount 9p para o
+      # C:\ do Windows (ver `x-worker-base`), e o `mmap` compartilhado que o
+      # prometheus_client usa não funciona nesse sistema de arquivos — os
+      # arquivos eram criados com o tamanho certo e ficavam com zero
+      # entradas, silenciosamente. /dev/shm é tmpfs de verdade.
+      PROMETHEUS_MULTIPROC_DIR: /dev/shm/prometheus_oraculo_worker_media
+      METRICS_PORT: "9104"
     command: ["celery", "-A", "src.infrastructure.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo", "--queues=media"]
 
-  # worker_graph removido do compose (2026-07-31): fila "graph"/worker_graph_extractor
-  # nunca teve chamador real em produção (nenhum router/agent/use_case despacha
-  # "graph_extractor" — confirmado por grep, não só por nota antiga). Código e task
-  # continuam existindo (worker_graph_extractor.py, registry.py, celery_app.py) —
-  # é só reativar este serviço se aparecer um uso real futuro.
+  # worker_graph saiu do compose em 2026-07-31: a fila "graph" nunca teve
+  # chamador real em produção. Em 2026-09-09 (item A8b) o código foi deletado
+  # também — `worker_graph_extractor.py` e `graph_extractor_service.py` não
+  # existem mais, e a fila saiu do `task_routes`. Ressuscitar exige escrever
+  # o worker de novo, não só descomentar um serviço.
 
   beat:
     <<: [*worker-base, *resources-light]

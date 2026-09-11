@@ -1,0 +1,124 @@
+{% extends "hub/_shell.html" %}
+{% block nav_active %}handoffs{% endblock %}
+{% block page_title %}Atendimento humano{% endblock %}
+
+{% block content %}
+<div class="handoff-view">
+
+<div class="info-banner" x-data="infoBanner('handoffs')" :data-open="aberto">
+  <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+    O que é esta página
+    <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div class="info-banner__body" x-show="aberto" x-cloak>
+    <p>Quando alguém pede para falar com uma pessoa, o assistente <strong>fica
+      em silêncio naquela conversa</strong> para não atrapalhar o atendimento.
+      A pausa dura 24 horas e termina sozinha.</p>
+    <p>Aqui você vê quem está em atendimento e pode <strong>devolver a conversa
+      ao assistente</strong> antes do prazo — por exemplo quando o atendimento
+      acabou, ou quando a pausa começou por engano durante um teste.</p>
+    <p>Devolver não avisa a pessoa. A próxima mensagem dela simplesmente volta
+      a ser respondida pelo assistente.</p>
+  </div>
+</div>
+
+<div class="handoff-bar">
+  <span class="caption" id="handoff-resumo">Carregando…</span>
+  <button class="btn btn--ghost btn--sm" id="btn-atualizar">Atualizar</button>
+</div>
+
+<div id="handoff-lista"></div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+import { hub } from '/static/js/core/api-client.js';
+import { showToast } from '/static/js/core/toast.js';
+import { confirmar } from '/static/js/core/modal.js';
+import { fmt } from '/static/js/core/format.js';
+
+const $ = (id) => document.getElementById(id);
+
+/* Tempo restante em linguagem de gente: quem opera o painel quer saber se
+   ainda dá tempo de agir, não quantos segundos faltam. */
+function restante(segundos) {
+  if (!segundos) return 'sem prazo definido';
+  const h = Math.floor(segundos / 3600);
+  const m = Math.round((segundos % 3600) / 60);
+  if (h >= 1) return `volta sozinha em ${h}h${m ? ' ' + m + 'min' : ''}`;
+  return `volta sozinha em ${Math.max(m, 1)}min`;
+}
+
+async function carregar() {
+  let d;
+  try {
+    d = await hub.get('/handoffs/data');
+  } catch {
+    $('handoff-resumo').textContent = 'Não deu para ler o estado das conversas.';
+    return;
+  }
+
+  const s = d.sessoes || [];
+  $('handoff-resumo').textContent = s.length
+    ? `${s.length} conversa(s) em atendimento humano`
+    : 'Nenhuma conversa em atendimento humano.';
+
+  $('handoff-lista').innerHTML = s.map((x) => `
+    <div class="handoff-item">
+      <div class="handoff-item__info">
+        <span class="badge ${x.origem === 'whatsapp' ? 'badge--warn' : 'badge--neutral'}">
+          ${x.origem === 'whatsapp' ? 'WhatsApp' : 'simulador do painel'}
+        </span>
+        <code class="handoff-item__id" data-tech="${fmt.esc(x.session_id)}">${fmt.esc(x.session_id)}</code>
+        <span class="caption">${restante(x.expira_em_s)}</span>
+      </div>
+      <button class="btn btn--primary btn--sm" data-devolver="${fmt.esc(x.session_id)}">
+        Devolver ao assistente
+      </button>
+    </div>`).join('');
+
+  $('handoff-lista').querySelectorAll('[data-devolver]').forEach((b) => {
+    b.addEventListener('click', () => devolver(b.dataset.devolver));
+  });
+}
+
+async function devolver(sid) {
+  const ok = await confirmar({
+    titulo: 'Devolver ao assistente',
+    corpo: '<p>O assistente volta a responder essa conversa a partir da ' +
+           'próxima mensagem. A pessoa não é avisada.</p>',
+    acao: 'Devolver',
+  });
+  if (!ok) return;
+
+  try {
+    await hub.post('/handoffs/devolver', { session_id: sid });
+    showToast('Conversa devolvida ao assistente.', 'ok');
+    await carregar();
+  } catch (e) {
+    showToast((e.payload && e.payload.error) || 'Não deu para devolver.', 'error');
+  }
+}
+
+$('btn-atualizar').addEventListener('click', carregar);
+carregar();
+</script>
+
+<style>
+.handoff-view { display: flex; flex-direction: column; gap: var(--sp-4); }
+.handoff-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+
+.handoff-item {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+.handoff-item__info { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
+.handoff-item__id { font-size: 0.8125rem; opacity: .8; word-break: break-all; }
+</style>
+{% endblock %}

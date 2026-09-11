@@ -6,7 +6,7 @@ parte da Fase 2 do plano de integração LangGraph/REST/MCP. Zero testes
 existiam pra este módulo antes desta sessão, apesar de ser lógica de
 domínio pura (sem IO) e ser o coração de toda decisão de autorização do
 Oráculo — tanto no dispatcher.py/dispatcher_langgraph.py legado quanto nos
-nodes nativos do LangGraph (Fase 2d, via agents/tickets/rbac.py).
+nodes nativos do LangGraph (Fase 2d, via domain_services/tickets/rbac.py).
 """
 from __future__ import annotations
 

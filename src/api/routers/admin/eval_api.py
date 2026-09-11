@@ -401,7 +401,7 @@ async def _get_retrieved_chunks(question: str, route: str) -> list[str]:
     try:
         from src.rag.embeddings import get_embeddings
         # 🔥 Atualizado para puxar o normalizar do novo Service
-        from src.agents.academic_knowledge.service import _normalizar
+        from src.rag.knowledge.service import _normalizar
         from src.infrastructure.redis_client import busca_hibrida
         import asyncio as _asyncio
 

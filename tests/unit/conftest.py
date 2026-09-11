@@ -2,9 +2,13 @@ import pytest
 from typing import List, Dict, Any, Type
 from pydantic import BaseModel
 
-# Importamos as tuas interfaces (Ports) e classes de domínio
+# Importamos as tuas interfaces (Ports) e classes de domínio.
+#
+# 2026-09-09 (item A8c): `FakeVectorStore`/`IVectorStorePort` saíram junto com
+# a cadeia de use-cases de RAG que ninguém chamava. O caminho vivo de busca é
+# `redis_client.busca_hibrida()`, com RRF calculado à mão — quem quiser um
+# dublê de busca deve mockar essa função, não um port que não existe mais.
 from src.domain.ports.llm_Provider import ILLMProvider, LLMResponse, T
-from src.domain.ports.vector_store_port import IVectorStorePort
 
 # =====================================================================
 # 1. Implementações "Fake" (Adaptadores de Teste Isolados)
@@ -63,37 +67,8 @@ class FakeLLMProvider(ILLMProvider):
         return response_schema(**dados_falsos)
 
 
-class FakeVectorStore(IVectorStorePort):
-    """
-    Simulador do Banco Vetorial assíncrono.
-    Finge buscar no Redis/Pinecone devolvendo dicionários pré-fabricados.
-    """
-    def __init__(self):
-        self.banco_memoria = []
-        # Formato exato exigido pela tua IVectorStorePort
-        self.resultado_busca = {
-            "vetorial": [],
-            "textual": []
-        }
-
-    async def salvar_chunks(self, chunks: List[Dict[str, Any]]) -> None:
-        self.banco_memoria.extend(chunks)
-
-    async def buscar_contexto(self, query_text: str, k: int, source_filter: str = None) -> Dict[str, List[Dict[str, Any]]]:
-        # Em vez de fazer a matemática vetorial, devolve apenas o que injetamos no teste
-        return self.resultado_busca
-
-
-# =====================================================================
-# 2. Fixtures do Pytest (Injeção de Dependência)
-# =====================================================================
-
 @pytest.fixture
 def fake_llm():
     """Injeta um provedor de LLM falso e limpo para cada teste."""
     return FakeLLMProvider()
 
-@pytest.fixture
-def fake_vector_store():
-    """Injeta um banco vetorial falso e limpo para cada teste."""
-    return FakeVectorStore()

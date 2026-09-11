@@ -38,12 +38,12 @@ Supervisor tinha acertado.
 
 **Bug adicional, mais sutil:** o override trocava só `decision.rota`, e
 **deixava `decision.dag_hint` com o valor antigo** (calculado pra rota
-original do Supervisor). O Planner (Gemini Pro, `agents/academic_knowledge/planning.py`)
+original do Supervisor). O Planner (Gemini Pro, `rag/knowledge/planning.py`)
 recebia `"Rota detectada: GERAL"` mas `"Dica do router: {'steps': ['ticket_abertura']}"`
 — informação contraditória. Diante disso, o modelo "resolvia" sozinho
 escolhendo o worker mais parecido da sua própria whitelist (`VALID_WORKERS`),
 que incluía `crud_confirm` — **um worker que nunca foi implementado de
-verdade** (achado já documentado antes de mim em `agents/tickets/service.py`
+verdade** (achado já documentado antes de mim em `domain_services/tickets/service.py`
 e `capabilities/registry.py`, mas nunca removido da whitelist).
 
 ### O que foi corrigido
@@ -54,7 +54,7 @@ e `capabilities/registry.py`, mas nunca removido da whitelist).
 - `application/runtime/dispatcher.py`: mapeia essas duas ações pras rotas
   `TICKET_ABERTURA`/`CRUD`, **e recalcula `decision.dag_hint` junto com
   `decision.rota`** no override — rota e hint nunca mais ficam dessincronizados.
-- `router/contracts.py` (`VALID_WORKERS`) e `agents/academic_knowledge/planning.py`:
+- `router/contracts.py` (`VALID_WORKERS`) e `rag/knowledge/planning.py`:
   removido `crud_confirm` da whitelist e do prompt do Planner — não existe,
   nunca existiu implementado. Fallback de segurança: se `CRUD`/`TICKET_ABERTURA`
   chegar no Planner por algum caminho que não seja o `dispatcher.py` (não
@@ -118,7 +118,7 @@ reenviava nome/curso de novo. Isso reiniciava o funil (3x no log de teste).
 
 ### Causa raiz
 
-`agents/conversation/registration.py` chamava
+`domain_services/conversation/registration.py` chamava
 `enviar_botoes_confirmacao(number=sender, ...)` — `sender` é o JID do
 **remetente individual dentro do grupo**, não o JID do grupo. Em grupo,
 toda entrega tem que ser endereçada ao JID do **grupo** (`chat_id`/`remote_jid`),
@@ -225,7 +225,7 @@ uma mensagem, sem se coordenarem:
 1. `router/llm_fallback.py::orchestrate()` — ação de alto nível.
 2. `router/supervisor.py::rotear()` — 5 camadas próprias (regex/heurística/
    regex seeded/KNN/Flash), com override do Orquestrador por cima.
-3. `agents/academic_knowledge/planning.py::criar_plano()` — o Planner (Pro)
+3. `rag/knowledge/planning.py::criar_plano()` — o Planner (Pro)
    ainda decide o worker final por conta própria dentro da whitelist
    `VALID_WORKERS`, às vezes ignorando a rota já decidida.
 
@@ -688,7 +688,7 @@ com sinônimos/regex (`validar_tipo`, `validar_categoria`, `validar_confirmacao`
 
 ### 8.4 Fluxo novo: CRUD de cadastro via LangGraph (implementado)
 
-Mesmo escopo do `crud_tool.py` original (`src/agents/tickets/crud_tool.py`)
+Mesmo escopo do `crud_tool.py` original (`src/domain_services/tickets/crud_tool.py`)
 — só `centro`(setor)/`telefone`, não expandido. 4 nodes novos
 (`crud_ask_campo` → `crud_ask_valor` → `crud_confirm` → `crud_save`), mesmo
 padrão 1-interrupt-por-node do ticket. Reaproveita
@@ -769,7 +769,7 @@ nesta rodada (ver `.claude.md` pra o workaround).
 
 ### 9.2 RBAC ausente no funil LangGraph (corrigido)
 
-`checar_permissao_chamado()` (`src/agents/tickets/rbac.py`) já existia e já
+`checar_permissao_chamado()` (`src/domain_services/tickets/rbac.py`) já existia e já
 protegia o fluxo real (`ticket_flow.py`/`crud_tool.py`), mas nunca foi
 portado pro `langgraph_experiment/nodes.py` — qualquer role/status
 conseguia abrir ticket/CRUD via LangGraph. Adicionado no topo dos nodes de
@@ -865,7 +865,7 @@ consciente de NÃO mexer nisso nesta sessão.
   nenhum (já documentado antes, nunca limpo). Removida a entrada de
   `_QUEUES` (`application/workers/registry.py`); comentários repetidos em
   `supervisor.py`/`planning.py` reduzidos a ponteiro pra
-  `agents/tickets/service.py` (mantém o histórico completo).
+  `domain_services/tickets/service.py` (mantém o histórico completo).
 - **`worker_graph`/`graph_extractor`**: confirmado por grep independente
   (não só pela nota antiga) — zero chamadores reais em router/agents/
   use_cases/commands/api. Container removido do `docker-compose.yml` e
@@ -906,7 +906,7 @@ consciente de NÃO mexer nisso nesta sessão.
 - `docker-compose.yml` — volume mount de `langgraph_experiment/`, remoção
   do serviço `worker_graph`.
 - `src/application/workers/registry.py`, `src/router/supervisor.py`,
-  `src/agents/academic_knowledge/planning.py`, `src/capabilities/registry.py`
+  `src/rag/knowledge/planning.py`, `src/capabilities/registry.py`
   — limpeza das referências ao worker fantasma `crud_confirm`.
 
 ### 9.10 Pendências explícitas pra próxima sessão
@@ -2135,7 +2135,7 @@ SIGAA reaproveita `start_or_continue_sigaa()` (zero duplicação); os outros
 
 Fase 2 fechada com cobertura de teste pro RBAC (bloqueio nomeado no ADR
 0001, zero testes existiam antes: `domain/permissions.py`,
-`agents/tickets/rbac.py`) e TD-013 registrado (Gatekeeper reescreve toda
+`domain_services/tickets/rbac.py`) e TD-013 registrado (Gatekeeper reescreve toda
 decisão `IGNORE` pra `LLM` incondicionalmente — pré-existente em `main`,
 não corrigido, fora do escopo das 7 decisões).
 
@@ -2206,7 +2206,7 @@ crashavam no boot com `PermissionError: [Errno 13] Permission denied:
 '/tmp/sigaa_downloads'`. Causa: `celery_app.py::include=[...]` importa
 TODOS os módulos de worker no boot de qualquer processo, independente de
 `--queues` — então `worker_rag` importa `worker_sigaa.py` →
-`agents/sigaa/service.py` → `capabilities/sigaa/browser.py`, que cria
+`domain_services/sigaa/service.py` → `capabilities/sigaa/browser.py`, que cria
 `DOWNLOAD_DIR` (`/tmp/sigaa_downloads`) **como efeito colateral do
 import**, não sob demanda. Como `/tmp` do container é bind-mount de
 `dados/tmp` no host, um `dados/tmp` sem permissão de escrita pro usuário

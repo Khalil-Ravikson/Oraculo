@@ -325,7 +325,7 @@ def _enviar(chat_id: str, texto: str) -> None:
     """Envia mensagem ao admin via Evolution API."""
     import asyncio
     try:
-        from src.services.evolution_service import EvolutionService
+        from src.infrastructure.services.evolution_service import EvolutionService
         svc = EvolutionService()
         asyncio.run(svc.enviar_mensagem(chat_id, texto))
     except Exception as e:

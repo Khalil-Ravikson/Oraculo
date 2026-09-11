@@ -120,6 +120,11 @@ async def _startup(settings) -> None:
         from src.application.orchestration import loader as graph_loader
         await graph_loader.hydrate_redis()
 
+        # Menu do bot (item C2.5): espelha o menu ativo no Redis, de onde ele
+        # é lido em toda mensagem. Nunca crítico — cai no menu embutido.
+        from src.application.menu import loader as menu_loader
+        await menu_loader.hydrate_redis_menu()
+
 
     except Exception as exc:
         logger.error("❌ Falha crítica no Redis/Seeder: %s", exc)
@@ -149,18 +154,9 @@ async def _startup(settings) -> None:
     except Exception as exc:
         logger.warning("⚠️  Falha ao pré-aquecer componentes de IA: %s", exc)
 
-    # 2b. Agent Registry (Fase 2/5 do PLANO_REFATORACAO_SUPERVISOR.md)
-    try:
-        from src.agents.bootstrap import register_all_agents
-        from src.agents.registry import registry
-        await register_all_agents()
-        logger.info("✅ [AGENT REGISTRY] Agentes disponíveis: %s", [a.name for a in registry.all()])
-    except Exception as exc:
-        logger.warning("⚠️  Falha ao registrar agentes: %s", exc)
-
     # 3. Gateway WhatsApp (Evolution API)
     try:
-        from src.services.evolution_service import EvolutionService
+        from src.infrastructure.services.evolution_service import EvolutionService
         await EvolutionService().inicializar()
         logger.info("✅ Gateway WhatsApp (Evolution) ativo")
     except Exception as exc:

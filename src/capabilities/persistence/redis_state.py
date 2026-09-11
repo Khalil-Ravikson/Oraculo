@@ -8,7 +8,7 @@ PLANO_REFATORACAO_SUPERVISOR.md, seção 2.2 ponto 4).
 Capability "burra": só encapsula as chamadas Redis já existentes (mesmas
 chaves, mesmos TTLs). Nenhuma decisão de negócio aqui — quem decide o que
 fazer com o estado é `application/runtime/dispatcher.py` e
-`agents/sigaa/auth_flow.py`.
+`domain_services/sigaa/auth_flow.py`.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ RESULTS_TTL            = 120
 HITL_SESSION_TTL       = 300
 AUTH_TOKEN_TTL         = 300
 
-# Rascunho do funil de tickets (agents/tickets/ticket_flow.py) — chave própria
+# Rascunho do funil de tickets (domain_services/tickets/ticket_flow.py) — chave própria
 # para não colidir com hitl:session:* do SIGAA. TTL mais longo (18min) porque
 # o funil tem mais passos que a autenticação SIGAA. O marker sobrevive um
 # pouco mais que o draft só para permitir avisar o usuário na mensagem

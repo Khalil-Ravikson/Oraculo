@@ -34,7 +34,10 @@ class ScrapingService:
     def __init__(
         self,
         queue: Any | None = None,           # ScrapeQueueProducer | InMemoryQueue
-        rag_ingestion: Any | None = None,   # IngestionPipeline (opcional)
+        # Sentinela de "ingerir no RAG ao raspar". Qualquer valor verdadeiro
+        # liga; `scrape()` não usa o objeto, só testa a verdade dele. Manter
+        # `Any` para não quebrar quem passe um pipeline de verdade um dia.
+        rag_ingestion: Any | None = None,
         max_concurrency: int = 5,
     ):
         self._scrapers: list[BaseScraper] = []
@@ -251,7 +254,19 @@ def build_default_scraping_service(
         from .implementations.dokuwiki.hierarchy import RedisGraphStore
         graph_store = RedisGraphStore(redis_client)
 
-    service = ScrapingService(queue=queue, max_concurrency=5)
+    # `ingest_to_rag` chegava como parâmetro da fábrica e NUNCA era repassado
+    # — `ScrapingService.__init__` recebia só `queue`/`max_concurrency`, então
+    # `self._rag` ficava None e `_ingest_to_rag` jamais rodava. Resultado:
+    # scraping bem-sucedido, log de "✅ Scraped", e nada no índice de busca.
+    # Achado em 2026-09-11 rodando a ingestão da wiki inteira: 320 páginas
+    # raspadas, índice parado nos mesmos 30 trechos.
+    #
+    # O valor é um sentinela, não um pipeline: `scrape()` só checa se é
+    # verdadeiro antes de chamar `_ingest_to_rag`, que resolve as próprias
+    # dependências (chunker, embeddings, `salvar_chunk`).
+    service = ScrapingService(
+        queue=queue, rag_ingestion=ingest_to_rag or None, max_concurrency=5,
+    )
     service.register(_mk(WikipediaScraper))
 
     service.register(_mk(GenericHTTPScraper), fallback=True)

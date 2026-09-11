@@ -1,54 +1,77 @@
 # observability/alert_rules.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# Regras de alerta do Prometheus — REESCRITAS em 2026-09-09 (item B7).
+#
+# O que este arquivo tinha antes: sete alertas, dos quais SEIS referenciavam
+# métricas que não existem em lugar nenhum do código
+# (`oraculo_tokens_total`, `oraculo_stt_requests_total`,
+# `oraculo_tts_requests_total`, `oraculo_vision_requests_total`,
+# `oraculo_vision_latency_ms_bucket`). Um alerta que consulta uma métrica
+# inexistente nunca dispara e nunca falha — ele simplesmente dá a impressão
+# de que alguém está vigiando. Foram removidos.
+#
+# ── Por que sobrou tão pouco ─────────────────────────────────────────────
+# O `prometheus.yml` coleta três alvos: `oraculo_api`, `redis_exporter` e o
+# próprio Prometheus. **Os workers Celery não são coletados** — não expõem
+# `/metrics` e não estão em nenhum `scrape_config`. Como praticamente todo
+# `oraculo_*` é emitido dentro de um worker (roteamento, RAG, síntese, cache
+# semântico, circuit-breaker), nada disso chega aqui. Enquanto isso não
+# mudar, alerta sobre comportamento da aplicação neste arquivo seria ficção.
+#
+# ── Onde a observabilidade do v1 realmente está ──────────────────────────
+#   * custo e tokens por rota  → Postgres `metricas_llm` → /hub/llm-custo
+#   * saúde de infra e índices → /hub/infra/{health,storage,search}
+#   * circuito de LLM aberto   → mensagem de WhatsApp para SUPPORT_GROUP_JID
+#     (`adapters/llm_circuit_breaker.py::_avisar_suporte`) — este é o "um
+#     alerta real que chega a uma pessoa" do checklist de produção, e ele
+#     não passa por aqui de propósito, justamente porque roda no worker.
+#
+# ── Para voltar a alertar sobre a aplicação ──────────────────────────────
+# Seria preciso, nesta ordem: (1) expor `/metrics` nos workers Celery;
+# (2) adicionar um `scrape_config` para eles; (3) só então escrever a regra.
+# Sem os dois primeiros passos, não adicione regra nenhuma aqui.
+#
+# NOTA: não há Alertmanager neste projeto. Um alerta que dispara aqui fica
+# visível na UI do Prometheus e em nenhum outro lugar.
+# ─────────────────────────────────────────────────────────────────────────────
+
 groups:
-  - name: oraculo_alerts
+  - name: oraculo_infra
     rules:
+      # Vem do redis_exporter, que É coletado. Redis fora derruba o bot
+      # inteiro: fila do Celery, checkpoint do LangGraph, índice do RAG e
+      # estado do menu vivem todos nele.
       - alert: RedisDown
         expr: redis_up == 0
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "Redis offline"
+          summary: "Redis offline — o bot está mudo"
+          description: "Fila, checkpoint, índice do RAG e estado do menu dependem do Redis."
 
-      - alert: HighTokenUsage
-        expr: increase(oraculo_tokens_total[5m]) > 10000
+      # `up` é gerado pelo próprio Prometheus para cada alvo, então este
+      # alerta funciona sem nenhuma métrica da aplicação.
+      - alert: ApiDown
+        expr: up{job="oraculo_api"} == 0
         for: 2m
         labels:
-          severity: warning
+          severity: critical
+          # Não cobre os workers: eles não são alvo de scrape. Uma API de pé
+          # com todos os workers mortos NÃO dispara este alerta.
         annotations:
-          summary: "Uso de tokens acima do esperado"
+          summary: "API do Oráculo não responde ao scrape"
 
-      # ── Multimodal (STT/TTS/Vision) — limiares iniciais, ajustar após dado
-      # real de produção (ver roadmap: notas.md seção 11). Editar os números
-      # abaixo é o "ajustável" pedido — não exige mudar código Python.
-      - alert: HighSTTFailureRate
-        expr: increase(oraculo_stt_requests_total{resultado="falha"}[5m]) > 5
-        for: 2m
+      # Crescimento de memória é o risco concreto conhecido: o `thread_id` é
+      # fixo por sessão e os checkpoints do LangGraph não expiravam sozinhos
+      # até o item B10 (`beat_checkpoint_gc`, desligado por padrão).
+      - alert: RedisMemoriaAlta
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "Taxa de falha alta em transcrição de áudio (STT)"
-
-      - alert: HighTTSFailureRate
-        expr: increase(oraculo_tts_requests_total{resultado="falha"}[5m]) > 5
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Taxa de falha alta em síntese de voz (TTS)"
-
-      - alert: HighVisionFailureRate
-        expr: increase(oraculo_vision_requests_total{resultado="falha"}[5m]) > 5
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Taxa de falha alta em extração de imagem (Vision)"
-
-      - alert: HighVisionLatency
-        expr: histogram_quantile(0.95, rate(oraculo_vision_latency_ms_bucket[5m])) > 5000
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "p95 de latência de Vision acima de 5s"
+          summary: "Redis acima de 85% da memória máxima"
+          description: >-
+            Verifique o crescimento de `checkpoint:*`. O job `beat_checkpoint_gc`
+            aplica TTL nessas chaves, mas só quando CHECKPOINT_TTL_HORAS > 0.

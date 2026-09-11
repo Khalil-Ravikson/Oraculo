@@ -1,5 +1,5 @@
 """
-infrastructure/redis_client.py — v4 (RedisVL + SVS-VAMANA + backward-compat)
+infrastructure/redis_client.py — v4 (RedisVL + HNSW + backward-compat)
 ==============================================================================
 
 REGRA DE OURO DESTA TRANSIÇÃO:
@@ -20,11 +20,14 @@ FUNÇÕES MANTIDAS SÍNCRONAS (Celery compat):
 
 FUNÇÕES ASYNC (FastAPI/LangGraph):
   inicializar_indices()     → startup FastAPI
-  get_async_chunks_index()  → RedisVLVectorAdapter
+  get_async_chunks_index()  → factory de índice async (sem consumidor hoje)
 
-ALGORITMO SVS-VAMANA:
-  Substituímos HNSW por SVS-VAMANA (graph_max_degree=32).
-  ATENÇÃO: requer drop e re-ingestão se havia índice HNSW.
+ALGORITMO — HNSW (corrigido em 2026-09-09, item A9):
+  Os dois índices (`idx:rag:chunks` e `idx:tools`) são criados com
+  `"algorithm": "HNSW"` — ver os schemas abaixo, M=16 e EF=200. Esta
+  docstring afirmava SVS-VAMANA e dizia que ele havia "substituído o HNSW";
+  isso nunca chegou ao código, e a linha de log de criação repetia a mesma
+  informação errada. Trocar de algoritmo exigiria drop e reingestão:
     redis-cli FT.DROPINDEX idx:rag:chunks DD
     redis-cli FT.DROPINDEX idx:tools DD
 
@@ -54,7 +57,25 @@ from src.infrastructure.settings import settings
 logger = logging.getLogger(__name__)
 
 # ─── Constantes ───────────────────────────────────────────────────────────────
-VECTOR_DIM     = 3072        # gemini-embedding-001, validado em produção
+def _vector_dim() -> int:
+    """Dimensão do vetor do índice, derivada do provedor de embedding ativo.
+
+    Era a constante `VECTOR_DIM = 3072`, fixa. O problema: `EMBEDDING_PROVIDER`
+    é configurável e a dimensão não acompanhava — virar a chave para `local`
+    deixava o índice esperando 3072 contra vetores de outra dimensão, e a
+    busca passava a falhar ou devolver lixo **sem erro nenhum**.
+
+    Import tardio de propósito: `rag/embeddings.py` puxa dependências pesadas,
+    e este módulo é importado no caminho quente."""
+    from src.rag.embeddings import dimensao_do_provedor
+
+    return dimensao_do_provedor()
+
+
+# Compatibilidade: vários pontos ainda leem a constante. Resolvida uma vez, no
+# import, porque trocar o provedor exige reiniciar o processo de qualquer jeito
+# (o modelo é cacheado por processo).
+VECTOR_DIM     = _vector_dim()
 IDX_CHUNKS     = "idx:rag:chunks"
 IDX_TOOLS      = "idx:tools"
 PREFIX_CHUNKS  = "rag:chunk:"
@@ -70,7 +91,13 @@ HNSW_EF = 200
 # ─── Schemas RedisVL ──────────────────────────────────────────────────────────
 def _schema_chunks() -> IndexSchema:
     return IndexSchema.from_dict({
-        "index": {"name": IDX_CHUNKS, "prefix": PREFIX_CHUNKS, "storage_type": "json"},
+        # HASH e não JSON (2026-09-11): o RedisJSON guardava o embedding como
+        # array de 3072 números em texto — 81 KB por trecho, medido. Em HASH o
+        # vetor vai como float32 binário e o mesmo trecho ocupa 21 KB.
+        # Redução de 74%, com a busca vetorial filtrada por `doc_type` e
+        # `sistema` funcionando idêntica (comparado lado a lado antes de
+        # migrar). A wiki inteira saiu de ~1,34 GB para ~355 MB.
+        "index": {"name": IDX_CHUNKS, "prefix": PREFIX_CHUNKS, "storage_type": "hash"},
         "fields": [
             {"name": "content",     "type": "text",    "attrs": {"weight": 2.0}},
             {"name": "source",      "type": "tag"},
@@ -99,7 +126,7 @@ def _schema_chunks() -> IndexSchema:
     })
 
 def _schema_tools() -> IndexSchema:
-    """Schema SVS-VAMANA para routing semântico."""
+    """Schema HNSW para routing semântico."""
     return IndexSchema.from_dict({
         "index": {
             "name":         IDX_TOOLS,
@@ -178,7 +205,11 @@ def redis_ok() -> bool:
         return False
 
 
-# ─── AsyncSearchIndex factories (para RedisVLVectorAdapter) ─────────────────
+# ─── AsyncSearchIndex factories ────────────────────────────────────────────
+# Sem consumidor desde a remoção do `RedisVLVectorAdapter` (2026-09-09, item
+# A8c). Mantidas porque `inicializar_indices()` logo abaixo usa os mesmos
+# schemas e porque criar um índice async é a forma correta de fazer isso a
+# partir do FastAPI. Se continuarem sem chamador na próxima varredura, saem.
 
 def get_async_chunks_index() -> AsyncSearchIndex:
     """
@@ -194,9 +225,51 @@ def get_async_tools_index() -> AsyncSearchIndex:
 
 # ─── Inicialização de índices (ASYNC — chamado no startup FastAPI) ────────────
 
+async def _avisar_se_dimensao_divergir(index, name: str) -> None:
+    """Compara a dimensão do índice EXISTENTE com a do provedor ativo.
+
+    É a trava que faltava para trocar de modelo de embedding com segurança.
+    Sem ela, a troca "funciona": o sistema sobe, a busca roda, e devolve
+    resultado sem sentido — vetores de modelos diferentes não vivem no mesmo
+    espaço, mas o Redis não tem como saber disso.
+
+    Só AVISA, não derruba. Um índice com dimensão errada é um problema de
+    operação (exige drop e reingestão, decisão de quem opera), não algo que se
+    resolva impedindo a API de subir — o bot ficaria fora do ar sem que a
+    busca fosse o único caminho afetado."""
+    try:
+        info = await index.info()
+        attrs = info.get("attributes", []) if isinstance(info, dict) else []
+        for attr in attrs:
+            # O RediSearch devolve cada atributo como lista PLANA de pares
+            # ('identifier', '$.content', 'attribute', 'content', 'type', ...),
+            # não como dicionário — a primeira versão desta checagem assumiu
+            # dicionário e nunca disparava.
+            if isinstance(attr, dict):
+                campos = attr
+            elif isinstance(attr, (list, tuple)):
+                itens = [x.decode() if isinstance(x, (bytes, bytearray)) else str(x) for x in attr]
+                campos = dict(zip(itens[::2], itens[1::2]))
+            else:
+                continue
+
+            dim_atual = campos.get("dim") or campos.get("DIM")
+            if dim_atual and int(dim_atual) != VECTOR_DIM:
+                logger.error(
+                    "🚨 [RAG] Índice '%s' tem dimensão %s, mas o provedor de "
+                    "embedding ativo gera %d. A busca vai devolver resultado "
+                    "sem sentido. Troca de modelo exige recriar o índice e "
+                    "reingerir: FT.DROPINDEX %s DD",
+                    name, dim_atual, VECTOR_DIM, name,
+                )
+                return
+    except Exception:  # noqa: BLE001 — checagem best-effort, nunca bloqueia o boot
+        logger.debug("Não foi possível conferir a dimensão de '%s'.", name, exc_info=True)
+
+
 async def inicializar_indices() -> None:
     """
-    Cria índices SVS-VAMANA de forma idempotente.
+    Cria os índices (HNSW) de forma idempotente.
     DEVE ser chamado com `await` no startup do FastAPI.
     NÃO chamar de dentro de tasks Celery.
     """
@@ -206,10 +279,11 @@ async def inicializar_indices() -> None:
         try:
             exists = await index.exists()
             if exists:
-                logger.info("ℹ️  Índice '%s' já existe (SVS-VAMANA).", name)
+                await _avisar_se_dimensao_divergir(index, name)
+                logger.info("ℹ️  Índice '%s' já existe (HNSW).", name)
             else:
                 await index.create(overwrite=False)
-                logger.info("✅ Índice '%s' criado (SVS-VAMANA, dim=%d).", name, VECTOR_DIM)
+                logger.info("✅ Índice '%s' criado (HNSW, dim=%d).", name, VECTOR_DIM)
         except Exception as exc:
             logger.exception("❌ Falha ao criar índice '%s' | erro: %s", name, exc)
             raise
@@ -224,6 +298,16 @@ async def inicializar_indices() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 # src/infrastructure/redis_client.py — salvar_chunk()
+def _vetor_bytes(embedding) -> bytes:
+    """Embedding → float32 binário, no formato que o RediSearch espera em HASH.
+
+    Aceita lista, tupla ou array. Já em bytes, passa direto — alguns
+    chamadores podem ter convertido antes."""
+    if isinstance(embedding, (bytes, bytearray)):
+        return bytes(embedding)
+    return np.asarray(embedding, dtype=np.float32).tobytes()
+
+
 def salvar_chunk(chunk_id, content, source, doc_type, embedding,
                  chunk_index=0, metadata=None):
     r = get_redis()
@@ -234,7 +318,10 @@ def salvar_chunk(chunk_id, content, source, doc_type, embedding,
         "source":      source,
         "doc_type":    doc_type,
         "chunk_index": chunk_index,
-        "embedding":   embedding,
+        # float32 binário, não lista de floats: em HASH o Redis guarda os
+        # bytes crus. Como lista JSON, cada número virava texto e o trecho
+        # inteiro custava 4x mais memória.
+        "embedding":   _vetor_bytes(embedding),
         # Taxonomia — usa "Geral"/"Todos" como default seguro
         "eixo":        meta.get("eixo", "Institucional"),
         "setor":       meta.get("setor", "Geral"),
@@ -246,7 +333,7 @@ def salvar_chunk(chunk_id, content, source, doc_type, embedding,
         "label":       meta.get("label", ""),
         "indexed_at":  int(__import__("time").time()),
     }
-    r.json().set(key, "$", doc)
+    r.hset(key, mapping=doc)
 
 def deletar_chunks_por_source(source: str) -> int:
     """Remove todos os chunks de um source (SÍNCRONO). Retorna total deletado."""
@@ -288,8 +375,10 @@ def busca_hibrida(
       - rag_search_service.py
       - calendar_parser.py
 
-    Para novos consumers, prefer RedisVLVectorAdapter.buscar_hibrido() (async).
-    Esta função continuará sendo mantida enquanto as tools síncronas existirem.
+    **Este é o caminho de busca de produção.** A recomendação anterior aqui
+    mandava preferir `RedisVLVectorAdapter.buscar_hibrido()` — esse adapter
+    emitia `FT.HYBRID`, não suportado nesta versão do Redis Stack, nunca teve
+    consumidor, e foi removido em 2026-09-09 (item A8c, TD-015/TD-023).
     """
     r = get_redis()
 

@@ -12,6 +12,23 @@ infrastructure/celery_app.py — configuração do Celery
 import asyncio
 import os
 import logging
+
+# ── Diretório de métricas multiprocesso (TD-019) ─────────────────────────────
+# Precisa existir ANTES de qualquer import que declare métrica: o
+# `prometheus_client` abre um arquivo por métrica no momento da declaração, e
+# módulos como `workers/worker_rag_search.py` e `tasks/beat_nightly_memory.py`
+# declaram as suas no nível do módulo, fora de `observability/metrics.py`.
+#
+# Este é o ponto de entrada de todo worker Celery, então é o lugar mais cedo
+# que existe. Tentar criar no `worker_ready` falhava com
+# `FileNotFoundError: .../histogram_1.db` e deixava o worker em ciclo de
+# reinício — aprendido na prática, não na teoria.
+if os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+    try:
+        os.makedirs(os.environ["PROMETHEUS_MULTIPROC_DIR"], exist_ok=True)
+    except OSError:  # noqa: BLE001 — métrica nunca impede o worker de subir
+        os.environ.pop("PROMETHEUS_MULTIPROC_DIR", None)
+
 from celery import Celery
 from celery.schedules import crontab
 from celery.signals import worker_ready
@@ -49,14 +66,18 @@ celery_app.conf.update(
         "src.application.workers.worker_rag_search",    # ← NOVO
         "src.application.workers.worker_synthesis",     # ← NOVO
         "src.application.tasks.beat_nightly_memory",    # ← NOVO
+        "src.application.tasks.beat_checkpoint_gc",     # B10: TTL nos checkpoints
         "src.application.workers.worker_audio_to_text",
         "src.application.workers.worker_text_to_audio",
         "src.application.workers.worker_media_download",
-        "src.application.workers.worker_graph_extractor",
-        "src.application.workers.worker_db_connector",
-        "src.application.workers.worker_memory_manager",
-        "src.application.workers.worker_reranker",
         "src.application.workers.worker_sigaa",
+        "src.application.tasks.wiki_ingest_tasks",   # ingestão em lote da wiki
+        "src.application.tasks.pricing_tasks",       # catálogo de preços (OpenRouter)
+        # Removidos em 2026-09-09 (item A8b): worker_graph_extractor,
+        # worker_db_connector, worker_memory_manager e worker_reranker não
+        # tinham NENHUM chamador no repositório — nenhum .delay(),
+        # .apply_async() ou send_task() — mas continuavam sendo importados no
+        # boot de todo worker. Ver TD-022.
     ],
 
     # ── Beat Schedule ─────────────────────────────────────────────────────────
@@ -85,9 +106,35 @@ celery_app.conf.update(
         # a cada 6h é sobra de margem pra câmbio (não é day-trading), evita
         # martelar a API gratuita. Só ATUALIZA o valor auto; override manual
         # via /hub/llm-custo continua tendo precedência (ver pricing.py::taxa_brl_ativa).
+        # Revisita a wiki de madrugada. Sem `forcar`: o cache de scraping
+        # devolve página inalterada sem rebaixar nem re-embeddar, então uma
+        # wiki parada custa quase nada — o que mudou entra, o resto é barato.
+        "wiki_reingest_diario": {
+            "task":     "reingerir_wiki_ctic_periodico",
+            "schedule": crontab(hour=4, minute=30),
+            "options":  {"queue": "admin"},
+        },
+        # Catálogo de preços do OpenRouter — a ÚNICA parte da telemetria de
+        # custo que fala com a internet. O resolvedor, que roda em toda
+        # resposta de LLM, só lê o cache que esta tarefa preenche. Preço de
+        # modelo muda em semanas; de 12 em 12 horas é folga suficiente.
+        "atualizar_catalogo_precos": {
+            "task":     "atualizar_catalogo_precos",
+            "schedule": crontab(minute=15, hour="*/12"),
+            "options":  {"queue": "admin"},
+        },
         "atualizar_taxa_brl": {
             "task":     "atualizar_taxa_brl",
             "schedule": crontab(minute=0, hour="*/6"),
+            "options":  {"queue": "default"},
+        },
+        # Higiene dos checkpoints do LangGraph (item B10). Uma vez por dia,
+        # de madrugada: a task só põe TTL em chave que ainda não tem, então
+        # rodar mais vezes não adiantaria nada. Desligada por padrão
+        # (CHECKPOINT_TTL_HORAS=0) — ver a docstring do módulo.
+        "checkpoint_gc_diario": {
+            "task":     "beat_checkpoint_gc",
+            "schedule": crontab(hour=3, minute=30),
             "options":  {"queue": "default"},
         },
     },
@@ -104,14 +151,15 @@ celery_app.conf.update(
         "worker_synthesis":           {"queue": "synthesis"},
         "beat_nightly_memory_sync":   {"queue": "default"},
         "atualizar_taxa_brl":         {"queue": "default"},
+        # Ingestão da wiki vai para `admin`: é lenta (centenas de páginas) e
+        # não pode competir com mensagem de usuário na fila `default`.
+        "ingerir_wiki_ctic":            {"queue": "admin"},
+        "atualizar_catalogo_precos":    {"queue": "admin"},
+        "reingerir_wiki_ctic_periodico": {"queue": "admin"},
         "worker_audio_to_text":   {"queue": "media"},
         "worker_text_to_audio":   {"queue": "media"},
         "worker_ytb_download":    {"queue": "media"},
         "worker_insta_download":  {"queue": "media"},
-        "worker_graph_extractor": {"queue": "graph"},
-        "worker_db_connector":    {"queue": "default"},
-        "worker_memory_manager":  {"queue": "default"},
-        "worker_reranker":        {"queue": "rag_search"},
         "worker_sigaa_biblioteca":      {"queue": "default"},
         "worker_sigaa_extensao":        {"queue": "default"},
         "worker_sigaa_processos":       {"queue": "default"},
@@ -204,6 +252,16 @@ def on_worker_process_init(**kwargs):
     except Exception as e:
         logger.warning("⚠️ [CELERY] Falha ao hidratar graph_spec: %s", e)
 
+    # Menu do bot (item C2.5): o menu é lido em TODA mensagem, do espelho
+    # Redis. Sem esta hidratação, a primeira mensagem depois de um deploy
+    # pagaria uma consulta ao Postgres — e um Redis limpo com o menu editado
+    # no banco só convergiria no primeiro acesso de um usuário real.
+    try:
+        from src.application.menu import loader as menu_loader
+        run_in_worker_loop(menu_loader.hydrate_redis_menu())
+    except Exception as e:
+        logger.warning("⚠️ [CELERY] Falha ao hidratar o menu: %s", e)
+
     if os.environ.get("CELERY_PRELOAD_RERANKER", "false").lower() != "true":
         return
     try:
@@ -247,6 +305,21 @@ def on_worker_ready(sender=None, **kwargs):
     """
     tasks = [t for t in celery_app.tasks.keys() if not t.startswith("celery.")]
     logger.info("✅ [CELERY] Worker pronto. Tasks (%d): %s", len(tasks), tasks)
+
+    # ── Endpoint de métricas do worker (TD-019) ───────────────────────────────
+    # Roda no processo PRINCIPAL, servindo o agregado dos filhos via modo
+    # multiprocesso — as métricas são incrementadas nos filhos, que são
+    # reciclados por `--max-tasks-per-child`. Ver `observability/metrics_server.py`.
+    #
+    # Sem isto, tudo o que o Oráculo mede de verdade (LLM, RAG, roteamento)
+    # era emitido em worker e nunca chegava ao Prometheus.
+    try:
+        from src.infrastructure.observability import metrics_server
+
+        metrics_server.limpar_diretorio()
+        metrics_server.iniciar_servidor(int(os.environ.get("METRICS_PORT", "9100")))
+    except Exception as exc:  # noqa: BLE001 — métrica nunca derruba o worker
+        logger.warning("⚠️ [CELERY] Falha ao expor métricas do worker: %s", exc)
 
     # ── Recovery de XPENDING ──────────────────────────────────────────────────
     try:

@@ -83,8 +83,8 @@ async def test_responder_rag_direto_via_celery_nao_consulta_rag_synthesis_in_pro
 
     with patch("src.infrastructure.semantic_cache.SemanticCache", return_value=cache_instance), \
          patch("celery.chord", chord_cls), \
-         patch("src.agents.academic_knowledge.service.RAGSearchService", rag_cls), \
-         patch("src.agents.academic_knowledge.synthesis.SynthesisService", synth_cls):
+         patch("src.rag.knowledge.service.RAGSearchService", rag_cls), \
+         patch("src.rag.knowledge.synthesis.SynthesisService", synth_cls):
         await responder_rag_direto("qual o calendário?", rota="CALENDARIO")
 
     rag_cls.assert_not_called()

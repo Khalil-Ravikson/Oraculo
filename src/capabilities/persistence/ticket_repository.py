@@ -40,7 +40,7 @@ async def atualizar_setor_e_telefone(
 ) -> bool:
     """Escopo pelo telefone atual do remetente (mesmo cuidado de
     `atualizar_email_por_telefone`). Usado pela CRUD tool de teste
-    (`agents/tickets/crud_tool.py`) — gateada por `DEV_TEST_NO_DB_WRITE` no
+    (`domain_services/tickets/crud_tool.py`) — gateada por `DEV_TEST_NO_DB_WRITE` no
     chamador, esta função só faz a escrita real quando de fato invocada."""
     if not novo_centro and not novo_telefone:
         return False

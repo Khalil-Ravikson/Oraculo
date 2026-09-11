@@ -35,72 +35,103 @@ O **Oráculo UEMA** é um agente inteligente universitário. Pense nele como um
 assistente 24h que responde perguntas dos alunos, professores e funcionários da
 UEMA pelo WhatsApp — sem precisar ligar para a secretaria, sem esperar atendimento.
 
-**O que ele sabe responder?**
+**No v1 ele é um bot de menu.** O usuário digita um número e o bot responde
+de forma determinística. Isso não é uma limitação temporária de
+implementação: é a decisão de produto, porque torna o custo previsível e a
+taxa de erro baixa. Ver [`docs/ESTADO_ATUAL.md`](docs/ESTADO_ATUAL.md).
 
-- 📅 Datas do calendário acadêmico (matrícula, provas, feriados, início de semestre)
-- 📋 Informações do edital PAES 2026 (vagas, cotas, procedimentos)
-- 📞 Contatos de departamentos (PROG, CTIC, CECEN, reitoria)
-- 💻 Suporte técnico e sistemas (SIGAA, senha, Wi-Fi)
-- 📂 Qualquer documento que o administrador ingira no sistema
-- 🎙️ Nota de voz (transcrita via Gemini STT) e resposta em áudio sob pedido (Kokoro TTS)
+**O que ele responde hoje**
 
-**O que ele NÃO faz (por segurança)?**
+- 💻 Sistemas da UEMA — SIGAA e SIPAC, a partir da wiki da CTIC
+- 🔑 Acesso — senha, usuário, e-mail institucional, Wi-Fi
+- 📞 Telefones e setores da UEMA
+- 🙋 Encaminhamento para um atendente humano da CTIC
+- 🎙️ Nota de voz, transcrita por Gemini STT
 
-- Não executa ações críticas sem confirmação humana (ex: alterar cadastro)
-- Não responde perguntas fora do contexto da UEMA
-- Não atende usuários não cadastrados ou inativos
+**O que fica para depois** (cada um volta como um item de menu novo, sem
+retrabalho de arquitetura)
+
+- 📅 Calendário acadêmico
+- 📋 Edital PAES
+- 🎓 Notas e histórico no SIGAA — exige login por conversa
+- 🎫 Abertura de chamado formal no GLPI — hoje coberto por "falar com um
+  atendente"
+
+**O que ele não faz, por decisão**
+
+- Não age sozinho: não existe agente autônomo decidindo chamadas de
+  ferramenta em loop
+- Não classifica sua intenção com IA — quem roteia é o menu
+- Não atende usuário bloqueado ou inativo
 
 ---
 
 ## 2. Visão Geral da Arquitetura
 
-> 📖 Diagrama completo, com todas as camadas e decisões técnicas:
-> [`docs/architecture/arquitetura_oraculo.md`](docs/architecture/arquitetura_oraculo.md)
-> (fonte oficial). Esta seção é um resumo de onboarding.
+> Reescrita em 2026-09-09 (item A3). A versão anterior mostrava
+> `dispatcher_langgraph.py` e um "Planner (DAG de workers)" — o Planner foi
+> deletado pela ADR 0008 e o dispatcher virou
+> `application/orchestration/entrypoint.py`.
+>
+> 📖 Detalhe completo: [`docs/architecture/arquitetura_oraculo.md`](docs/architecture/arquitetura_oraculo.md).
+> Escopo do v1, flags e checklist de produção:
+> [`docs/ESTADO_ATUAL.md`](docs/ESTADO_ATUAL.md).
 
-WhatsApp (usuário)
-│
-▼
-Evolution API ──→ Webhook FastAPI
-│
-▼
-[PORTEIRO PostgreSQL]
-Valida: telefone, status, role
-│
-▼
-[LOCK Redis]
-Anti-spam, anti-duplicação
-│
-▼
-Celery Worker (background)
-│
-├─── gatekeeper.py ──→ pré-filtro (ignorar/registro/comando/LLM)
-│         │
-│         ▼
-│    router/supervisor.py ──→ classificação (regex → heurística → Flash)
-│         │
-│         ▼
-│    dispatcher_langgraph.py ──→ orquestrador de produção
-│         │
-│         ├── load_memory  (Redis)
-│         ├── Planner      (DAG de workers especializados)
-│         ├── retrieve     (busca híbrida Redis, RAG)
-│         ├── grade_docs   (CRAG score)
-│         ├── generate     (Gemini/DeepSeek/Groq via llm_factory)
-│         └── save_memory  (Redis)
-│
-└─── resposta → Evolution API → WhatsApp
+```
+WhatsApp
+   │
+   ▼
+Evolution API ──→ Webhook FastAPI (responde 200 na hora)
+   │
+   ▼
+[PORTEIRO Postgres]  telefone, status, RBAC
+   │
+   ▼
+[LOCK Redis]  lock:msg:{phone}, TTL 90s — serializa a sessão
+   │
+   ▼
+Celery worker (fila default)
+   │
+   ├─ gatekeeper.py ──→ pré-filtro
+   │
+   ▼
+application/orchestration/entrypoint.py   ← ORQUESTRADOR ÚNICO (ADR 0008)
+   │
+   ├─ sessão em atendimento humano? → silencia
+   ├─ fast-paths: áudio (STT), mídia sem legenda, labs
+   ├─ guardrails de entrada
+   ├─ funil pausado? → retoma de onde parou
+   │
+   ├─ MOTOR DE MENU (v1) ─┬─ menu / texto fixo → responde aqui   ⟵ 0 token
+   │                      ├─ pedir atendente → nó human_handoff  ⟵ 0 token
+   │                      └─ pergunta → grafo, rota já decidida
+   ▼
+StateGraph (LangGraph) — topologia é DADO (GraphSpec), não código
+   │
+   ├─ classify_node — não faz nada quando o menu já decidiu
+   ▼
+nó da rota
+   └─ rag → busca híbrida no Redis → síntese (Gemini/DeepSeek/Groq)
+   │
+   ▼
+resposta + tela "Isso ajudou?" → Evolution API → WhatsApp
+```
 
-> ⚠️ O pipeline `OracleChain`/LangChain Runnables descrito em versões
-> anteriores deste README foi removido do código (confirmado ausente do
-> repositório). LangChain hoje é usado só para embeddings/chunking do RAG —
-> não é o framework de orquestração. Corrigido em 2026-08-25.
+**O ponto que resume o v1:** o LLM só é chamado na síntese de uma resposta de
+RAG. Navegar o menu, ler um texto fixo e pedir atendente custam zero token.
 
-**Clean Architecture** — o código segue 4 camadas:
-domain/       → regras de negócio puras (sem frameworks)
-application/  → casos de uso (orquestra o domínio)
-infrastructure/ → banco, redis, LLM, WhatsApp (detalhes técnicos)
-api/          → endpoints FastAPI (apresentação)
+**LangChain** é usado só para embeddings e chunking do RAG. **Não** é o
+framework de orquestração — quem orquestra é o LangGraph, e o `OracleChain`
+citado em versões antigas não existe mais.
+
+**Clean Architecture** — quatro camadas:
+
+```
+domain/          regras de negócio puras, sem framework
+application/     casos de uso, orquestração, workers
+infrastructure/  Postgres, Redis, LLM, WhatsApp
+api/             endpoints FastAPI
+```
 
 ---
 
@@ -111,7 +142,7 @@ api/          → endpoints FastAPI (apresentação)
 | Linguagem | Python 3.12 (imagem Docker usa 3.11-slim — ver nota) | Toda a aplicação |
 | API Web | FastAPI | Webhook WhatsApp + portal admin |
 | LLM | Google Gemini (padrão) + DeepSeek/Groq (alternativos, trocáveis em runtime via `/hub/llm-custo`) | Geração de respostas |
-| Framework LLM | Nenhum framework de orquestração — camadas próprias (`router/`+`agents/`+`capabilities/`); LangChain só para embeddings/chunking | Pipeline de RAG |
+| Framework LLM | LangGraph para o grafo; camadas próprias em volta (`menu/` decide, `rag/knowledge/` responde, `capabilities/` integra). LangChain só para embeddings e chunking | Pipeline de RAG |
 | Banco relacional | PostgreSQL | Usuários, identidade, auditoria |
 | Banco vetorial | Redis Stack + RedisVL | Documentos, embeddings, buscas semânticas |
 | Fila de tarefas | Celery + Redis | Processar mensagens em background |
@@ -126,10 +157,8 @@ api/          → endpoints FastAPI (apresentação)
 
 ## 4. Estrutura de Pastas
 
-> ⚠️ Corrigido em 2026-08-25 — a versão anterior desta árvore descrevia uma
-> estrutura pré-refatoração (`oracle_chain.py`, `domain/tools/`,
-> `domain/services/` com roteador/permissões) que não existe mais no
-> código. A árvore abaixo reflete `src/` real.
+> Atualizada em 2026-09-09 (item A3): os dois `dispatcher*.py` foram
+> deletados pela ADR 0008 e `src/graph/` virou `src/graph_studio/`.
 
 oraculo-uema/
 ├── src/
@@ -142,20 +171,34 @@ oraculo-uema/
 │   │   └── middleware/
 │   │       └── auth_middleware.py  # JWT admin
 │   │
-│   ├── router/                  # Classificação de intenção (Supervisor)
-│   │   ├── supervisor.py        # regex → heurística → Flash
+│   ├── router/                  # Supervisor — FORA do caminho crítico no v1
+│   │   ├── supervisor.py        # regex → heurística → KNN → Flash (só em rollback)
 │   │   ├── gatekeeper.py        # pré-filtro (ignorar/registro/comando/LLM)
-│   │   └── llm_fallback.py      # classificação/orquestração via LLM
+│   │   └── llm_fallback.py      # classificação estruturada via LLM
 │   │
-│   ├── agents/                  # Agentes de domínio (RAG, SIGAA, tickets, conversação)
+│   ├── rag/                     # Embeddings, ingestão e o RAG do v1
+│   │   └── knowledge/           #   busca híbrida + síntese da resposta
+│   ├── domain_services/         # SIGAA, chamados, cadastro — fora do v1
 │   ├── capabilities/            # Tools/integrações autodescobertas
 │   │
-│   ├── application/            # Casos de uso (orquestra domínio)
-│   │   ├── runtime/dispatcher_langgraph.py  # orquestrador de produção
-│   │   ├── runtime/dispatcher.py            # orquestrador legado (ainda usado por SSE/eval)
+│   ├── application/            # Casos de uso, orquestração, workers
+│   │   ├── orchestration/       # ★ ORQUESTRADOR ÚNICO (ADR 0008)
+│   │   │   ├── entrypoint.py    #   processar() — o caminho de toda mensagem
+│   │   │   ├── builder.py       #   GraphSpec → StateGraph
+│   │   │   ├── nodes.py         #   classify_node + um nó por rota
+│   │   │   ├── spec.py          #   topologia do grafo como DADO
+│   │   │   └── specs/default.json
+│   │   ├── menu/                # ★ MOTOR DE MENU do v1
+│   │   │   ├── resolver.py      #   a decisão — função pura, sem LLM
+│   │   │   ├── spec.py          #   menu como dado + validação
+│   │   │   ├── state.py         #   posição do usuário no Redis
+│   │   │   └── menus/default.json
 │   │   ├── tasks/
-│   │   │   └── process_message_task.py  # Task Celery: processa mensagem
-│   │   └── use_cases/          # Casos de uso específicos
+│   │   │   └── process_message_task.py  # task Celery de entrada
+│   │   ├── workers/            # worker_*.py
+│   │   └── use_cases/
+│   │
+│   ├── graph_studio/           # Componentes do Hub + sandbox — NÃO é produção
 │   │
 │   ├── domain/                 # Regras de negócio puras
 │   │   ├── entities/           # Modelos do domínio
@@ -205,9 +248,6 @@ oraculo-uema/
 │       ├── chunkviz.html       # Visualizador de chunks
 │       └── config.html         # Configuração do sistema
 │
-├── langgraph_experiment/       # Grafo (nodes/state) usado por dispatcher_langgraph.py
-│                                  # em produção — "experiment" no nome é histórico, ver
-│                                  # docs/decisions/0001-langgraph-nao-aprovado-para-main.md
 ├── rest_lab/ · mcp_lab/        # Laboratórios de pesquisa (não produto), com
 │                                  # camada de Application própria (ADR 0005/0006)
 ├── dados/                      # PDFs e documentos para ingestão
@@ -223,53 +263,67 @@ oraculo-uema/
 
 ## 5. Como o Sistema Funciona (fluxo completo)
 
-### 5.1 Uma mensagem do WhatsApp, passo a passo
-USUÁRIO envia mensagem via WhatsApp
-"quando é a matrícula de veteranos?"
-EVOLUTION API recebe e envia para o webhook:
-POST /webhook/evolution  { phone: "5598...", text: "quando é..." }
-PORTEIRO (PostgreSQL):
-→ busca o telefone no banco
-→ verifica: está cadastrado? status=ativo?
-→ se não: BLOQUEIA (sem gastar tokens do LLM!)
-→ se sim: monta IdentidadeRica { nome, curso, role, ... }
-LOCK (Redis):
-→ cria lock:5598... no Redis (TTL 90s)
-→ evita processar duas mensagens ao mesmo tempo do mesmo usuário
-→ se já está bloqueado E mensagem é inútil (ok, 👍): ignora silenciosamente
-CELERY (background task):
-→ webhook retorna 200 imediatamente
-→ task processar_mensagem executa em background
-ORACLECHAIN (pipeline RAG):
-a) load_memory
-→ carrega histórico dos últimos 5 turnos do Redis
-→ carrega fatos de longo prazo do usuário
-b) route_intent
-→ regex rápido: "matrícula" → CALENDARIO (conf=0.90)
-→ se confiança baixa: KNN semântico no Redis
-c) transform_query
-→ enriquece com contexto: "matrícula veteranos 2026.1 CECEN"
-d) retrieve (busca híbrida)
-→ BM25 (busca por palavras-chave exatas)
-→ Vector (busca semântica via embeddings)
-→ RRF (fusão dos dois rankings)
-→ filtra por metadata (source=calendario-2026.pdf)
-e) grade_docs (CRAG)
-→ avalia qualidade dos chunks encontrados
-→ score 0.0 a 1.0
-→ se score baixo: tenta busca mais ampla
-f) generate (Gemini)
-→ monta prompt com contexto + histórico + fatos
-→ chama Gemini (gemini-2.0-flash ou similar)
-→ verifica se LLM quer chamar alguma tool
-→ se tool crítica: ativa HITL (aguarda confirmação)
-g) save_memory
-→ salva turno no Redis (chat:5598...)
-EVOLUTION API:
-→ envia a resposta para o WhatsApp do usuário
-LOCK liberado (Redis):
-→ próxima mensagem do usuário pode ser processada
-### 5.2 Diagrama de componentes
+> Reescrita em 2026-09-09 (item A3). A versão anterior narrava o pipeline
+> `OracleChain` (`route_intent` → `transform_query` → `grade_docs` → …), que
+> não existe no código há tempos.
+
+### 5.1 Uma conversa real, passo a passo
+
+**Mensagem 1 — o usuário manda "oi"**
+
+1. **Evolution API** entrega no webhook: `POST /webhook/evolution`.
+2. **Porteiro (Postgres)** procura o telefone, confere status e monta a
+   identidade. Bloqueio aqui não gasta token nenhum.
+3. **Lock (Redis)** cria `lock:msg:{phone}` com TTL de 90s, para duas
+   mensagens da mesma sessão não se atropelarem.
+4. **Celery** assume; o webhook já respondeu 200.
+5. **Entrypoint** vê que a sessão não está em atendimento humano, passa pelos
+   guardrails, e chega ao **motor de menu**.
+6. O menu não encontra estado para a sessão e responde o **menu principal**.
+
+**Custo: zero token.** O grafo nem foi invocado.
+
+**Mensagem 2 — o usuário manda "2"**
+
+O menu resolve a tecla, empilha a posição e responde a tela de sistemas
+(SIGAA e SIPAC). **Zero token de novo.**
+
+**Mensagem 3 — o usuário manda "1" (SIGAA)**
+
+O menu anota uma *pergunta pendente* com `rota=WIKI`,
+`doc_type=wiki_ctic`, `filtros={sistema: sigaa}` e responde o convite:
+"Escreva sua pergunta sobre o SIGAA." **Ainda zero token.**
+
+**Mensagem 4 — "como emito declaração de vínculo?"**
+
+Aqui, e só aqui, o grafo entra:
+
+1. O menu vê a pergunta pendente e devolve rota e taxonomia **já decididas**.
+   Nada é classificado por LLM.
+2. O grafo é invocado com `route="rag"`. O `classify_node` vê a rota
+   preenchida e não faz nada.
+3. **`rag_node`** consulta o cache semântico. Acerto no cache responde sem
+   chamar o modelo.
+4. Se não houver cache: **busca híbrida** no Redis — dois `FT.SEARCH` (HNSW
+   vetorial e BM25 textual), fusão por RRF calculada em memória, e rerank por
+   cross-encoder local (CPU).
+5. **Síntese**: os chunks vão ao Gemini, que escreve a resposta ancorada
+   neles. **Esta é a única chamada de LLM da conversa inteira.**
+6. O entrypoint anexa a tela "Isso ajudou?" e o menu fica parado nela.
+
+**Mensagem 5 — o usuário manda "0" a qualquer momento**
+
+Handoff: o bot silencia a sessão (`handoff:session:{id}`, TTL 24h), enfileira
+em `handoff:queue` e avisa a equipe no `SUPPORT_GROUP_JID`. Zero token.
+
+### 5.2 Resumo do custo por tipo de ação
+
+| Ação | Chamadas de LLM |
+|---|---|
+| Abrir menu, navegar, voltar | 0 |
+| Ler um texto fixo | 0 |
+| Pedir atendente | 0 |
+| Fazer uma pergunta | 1 síntese, ou 0 se cair no cache |
 
 ---
 
@@ -451,55 +505,106 @@ RBAC = Role-Based Access Control = controle de acesso baseado em papéis.
 
 ---
 
-## 11. HITL — Confirmação Humana
+## 11. HITL — quando uma pessoa entra no loop
 
-HITL = Human-in-the-Loop = "humano no loop de decisão".
+> Reescrita em 2026-09-09 (item A3). A descrição anterior — "o LLM detecta
+> intenção de ação crítica" e grava `hitl:{session_id}` — descrevia **um**
+> mecanismo, feito por LLM. Existem **três**, nenhum deles decidido por LLM.
 
-Algumas ações são **irreversíveis ou críticas** (alterar email, abrir chamado formal).
-O Oráculo não executa automaticamente — pede confirmação:
-Usuário: "quero mudar meu email para joao@aluno.uema.br"
-Oráculo: ⚠️ Confirmação necessária
-Alterar e-mail para joao@aluno.uema.br
-Responda SIM para confirmar ou NÃO para cancelar.
-Usuário: "sim"
-Oráculo: ✅ E-mail atualizado com sucesso!
+| Mecanismo | Onde | Para quê | No v1 |
+|---|---|---|---|
+| `interrupt()` do LangGraph | Nós travados dos funis de ticket e CRUD | Uma pergunta por nó, com validador e re-pergunta. O estado vive no checkpoint em Redis, então a conversa sobrevive a troca de processo. | **Fora** — ticket e CRUD saem do v1 |
+| Máquina de estado em Redis | `hitl:session:{id}`, autenticação do SIGAA | CPF e senha, que não podem passar pelo checkpoint | **Fora** — SIGAA sai do v1 |
+| Handoff terminal | `handoff:session:{id}`, TTL 24h | O usuário pede uma pessoa. O bot silencia a sessão, enfileira em `handoff:queue` e avisa a equipe. | **Ativo — é o único HITL do v1** |
 
-**Como funciona tecnicamente:**
-1. LLM detecta intenção de ação crítica
-2. Salva no Redis: `hitl:{session_id}` com `action`, `args`, `expires_at`
-3. Envia mensagem pedindo confirmação
-4. Na próxima mensagem, antes de qualquer coisa, verifica Redis
-5. Se "sim" → executa a tool; se "não" → cancela; se outra coisa → repete
+**Um detalhe de implementação que não é acidental:** cada funil tem *um
+`interrupt()` por nó*, e não vários no mesmo nó. O pacote
+`langgraph-checkpoint-redis` tem um bug conhecido com múltiplos interrupts
+pendentes no mesmo nó — funciona no primeiro resume e quebra no segundo.
+Por isso os funis são uma sequência de nós travados, um por pergunta.
+
+**No v1, o handoff é a saída de emergência do usuário.** Ele funciona de
+qualquer tela, inclusive no meio de um convite para escrever uma pergunta, e
+é reconhecido por `0` ou por frases como "quero falar com um atendente". A
+detecção é regex, nunca LLM: é a única saída garantida do usuário, então não
+pode depender de cota de API nem de acerto de classificador.
+
+**E o bot precisa conseguir voltar.** A pausa dura 24 horas e termina sozinha,
+mas há duas formas de encerrar antes: a página **Atendimento humano**
+(`/hub/handoffs`) no painel, com um botão por conversa, ou `$voltar <jid>`
+pelo WhatsApp. A página existe porque a segunda opção não alcança quem testou
+pelo simulador de chat — e uma conversa sem saída é pior que não ter pausa.
 
 ---
 
-## 12. Plataforma Web Admin
+## 12. Plataforma Web Admin (Hub v2)
 
-Acessível em: `http://localhost:9000/hub/`
+Em `http://localhost:9000/hub/`. Login por `ADMIN_USERNAME` e
+`ADMIN_PASSWORD` no `.env`.
 
-**Login:** usuário e senha definidos em `ADMIN_USERNAME` e `ADMIN_PASSWORD` no `.env`
+> Reescrita em 2026-09-09 (item A3). A lista anterior tinha nove páginas e
+> era do Hub antigo, anterior à ADR 0007. Hoje são cerca de vinte rotas.
 
-### Páginas disponíveis
+**Stack:** Jinja2 + HTMX + Alpine.js vendorados, **sem build step** (ADR
+0007). Regra dura do design system: nenhuma página imprime identificador de
+código, tabela ou migration fora de `data-tech`/tooltip — travado por
+`tests/unit/hub/test_no_backend_jargon.py`.
+
+### Operação do dia a dia
 
 | URL | O que faz |
 |---|---|
-| `/hub/` | Dashboard principal com cards e status dos serviços |
-| `/hub/chat` | Simulador de chat — testa o agente diretamente |
-| `/hub/chunkviz` | Upload de documentos e visualização de chunks |
-| `/hub/audit` | Log de todas as ações administrativas |
-| `/hub/users` | Lista e gerencia usuários cadastrados |
-| `/hub/config` | Configuração: prompt, manutenção, cache, workers |
-| `/eval/` | Avaliação da qualidade do RAG (métricas técnicas) |
-| `/monitor/` | Dashboard ao vivo das conversas |
-| `/admin/` | Portal admin completo (configurações avançadas) |
+| `/hub/` | Dashboard com status dos serviços |
+| `/hub/chat` | Simulador de conversa — testa o agente sem WhatsApp |
+| `/hub/users` | Usuários cadastrados |
+| `/hub/audit` | Log de ações administrativas |
+| `/hub/config` | Configuração dinâmica (sem restart) |
 
-### Ferramentas externas (links rápidos em /hub/config)
+### Agentes, rotas e custo
 
-| Ferramenta | URL padrão | Para que serve |
+| URL | O que faz |
+|---|---|
+| `/hub/agents` | Liga e desliga agentes (circuit-breaker), prompt e provider por agente |
+| `/hub/routes` | Rotas do `route_registry` — `doc_type`, `k`, cacheável |
+| `/hub/llm-custo` | **Custo por provider e por rota**, cotação do dólar, reset de circuito. É a observabilidade oficial do v1 |
+| `/hub/providers` | Cadastra provider compatível com a API da OpenAI, sem deploy. A chave fica no `.env`, nunca no banco |
+
+### Conhecimento e qualidade
+
+| URL | O que faz |
+|---|---|
+| `/hub/chunkviz` | Upload de documento, simulação de chunking e ingestão |
+| `/hub/eval` | Avaliação da qualidade do RAG |
+| `/hub/infra/search` | Índices RediSearch, contagem de chunks, teste de busca |
+| `/hub/infra/storage` · `/hub/infra/health` | Uso do Redis e saúde dos serviços |
+
+### Grafo e ferramentas
+
+| URL | O que faz | Afeta produção? |
 |---|---|---|
-| Grafana | `localhost:3001` | Dashboards visuais de métricas |
-| Prometheus | `localhost:9090` | Raw metrics e alertas |
-| `/hub/llm-custo` | portal admin | Custo por provider/rota, cache semântico (nativo, Postgres) |
+| `/hub/graph-studio` — aba "Grafo de produção" | Diagrama da `GraphSpec` ativa, criação de rota nova, histórico e revert | **Sim**, no próximo restart dos workers |
+| `/hub/graph-studio` — aba "Laboratório" | Canvas de componentes isolados | Não, nunca foi o grafo de produção |
+| `/hub/graph-nodes` | Catálogo de componentes do `graph_studio` | Não (congelado, TD-020) |
+| `/hub/capabilities` · `/hub/mcp-servers` | Ferramentas HTTP/MCP cadastradas pelo painel | Sim |
+| `/hub/channels` | Conecta instância existente da Evolution API | Parcial — o caminho quente ainda lê `settings.EVOLUTION_*` |
+
+### Menu do bot
+
+| URL | O que faz | Afeta produção? |
+|---|---|---|
+| `/hub/menu` | Edita as telas do bot: texto de abertura, opções numeradas e respostas prontas. Mostra a pré-visualização exata do que a pessoa recebe no WhatsApp, com histórico e reverter | **Sim, na hora** — a próxima mensagem já usa o texto novo, sem restart |
+
+É a página configurável que mais importa no v1: mudar o que o assistente
+responde deixou de exigir deploy. O que está gravado no banco vence o texto
+que veio com o código; "Restaurar o texto original" volta ao embutido sem
+perder o histórico.
+
+### Ferramentas externas
+
+| Ferramenta | URL padrão | Observação |
+|---|---|---|
+| Prometheus | `localhost:9090` | Coleta a API e o Redis, **não os workers** — ver §16 |
+| Grafana | `localhost:3001` | Provisionamento historicamente não montado |
 
 ---
 
@@ -668,7 +773,26 @@ O `beat` (agendador) executa tarefas periodicamente:
 
 ---
 
-## 16. Observabilidade (Prometheus + Grafana + /hub/llm-custo)
+## 16. Observabilidade
+
+> ⚠️ **Leia isto antes do resto da seção** (atualizado em 2026-09-09, item
+> A3/B7). O `prometheus.yml` coleta três alvos: a API, o `redis_exporter` e o
+> próprio Prometheus. **Os workers Celery não são coletados** — não expõem
+> `/metrics` e não estão em nenhum `scrape_config`. Como quase todo
+> `oraculo_*` é emitido dentro de um worker, **a lista de métricas mais
+> abaixo não chega ao Prometheus hoje** (TD-019).
+>
+> A observabilidade que **funciona de verdade** no v1 é:
+>
+> * **`/hub/llm-custo`** — custo, tokens e cache por provider e por rota,
+>   lendo a tabela `metricas_llm` no Postgres. Independe do Prometheus.
+> * **`/hub/infra/{health,storage,search}`** — saúde dos serviços, uso do
+>   Redis e estado dos índices.
+> * **Alerta de provider fora do ar** — o circuit-breaker manda WhatsApp para
+>   `SUPPORT_GROUP_JID`. É o único alerta que chega a uma pessoa.
+>
+> O `alert_rules.yml` foi reescrito: dos sete alertas, seis consultavam
+> métricas inexistentes. Sobraram três, todos de infraestrutura.
 
 Não usamos Langfuse/LangSmith — avaliado e descartado (ver
 `pesquisa_arquitetura_producao.md` §4.5): a telemetria de custo/rota/cache
@@ -687,7 +811,8 @@ toda chamada de geração de texto.
 
 Acesse: `http://localhost:9090`
 
-Métricas coletadas (não exaustivo):
+Métricas **emitidas pelo código** (a maioria dentro de workers, portanto
+hoje não coletadas — ver o aviso no topo desta seção):
 oraculo_requests_total                    → total de mensagens processadas
 oraculo_requests_blocked_total            → bloqueadas pelo Porteiro
 oraculo_semantic_cache_result_total       → hit/miss do cache semântico, por rota
@@ -706,6 +831,9 @@ Dashboards versionados em `observability/grafana/provisioning/dashboards/`:
 
 - `llm_custo_providers.json` — custo/tokens/cache por provider
 - `comportamento_ia.json` — roteamento, memória, falhas do pipeline
+
+⚠️ Estes dashboards consultam métricas emitidas em workers, que o Prometheus
+não coleta. Para custo real, use `/hub/llm-custo`, que lê o Postgres.
 
 ### Jaeger — Tracing distribuído (OpenTelemetry)
 

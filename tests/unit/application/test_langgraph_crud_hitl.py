@@ -2,7 +2,7 @@
 Regressão do funil de CRUD de cadastro (HITL) do experimento LangGraph —
 mesmo padrão/motivo do test_langgraph_ticket_hitl.py (MemorySaver, isolado
 do bug de checkpointer Redis). Escopo igual ao crud_tool.py original
-(src/agents/tickets/crud_tool.py): só setor (CentroEnum) e telefone.
+(src/domain_services/tickets/crud_tool.py): só setor (CentroEnum) e telefone.
 """
 from __future__ import annotations
 

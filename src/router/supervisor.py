@@ -16,8 +16,9 @@ MÉTRICAS PROMETHEUS:
   oraculo_router_cache_hit_total{layer}
   oraculo_router_latency_ms (histogram)
 
-Ex-`application/routing/semantic_router.py` (mantido ali como shim de
-compatibilidade — ver esse arquivo). A chamada Gemini está em
+Ex-`application/routing/semantic_router.py`, que foi **deletado** — a
+docstring anterior mandava "ver esse arquivo" para um shim de compatibilidade
+que não existe mais (corrigido em 2026-09-09, item A9). A chamada Gemini está em
 `router/llm_fallback.py`. `_dag_hint_para_rota` devolve só
 `{doc_type, k_vector, k_text}` pro RAG — o DAG do Planner (ADR 0008) foi
 deletado.

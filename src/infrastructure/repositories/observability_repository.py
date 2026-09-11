@@ -92,6 +92,68 @@ class ObservabilityRepository:
             logger.error("❌ [OBS] salvar_metrica_llm falhou: %s", e)
             await self._db.rollback()
 
+    async def salvar_uso_llm(self, uso) -> None:
+        """Grava um `UsoLLM` (ver `observability/usage.py`).
+
+        Substitui `salvar_metrica_llm` para o caminho novo: aquele recebia 12
+        argumentos soltos e não tinha onde pôr custo aberto, origem do preço
+        nem status. Continua existindo para os call sites antigos (avaliador,
+        RAG) que gravam métrica sem passar por um provider de LLM."""
+        try:
+            await self._db.execute(text(_SQL_USO_LLM), uso.para_persistencia())
+            await self._db.commit()
+        except Exception as e:
+            logger.error("❌ [OBS] salvar_uso_llm falhou: %s", e)
+            await self._db.rollback()
+
+    async def get_qualidade_custo(self, horas: int = 24) -> dict:
+        """Quanto do gasto do período é medido, estimado ou desconhecido.
+
+        Responde a pergunta que o painel não conseguia responder: antes da
+        migration 027, custo desconhecido era gravado como `0.0` e somava com
+        as chamadas realmente gratuitas. Um provider novo sem preço
+        cadastrado aparecia como se não custasse nada.
+
+        Linhas antigas (anteriores à migration) não têm `cost_status` — entram
+        como `legado`, e não como desconhecidas: elas foram calculadas, só não
+        registraram a confiança."""
+        try:
+            resultado = await self._db.execute(
+                text("""
+                    SELECT
+                        COALESCE(cost_status, 'legado')      AS status,
+                        COALESCE(pricing_source, 'legado')   AS origem,
+                        COUNT(*)                             AS chamadas,
+                        COALESCE(SUM(custo_usd), 0)          AS custo_usd,
+                        COALESCE(SUM(tokens_total), 0)       AS tokens
+                    FROM metricas_llm
+                    -- `make_interval`, e não concatenação de string: com
+                    -- asyncpg o parâmetro chega tipado, e `:horas || ' hours'`
+                    -- exige str enquanto o endpoint passa int.
+                    WHERE ts >= NOW() - make_interval(hours => :horas)
+                    GROUP BY 1, 2
+                    ORDER BY chamadas DESC
+                """),
+                {"horas": horas},
+            )
+        except Exception as e:
+            logger.error("❌ [OBS] get_qualidade_custo falhou: %s", e)
+            return {"por_status": [], "tokens_estimados_pct": 0.0}
+
+        linhas = [dict(r._mapping) for r in resultado]
+        for linha in linhas:
+            linha["custo_usd"] = float(linha["custo_usd"] or 0)
+
+        total = sum(l["chamadas"] for l in linhas) or 1
+        nao_exatas = sum(l["chamadas"] for l in linhas if l["status"] not in ("exact", "legado"))
+
+        return {
+            "por_status": linhas,
+            # Percentual do período cujo custo NÃO é medido com preço oficial
+            # e tokens reais. É o número que diz o quanto confiar no total.
+            "estimado_ou_desconhecido_pct": round(nao_exatas / total * 100, 1),
+        }
+
     async def get_metricas_dashboard(self, horas: int = 24) -> dict:
         """Retorna métricas agregadas para o dashboard admin."""
         try:
@@ -329,6 +391,52 @@ class ObservabilityRepository:
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper síncrono para Celery workers
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Telemetria de uso de LLM (migration 027)
+#
+# `ON CONFLICT DO NOTHING` no `request_id` é a idempotência: um retry de task
+# que reenvie o mesmo evento não duplica a linha. Sem isso, uma task que falha
+# DEPOIS de gravar a métrica e é reexecutada contaria o mesmo gasto duas vezes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SQL_USO_LLM = """
+    INSERT INTO metricas_llm
+        (request_id, trace_id, user_id, rota, provider, modelo,
+         tokens_entrada, tokens_saida, tokens_total, tokens_cache, tokens_reasoning,
+         custo_entrada, custo_saida, custo_cache, custo_reasoning, custo_usd,
+         moeda, pricing_source, cost_status, token_count_status, pricing_version,
+         latencia_ms, status, erro)
+    VALUES
+        (:request_id, :trace_id, :user_id, :rota, :provider, :modelo,
+         :tokens_entrada, :tokens_saida, :tokens_total, :tokens_cache, :tokens_reasoning,
+         :custo_entrada, :custo_saida, :custo_cache, :custo_reasoning, :custo_usd,
+         :moeda, :pricing_source, :cost_status, :token_count_status, :pricing_version,
+         :latencia_ms, :status, :erro)
+    ON CONFLICT (request_id) WHERE request_id IS NOT NULL DO NOTHING
+"""
+
+
+def salvar_uso_llm_sync(uso) -> None:
+    """Grava um `UsoLLM` (ver `observability/usage.py`) pelo caminho síncrono.
+
+    Nunca levanta: telemetria é secundária à resposta do LLM."""
+    try:
+        from sqlalchemy import create_engine
+        from src.infrastructure.settings import settings
+
+        url = settings.DATABASE_URL.replace("+asyncpg", "").replace(
+            "postgresql://", "postgresql+psycopg2://"
+        )
+        engine = create_engine(url, pool_pre_ping=True)
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(_SQL_USO_LLM), uso.para_persistencia())
+        finally:
+            engine.dispose()
+    except Exception as e:
+        logger.error("❌ [OBS] salvar_uso_llm_sync falhou: %s", e)
+
 
 def salvar_metrica_sync(
     user_id:        str,

@@ -179,7 +179,7 @@ async def test_sigaa_node_delega_pra_start_or_continue_sigaa():
     )
 
     with patch(
-        "src.agents.sigaa.auth_flow.start_or_continue_sigaa",
+        "src.domain_services.sigaa.auth_flow.start_or_continue_sigaa",
         new_callable=AsyncMock, return_value=fake_result,
     ) as mock_start:
         result = await sigaa_node(state)
@@ -197,7 +197,7 @@ async def test_sigaa_node_none_retorna_fallback_amigavel():
     state = OraculoState(session_id="sess-1", message="notas", route="sigaa")
 
     with patch(
-        "src.agents.sigaa.auth_flow.start_or_continue_sigaa",
+        "src.domain_services.sigaa.auth_flow.start_or_continue_sigaa",
         new_callable=AsyncMock, return_value=None,
     ):
         result = await sigaa_node(state)

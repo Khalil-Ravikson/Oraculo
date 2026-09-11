@@ -28,6 +28,18 @@ except ImportError:
     PROMETHEUS_AVAILABLE = False
     logger.warning("⚠️ prometheus_client não instalado. Métricas desativadas.")
 
+# Modo multiprocesso (workers Celery, TD-019): o diretório precisa existir
+# ANTES da primeira métrica ser declarada — `prometheus_client` abre um arquivo
+# por métrica na declaração, e as declarações acontecem no import deste módulo.
+if PROMETHEUS_AVAILABLE:
+    try:
+        from src.infrastructure.observability.metrics_server import garantir_diretorio
+
+        garantir_diretorio()
+    except Exception:  # noqa: BLE001 — métrica nunca derruba o processo
+        logger.warning("⚠️ Falha ao preparar diretório de métricas multiprocesso.", exc_info=True)
+
+
 # Buckets calibrados para o Oráculo
 _REQUEST_BUCKETS   = [50, 100, 200, 500, 1000, 2000, 5000]
 _DB_BUCKETS        = [5, 10, 20, 50, 100, 200, 500]
@@ -111,6 +123,23 @@ class PrometheusMetrics:
             Counter, f"{ns}_llm_cost_usd_total",
             "Custo acumulado em USD das chamadas ao LLM", ["provider"])
         # Incrementado a cada geração com o custo real (usage_metadata) daquela chamada
+
+        # Telemetria de custo (2026-09-11): distingue gasto medido de gasto
+        # estimado, que a versão anterior somava como se fosse a mesma coisa.
+        self._llm_pricing_source_total = _get_or_create(
+            Counter, f"{ns}_llm_pricing_source_total",
+            "Chamadas de LLM por origem do preço e confiança do custo",
+            ["pricing_source", "cost_status"])
+
+        self._llm_pricing_fallback_total = _get_or_create(
+            Counter, f"{ns}_llm_pricing_fallback_total",
+            "Chamadas cujo preço veio de fonte de fallback (não oficial)",
+            ["pricing_source"])
+
+        self._llm_unknown_model_total = _get_or_create(
+            Counter, f"{ns}_llm_unknown_model_total",
+            "Chamadas sem preço em nenhuma fonte — custo desconhecido",
+            ["provider"])
 
         self._llm_calls_total = _get_or_create(
             Counter, f"{ns}_llm_calls_total",
@@ -284,6 +313,8 @@ class PrometheusMetrics:
         provider: str = "gemini",
         modelo: str = "",
         rota: str = "",
+        pricing_source: str = "",
+        cost_status: str = "",
     ) -> None:
         """
         Registra uma chamada LLM completa: tokens, custo, latência e
@@ -294,6 +325,19 @@ class PrometheusMetrics:
         """
         if not self._enabled:
             return
+        # Origem do preço e confiança do custo: rótulos de BAIXA cardinalidade
+        # (5 origens × 3 status), seguros como label. `user_id`, `request_id` e
+        # `trace_id` NÃO entram aqui de propósito — explodiriam a cardinalidade
+        # da série e pertencem ao banco e aos traces.
+        if pricing_source:
+            self._llm_pricing_source_total.labels(
+                pricing_source=pricing_source, cost_status=cost_status or "unknown",
+            ).inc()
+            if pricing_source not in ("official",):
+                self._llm_pricing_fallback_total.labels(pricing_source=pricing_source).inc()
+            if pricing_source == "unknown":
+                self._llm_unknown_model_total.labels(provider=provider).inc()
+
         if input_tokens:
             self._llm_tokens_total.labels(direction="input", provider=provider).inc(input_tokens)
         if output_tokens:

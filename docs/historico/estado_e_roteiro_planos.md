@@ -1,5 +1,11 @@
 # Oráculo — Estado dos planos e roteiro do que falta
 
+> ⛔ **SUPERADO (2026-09-09, item A6).** Este documento se apresentava como
+> "ponto único de verdade" e descreve a Fase 2 como bloqueada — ela foi
+> destravada e concluída pela ADR 0008. Os roteiros que ele referencia foram
+> arquivados em `historico/roadmap-2026-superado/`. O v1 é um bot de menu:
+> ver [`docs/ESTADO_ATUAL.md`](../ESTADO_ATUAL.md).
+
 > Consolidação do que já foi implementado e do que resta, nos dois planos em
 > curso + o adendo de arquitetura de nós. Ponto único de verdade para retomar
 > o trabalho. Atualizado em 2026-08-28.

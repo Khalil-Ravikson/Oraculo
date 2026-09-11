@@ -11,10 +11,18 @@ sem legenda, labs REST/MCP), guardrails de input, continuação de HITL legado
 (SIGAA CPF/senha), e a decisão de retomar um `interrupt()` pendente.
 
 Classificação (`router/supervisor.py::rotear()`, o Supervisor real, 5
-camadas — ÚNICO classificador do sistema) e circuit-breaker por agente
-(kill-switch de `/hub/agents`) são o próprio `classify_node` do grafo (ADR
-0008 Fase B) — só rodam em mensagem nova, o que já era verdade quando essa
-lógica vivia aqui.
+camadas) e circuit-breaker por agente (kill-switch de `/hub/agents`) são o
+próprio `classify_node` do grafo (ADR 0008 Fase B) — só rodam em mensagem
+nova, o que já era verdade quando essa lógica vivia aqui.
+
+**v1 — bot de menu (item B2).** Com `FEATURE_MENU_BOT` ligada (o default),
+quem decide a rota NÃO é mais o Supervisor: é o motor de menu
+(`application/menu/`), no passo 0.5 deste arquivo, de forma determinística e
+sem gastar token. O grafo é invocado já com `route`/`rota` preenchidos, e
+`classify_node` não faz nada. Navegar o menu, ler um texto fixo e pedir
+atendente sequer chegam ao grafo. O Supervisor só volta a rodar se a flag
+for desligada (rollback) ou se o menu falhar (Redis fora). Ver
+`docs/ESTADO_ATUAL.md` §1.
 
 Checkpointer: `AsyncRedisSaver` (não `MemorySaver`) — obrigatório porque a
 API e os workers Celery rodam em processos/containers diferentes; um
@@ -51,6 +59,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from typing import Any
 
 from src.application.runtime.contracts import OSResult
 
@@ -122,10 +131,71 @@ def _rota_from_route(route: str) -> str:
     return route_registry.rota_do_node(route)
 
 
+async def _resolver_menu(session_id: str, message: str, r: Any):
+    """Resolve a mensagem contra o menu do v1 e PERSISTE a posição nova.
+
+    Devolve `None` quando o menu não pôde ser resolvido (Redis fora, config
+    corrompida) — o chamador então segue pelo caminho antigo, com o
+    Supervisor. Degradar para "o bot classifica sozinho" é pior em custo mas
+    melhor que ficar mudo, e é a mesma escolha que o passo de handoff faz
+    logo acima.
+
+    O tipo de retorno é `menu.resolver.MenuResultado | None`; a anotação fica
+    solta para não puxar o import do motor de menu para o topo do módulo (o
+    entrypoint é importado no boot de todo worker)."""
+    from src.application.menu.loader import carregar_menu
+    from src.application.menu.resolver import resolver as resolver_menu
+    from src.application.menu.state import get_menu_state, set_menu_state
+
+    try:
+        config = await carregar_menu()
+        estado = await get_menu_state(r, session_id)
+        resultado = resolver_menu(config, estado, message)
+        await set_menu_state(r, session_id, resultado.estado)
+        return resultado
+    except Exception:  # noqa: BLE001 — menu quebrado não pode derrubar a mensagem
+        logger.exception("⚠️  [MENU] falha ao resolver (session=%s) — caindo no Supervisor", session_id)
+        return None
+
+
+async def _fechar_com_feedback(
+    session_id: str, answer: str, rota: str, doc_type: str, r: Any
+) -> str:
+    """Anexa a tela "Isso ajudou?" à resposta e deixa o menu parado nela.
+
+    Determinístico e sem LLM: é uma tela de menu como qualquer outra, então a
+    resposta do usuário (1/2/3/9) volta pelo `resolver` normal. A alternativa
+    — perguntar "isso ajudou?" e interpretar a resposta com um modelo — seria
+    pagar token para ler um "sim".
+
+    O `1`/`2` alimentam a tabela `feedback_avaliacoes` que já existe. Gravar
+    ainda não está ligado: depende do banco, e o `DEV_TEST_NO_DB_WRITE`
+    continua `true` (ver `docs/ESTADO_ATUAL.md` §4). A tela já coleta; ligar a
+    escrita é um passo isolado."""
+    from src.application.menu.loader import carregar_menu
+    from src.application.menu.spec import render
+    from src.application.menu.state import MenuEstado, set_menu_state
+
+    try:
+        config = await carregar_menu()
+        if not config.pos_resposta:
+            return answer
+
+        await set_menu_state(
+            r, session_id,
+            MenuEstado(no=config.pos_resposta, ultima_rota=rota, ultimo_doc_type=doc_type),
+        )
+        return f"{answer}\n\n{render(config, config.pos_resposta)}"
+    except Exception:  # noqa: BLE001 — perder o rodapé é aceitável, perder a resposta não
+        logger.exception("⚠️  [MENU] falha ao anexar a tela de feedback (session=%s)", session_id)
+        return answer
+
+
 def _payload_mensagem_nova(
     session_id: str, message: str,
     history: str = "", fatos: list[str] | None = None,
     user_context: dict | None = None,
+    route: str = "", rota: str = "",
 ) -> dict:
     """Payload inicial pro `ainvoke()` de uma mensagem NOVA.
 
@@ -145,11 +215,26 @@ def _payload_mensagem_nova(
     sempre é inofensivo (nodes.py só lê quando relevante).
 
     `user_context`: usado pelos nós check_status/greeting/media_download/
-    sigaa (ex.: chat_id de entrega), inofensivo pros demais."""
-    return {
-        "session_id": session_id, "message": message, "route": "", "cancelado": False,
+    sigaa (ex.: chat_id de entrega), inofensivo pros demais.
+
+    `route`/`rota`: preenchidos pelo motor de menu do v1 (item B2), que já
+    decidiu o destino de forma determinística — `classify_node` vê `route`
+    preenchido e não faz nada, que é como navegar o menu custa zero token.
+    Vazios (o default) mantêm o comportamento anterior: quem classifica é o
+    `classify_node`. O reset explícito descrito acima continua valendo — a
+    diferença é que agora o valor pode ser posto DE PROPÓSITO nesta mesma
+    chamada, em vez de sobreviver por acidente do checkpoint anterior."""
+    payload = {
+        "session_id": session_id, "message": message, "route": route, "cancelado": False,
         "history": history, "fatos": fatos or [], "user_context": user_context or {},
     }
+    # `rota` só entra quando o menu JÁ decidiu. Sem decisão, a chave fica
+    # ausente de propósito: quem preenche é o `classify_node`, e mandar
+    # `rota=""` aqui não acrescentaria nada (o `route` vazio acima já é o
+    # sinal de "não classificado") — ver test_payload_mensagem_nova_inclui_contexto.
+    if rota:
+        payload["rota"] = rota
+    return payload
 
 
 def _to_os_result(result: dict, rota: str, t0: float) -> OSResult:
@@ -285,7 +370,14 @@ async def processar(
     from src.application.chain.guardrails import get_input_guardrail
 
     def _validate_sync():
-        return get_input_guardrail().validate(message, session_id, r)
+        from src.infrastructure.settings import settings
+
+        # Com o menu ligado, o limite é cobrado depois (passo 0.5), só para
+        # perguntas. Desligado (rollback), não há como saber o custo antes de
+        # classificar, então volta a valer para toda mensagem.
+        return get_input_guardrail().validate(
+            message, session_id, r, checar_rate=not settings.FEATURE_MENU_BOT,
+        )
 
     guard_ok, text_or_error = await asyncio.to_thread(_validate_sync)
     if not guard_ok:
@@ -296,7 +388,7 @@ async def processar(
         )
     message = text_or_error  # sanitizado
 
-    from src.agents.sigaa.auth_flow import handle_hitl_continuation
+    from src.domain_services.sigaa.auth_flow import handle_hitl_continuation
 
     hitl_result = await handle_hitl_continuation(message, session_id, user_context, r)
     if hitl_result is not None:
@@ -361,6 +453,65 @@ async def processar(
         result = await app.ainvoke(Command(resume=message), config=config)
         return _to_os_result(result, rota, t0)
 
+    # ── 0.5. Motor de menu (v1 — bot de menu, item B2) ───────────────────────
+    # Roda DEPOIS da retomada de funil (um funil em andamento tem prioridade
+    # sobre o menu) e ANTES da classificação. Três dos quatro desfechos não
+    # chegam a invocar o grafo nem a tocar num LLM:
+    #
+    #   menu/texto → responde e retorna aqui mesmo          → 0 token
+    #   handoff    → grafo, direto no nó human_handoff      → 0 token
+    #   pergunta   → grafo, direto no rag com a taxonomia   → 1 síntese
+    #
+    # Ver `docs/ESTADO_ATUAL.md` §1 e `application/menu/resolver.py`.
+    from src.infrastructure.settings import settings
+
+    menu_rota = ""
+    menu_route = ""
+    menu_doc_type = ""
+    if settings.FEATURE_MENU_BOT:
+        menu = await _resolver_menu(session_id, message, r)
+
+        if menu is not None and menu.tipo in ("menu", "texto"):
+            ms = int((time.monotonic() - t0) * 1000)
+            logger.info("📋 [MENU] %s → no=%s (session=%s)", menu.tipo, menu.estado.no, session_id)
+            return OSResult(
+                answer=menu.texto, plan_id="menu", rota="MENU",
+                cache_hit=False, total_ms=ms, status="ok",
+            )
+
+        if menu is not None and menu.tipo == "handoff":
+            menu_route, menu_rota = "human_handoff", "ESCALAR_HUMANO"
+
+        elif menu is not None and menu.tipo == "pergunta":
+            # Só AQUI o limite de mensagens é cobrado: esta é a única mensagem
+            # que vai custar alguma coisa. Navegar o menu, ler texto fixo e
+            # pedir atendente não contam — punir quem usa o produto como ele
+            # foi desenhado era o efeito da versão anterior, que cobrava o
+            # limite em `validate()`, antes de saber o que a mensagem era.
+            from src.application.chain.guardrails import checar_rate_limit
+
+            bloqueado, aviso = await asyncio.to_thread(
+                checar_rate_limit, session_id, r,
+            )
+            if bloqueado:
+                ms = int((time.monotonic() - t0) * 1000)
+                return OSResult(
+                    answer=aviso, plan_id="rate_limited", rota="BLOCKED",
+                    cache_hit=False, total_ms=ms, status="error",
+                )
+
+            menu_route, menu_rota = "rag", menu.rota
+            menu_doc_type = menu.doc_type
+            # A pergunta é o texto do usuário; quando ele chegou por um
+            # convite ("escreva sua pergunta sobre o SIGAA"), é a mesma coisa.
+            message = menu.query or message
+            # Filtros da tecla apertada (ex.: sistema=sigaa). O `rag_node`
+            # ainda NÃO os consome — os campos `sistema`/`modulo` só existem
+            # no índice depois do item B5. Viajam no user_context para não se
+            # perderem silenciosamente até lá.
+            if menu.filtros:
+                user_context = {**user_context, "menu_filtros": dict(menu.filtros)}
+
     # ── 1. Mensagem nova ──────────────────────────────────────────────────────
     # Classificação (Supervisor real) e circuit-breaker por agente são o
     # próprio `classify_node` do grafo (ADR 0008 Fase B) — o entrypoint só
@@ -369,7 +520,20 @@ async def processar(
     # pro caso (não deveria acontecer) do grafo devolver sem classificar.
     payload = _payload_mensagem_nova(
         session_id, message, history=history, fatos=fatos, user_context=user_context,
+        route=menu_route, rota=menu_rota,
     )
     result = await app.ainvoke(payload, config=config)
     rota = result.get("rota") or "GERAL"
-    return _to_os_result(result, rota, t0)
+    saida = _to_os_result(result, rota, t0)
+
+    # ── 2. Tela "Isso ajudou?" (v1, item B6) ─────────────────────────────────
+    # Só depois de uma resposta de RAG que saiu inteira. Um funil pausado
+    # (`hitl_pending`) ou um handoff não podem receber esse rodapé: no
+    # primeiro o usuário tem uma pergunta pendente para responder, no segundo
+    # o bot está silenciado.
+    if menu_route == "rag" and saida.status == "ok" and saida.answer:
+        saida.answer = await _fechar_com_feedback(
+            session_id, saida.answer, menu_rota, menu_doc_type, r,
+        )
+
+    return saida

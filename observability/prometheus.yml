@@ -1,7 +1,12 @@
 # observability/prometheus.yml
 # ─────────────────────────────────────────────────────────────────────────────
 # Prometheus — Scrape config para Oráculo UEMA
-# IP 172.18.0.1:9000 = host da rede Docker (Windows/Empresa)
+#
+# Todos os alvos usam NOME DE SERVIÇO do compose, não IP do host. O alvo da
+# API apontava para `172.18.0.1:9000` (o gateway da rede Docker no WSL2) e
+# ficava `down` — dependia de o host publicar aquela porta naquele IP, o que
+# mudou quando a API passou a publicar 9001. Nome de serviço é resolvido pelo
+# DNS interno do compose e não quebra quando a porta publicada muda.
 # ─────────────────────────────────────────────────────────────────────────────
 
 global:
@@ -16,7 +21,7 @@ scrape_configs:
   # FastAPI + prometheus-fastapi-instrumentator + métricas custom
   - job_name: "oraculo_api"
     static_configs:
-      - targets: ["172.18.0.1:9000"]
+      - targets: ["api:9000"]
         labels:
           env: "production"
           service: "oraculo_api"
@@ -24,6 +29,29 @@ scrape_configs:
     scheme: http
     # Aumenta timeout para evitar falso-positivo em cold start
     scrape_timeout: 8s
+
+  # Workers Celery (TD-019, 2026-09-11)
+  # ───────────────────────────────────────────────────────────────────────────
+  # Estes alvos NÃO EXISTIAM até 2026-09-11, e a ausência deles era o buraco
+  # inteiro da observabilidade do projeto: quase toda métrica do Oráculo —
+  # chamada de LLM, busca RAG, decisão de roteamento — é emitida dentro de um
+  # worker. Sem scrape aqui, tudo isso era medido e descartado, e os painéis
+  # do Grafana mostravam um sistema que ninguém estava observando.
+  #
+  # Cada worker serve o agregado dos seus processos filhos (modo multiprocesso
+  # do prometheus_client) na porta declarada no docker-compose.
+  - job_name: "oraculo_workers"
+    static_configs:
+      - targets: ["worker:9101"]
+        labels: { env: "production", service: "oraculo_worker", fila: "default_admin" }
+      - targets: ["worker_rag:9102"]
+        labels: { env: "production", service: "oraculo_worker_rag", fila: "rag_search" }
+      - targets: ["worker_synthesis:9103"]
+        labels: { env: "production", service: "oraculo_worker_synthesis", fila: "synthesis" }
+      - targets: ["worker_media:9104"]
+        labels: { env: "production", service: "oraculo_worker_media", fila: "media" }
+    metrics_path: /metrics
+    scheme: http
 
   # Redis Exporter (porta padrão 9121)
   # Imagem: oliver006/redis_exporter

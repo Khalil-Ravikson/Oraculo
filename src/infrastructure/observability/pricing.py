@@ -2,7 +2,7 @@
 infrastructure/observability/pricing.py — tabela de preço por provider/modelo
 ================================================================================
 Substitui a constante hardcoded e desatualizada que existia em
-`agents/academic_knowledge/synthesis.py` (`_CUSTO_INPUT`/`_CUSTO_OUTPUT`,
+`rag/knowledge/synthesis.py` (`_CUSTO_INPUT`/`_CUSTO_OUTPUT`,
 comentário "Custo Gemini 2.5 Flash" mas com valores de preço antigo do
 Gemini 1.5 Flash — achado registrado em `analise_custo_real_llm.md` §4).
 

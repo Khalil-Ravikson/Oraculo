@@ -15,7 +15,7 @@ Espelha `route_registry._DEFAULTS`; a paridade é travada por
 `tests/unit/infrastructure/test_route_registry.py`.
 
 Revision ID: 023_orquestrador_unico_langgraph
-Revises: 022_route_registry_escalar_humano
+Revises: 022_route_registry_escalar
 Create Date: 2026-09-03
 
 """
@@ -24,7 +24,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = "023_orquestrador_unico_langgraph"
-down_revision = "022_route_registry_escalar_humano"
+down_revision = "022_route_registry_escalar"
 branch_labels = None
 depends_on = None
 

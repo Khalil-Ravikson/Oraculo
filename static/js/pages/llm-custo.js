@@ -40,6 +40,7 @@ async function carregar() {
       || '<tr><td colspan="5" class="table__empty">Sem dados nas últimas 24h.</td></tr>';
 
     renderRotas(d, brl);
+    renderQualidade(d, brl);
 
     const cache = d.cache || {};
     $('cache-rota').innerHTML = Object.entries(cache.por_rota || {}).map(([r, n]) =>
@@ -50,6 +51,59 @@ async function carregar() {
       showToast(`${r.deleted ?? 0} entradas de ${rota(b.dataset.cr)} removidas`); carregar();
     });
   } catch (e) { showToast('Erro na telemetria: ' + e.message, 'error'); }
+}
+
+/* Confiança do custo (2026-09-11).
+
+   Antes, custo desconhecido era gravado como zero e somado junto com as
+   chamadas realmente gratuitas — o total do painel parecia igualmente
+   confiável em todos os casos. Esta seção mostra a diferença. */
+const CONFIANCA = {
+  exact:     ['medido',      'badge--ok'],
+  estimated: ['estimado',    'badge--warn'],
+  unknown:   ['desconhecido','badge--danger'],
+  legado:    ['anterior',    'badge--neutral'],
+};
+
+const ORIGEM = {
+  official:      'preço conferido aqui',
+  openrouter:    'catálogo externo',
+  litellm:       'tabela local',
+  pricepertoken: 'fonte de reserva',
+  unknown:       'nenhuma fonte tinha',
+  legado:        'antes desta medição',
+};
+
+function renderQualidade(d, brl) {
+  const q = d.qualidade_custo || {};
+  const linhas = q.por_status || [];
+
+  const cat = d.catalogo_precos || {};
+  $('precos-fonte').textContent = cat.atualizado_em
+    ? `catálogo externo com ${cat.modelos} modelos · atualizado ${String(cat.atualizado_em).slice(0, 16).replace('T', ' ')}`
+    : 'catálogo externo ainda não baixado';
+
+  const pct = q.estimado_ou_desconhecido_pct ?? 0;
+  $('qualidade-resumo').textContent = linhas.length
+    ? (pct > 0
+        ? `${pct}% das chamadas do período têm custo estimado ou desconhecido — o total acima é uma aproximação nessa fatia.`
+        : 'Todo o custo do período foi medido com preço conferido e tokens reais.')
+    : 'Sem chamadas no período.';
+
+  $('qualidade-custo').innerHTML = linhas.map((l) => {
+    const [rotulo, classe] = CONFIANCA[l.status] || [l.status, 'badge--neutral'];
+    const origem = ORIGEM[l.origem] || l.origem;
+    // Custo desconhecido não é exibido como zero: seria a mesma mentira que
+    // esta seção existe para desfazer.
+    const usd = l.status === 'unknown' ? '—' : fmt.usd(l.custo_usd);
+    return `<tr>
+      <td><span class="badge ${classe}" data-tech="${fmt.esc(l.status)}">${rotulo}</span></td>
+      <td>${fmt.esc(origem)}</td>
+      <td class="num">${fmt.num(l.chamadas)}</td>
+      <td class="num">${usd}</td>
+      <td class="num">${fmt.num(l.tokens ?? 0)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="table__empty">Sem chamadas no período.</td></tr>';
 }
 
 function renderResumo(d) {

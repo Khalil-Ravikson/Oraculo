@@ -3,7 +3,7 @@ src/application/workers/worker_sigaa.py
 =========================================
 Worker Celery para automação de tarefas no SIGAA — emagrecido na Fase 5 do
 PLANO_REFATORACAO_SUPERVISOR.md (seção 2.3): só desempacota o evento Celery,
-chama `agents/sigaa/service.py::SigaaService` (decisão + formatação +
+chama `domain_services/sigaa/service.py::SigaaService` (decisão + formatação +
 elegibilidade) e publica o resultado. Scraping puro vive em
 `capabilities/sigaa/browser.py`.
 
@@ -20,7 +20,7 @@ import logging
 import time
 from typing import Any
 
-from src.agents.sigaa.service import SigaaService
+from src.domain_services.sigaa.service import SigaaService
 from src.infrastructure.celery_app import celery_app
 from src.application.workers.registry import register
 

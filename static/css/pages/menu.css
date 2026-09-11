@@ -1,0 +1,133 @@
+/* menu.css — página de edição do menu do bot (item C2.5).
+
+   Três colunas: telas · editor · pré-visualização. A pré-visualização imita
+   um balão de WhatsApp de propósito — quem edita precisa julgar o texto no
+   formato em que ele será lido, não numa caixa de formulário. */
+
+.menu-view { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+/* ── Barra de ações ─────────────────────────────────────────────────────── */
+
+.menu-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap;
+}
+.menu-bar__status { display: flex; align-items: center; gap: var(--sp-2); }
+.menu-bar__acoes  { display: flex; align-items: center; gap: var(--sp-2); }
+
+/* ── Grade principal ────────────────────────────────────────────────────── */
+
+.menu-grid {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 300px;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .menu-grid { grid-template-columns: 200px minmax(0, 1fr); }
+  .menu-preview { grid-column: 1 / -1; }
+}
+@media (max-width: 720px) {
+  .menu-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Lista de telas ─────────────────────────────────────────────────────── */
+
+.menu-telas {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--sp-3);
+}
+.menu-telas__head { margin-bottom: var(--sp-2); }
+.menu-telas__lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
+.menu-telas__item {
+  width: 100%; text-align: left; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: transparent; border: 0; border-radius: var(--radius-sm);
+  color: var(--text); font: inherit;
+}
+.menu-telas__item:hover   { background: var(--surface-2); }
+.menu-telas__item.is-ativo { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+
+/* ── Editor ─────────────────────────────────────────────────────────────── */
+
+.menu-editor {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  min-width: 0;
+}
+
+.menu-opcoes__head {
+  display: flex; align-items: center; justify-content: space-between;
+  border-top: 1px solid var(--border); padding-top: var(--sp-3);
+}
+
+.opcao {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: var(--sp-3); margin-bottom: var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-3);
+}
+
+.opcao__linha {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 210px 36px;
+  gap: var(--sp-2); align-items: center;
+}
+@media (max-width: 820px) {
+  .opcao__linha { grid-template-columns: 56px minmax(0, 1fr) 36px; }
+  .opcao__linha .select { grid-column: 1 / -1; }
+}
+
+.input--tecla { text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+.opcao__remover { color: var(--danger); }
+
+.opcao__detalhe {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--border);
+}
+
+/* ── Pré-visualização ───────────────────────────────────────────────────── */
+
+.menu-preview {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  position: sticky; top: var(--sp-4);
+}
+
+/* O fundo esverdeado e o balão são deliberados: o julgamento sobre um texto
+   de WhatsApp muda conforme o contexto visual em que ele é lido. */
+.zap {
+  background: #ece5dd; border-radius: var(--radius-sm);
+  padding: var(--sp-3); min-height: 180px;
+}
+:root[data-theme="dark"] .zap,
+:root:not([data-theme="light"]) .zap { background: #0b141a; }
+
+.zap__balao {
+  background: #fff; color: #111b21;
+  border-radius: 8px 8px 8px 2px;
+  padding: var(--sp-3);
+  font-size: 0.875rem; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, .12);
+  max-width: 100%;
+}
+:root[data-theme="dark"] .zap__balao,
+:root:not([data-theme="light"]) .zap__balao { background: #202c33; color: #e9edef; }
+
+.lista-historico { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.lista-historico li { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+
+/* Painel de versões anteriores. Inline em vez de modal: os botões precisam
+   continuar no DOM enquanto o operador decide, e um modal que se fecha ao
+   confirmar levava os botões junto. */
+.painel-historico {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}

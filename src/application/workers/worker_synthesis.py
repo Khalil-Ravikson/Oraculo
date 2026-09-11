@@ -141,8 +141,8 @@ async def _run_async(results: list, event: dict) -> dict:
 
     logger.info("📦 [SYNTH WORKER] %d chunks únicos para síntese", len(chunks_unicos))
 
-    # ── Gera resposta via SynthesisService (agents/academic_knowledge/synthesis.py) ──
-    from src.agents.academic_knowledge.synthesis import SynthesisService
+    # ── Gera resposta via SynthesisService (rag/knowledge/synthesis.py) ──
+    from src.rag.knowledge.synthesis import SynthesisService
     synth_result = await SynthesisService().sintetizar(
         chunks=chunks_unicos[:6],
         plan_ctx=plan_ctx,

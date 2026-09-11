@@ -1,0 +1,255 @@
+{% extends "hub/_shell.html" %}
+{% block nav_active %}wiki{% endblock %}
+{% block page_title %}Wiki da CTIC{% endblock %}
+
+{% block content %}
+<div class="wiki-view">
+
+<div class="info-banner" x-data="infoBanner('wiki')" :data-open="aberto">
+  <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+    O que é esta página
+    <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div class="info-banner__body" x-show="aberto" x-cloak>
+    <p>É daqui que o assistente aprende. A wiki da CTIC é a base de
+      conhecimento que ele consulta quando alguém faz uma pergunta.</p>
+    <p><strong>Descobrir</strong> lê a lista de páginas da wiki sem gravar
+      nada — serve para você ver o que entraria. <strong>Trazer para o
+      assistente</strong> lê cada página e a guarda de forma pesquisável, já
+      classificada por sistema e módulo.</p>
+    <p>Páginas que não mudaram desde a última vez não são reprocessadas, então
+      repetir a operação é barato.</p>
+  </div>
+</div>
+
+<div class="wiki-estado">
+  <div class="wiki-estado__card">
+    <span class="caption">O que o assistente já conhece</span>
+    <div id="wiki-indice" class="wiki-indice">Carregando…</div>
+  </div>
+</div>
+
+<div class="wiki-bar">
+  <button class="btn btn--ghost" id="btn-descobrir">Descobrir páginas</button>
+  <button class="btn btn--primary" id="btn-ingerir" disabled>Trazer para o assistente</button>
+  <label class="wiki-forcar">
+    <input type="checkbox" id="chk-forcar">
+    <span class="caption">Reprocessar tudo, mesmo o que não mudou</span>
+  </label>
+  <button class="btn btn--ghost" id="btn-limpar">Limpar o que está sem assunto</button>
+</div>
+
+<div id="wiki-aviso" class="alert alert--erro" hidden></div>
+
+<div id="wiki-progresso" class="wiki-progresso" hidden>
+  <div class="wiki-progresso__barra"><div id="wiki-barra"></div></div>
+  <span class="caption" id="wiki-progresso-txt"></span>
+</div>
+
+<div id="wiki-lista" class="wiki-lista"></div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+import { hub } from '/static/js/core/api-client.js';
+import { showToast } from '/static/js/core/toast.js';
+import { confirmar } from '/static/js/core/modal.js';
+import { fmt } from '/static/js/core/format.js';
+
+const $ = (id) => document.getElementById(id);
+let PAGINAS = [];
+let TIMER = null;
+
+/* Nome humano de cada assunto. A tela nunca mostra o identificador interno,
+   que fica só no data-tech. */
+const ASSUNTO = {
+  wiki_ctic:  'Wiki da CTIC',
+  contatos:   'Telefones e setores',
+  calendario: 'Calendário acadêmico',
+  edital:     'Edital',
+  geral:      'Sem assunto definido',
+  web:        'Páginas da web',
+};
+
+async function carregarIndice() {
+  let d;
+  try { d = await hub.get('/wiki/indice'); }
+  catch { $('wiki-indice').textContent = 'Não deu para ler o índice.'; return; }
+
+  const linhas = Object.entries(d.por_assunto || {});
+  if (!linhas.length) {
+    $('wiki-indice').innerHTML =
+      '<span class="caption">O assistente ainda não conhece nenhum documento.</span>';
+    return;
+  }
+
+  linhas.sort((a, b) => b[1] - a[1]);
+  $('wiki-indice').innerHTML = linhas.map(([tipo, n]) => {
+    // A wiki é o que o menu consulta; o resto fica fora do alcance dele.
+    const usado = tipo === 'wiki_ctic' || tipo === 'contatos';
+    return `<div class="wiki-indice__linha">
+      <span class="badge ${usado ? 'badge--ok' : 'badge--neutral'}" data-tech="${fmt.esc(tipo)}">
+        ${fmt.esc(ASSUNTO[tipo] || tipo)}
+      </span>
+      <span>${n} trecho(s)</span>
+      ${usado ? '' : '<span class="caption">fora das buscas do menu</span>'}
+    </div>`;
+  }).join('');
+}
+
+async function descobrir() {
+  $('btn-descobrir').disabled = true;
+  aviso(null);
+  try {
+    const d = await hub.get('/wiki/descobrir');
+    if (d.error) { aviso(d.error); return; }
+
+    PAGINAS = d.paginas || [];
+    $('btn-ingerir').disabled = PAGINAS.length === 0;
+    $('wiki-lista').innerHTML =
+      `<p class="caption">${PAGINAS.length} página(s) encontradas em ${fmt.esc(d.origem)}.</p>` +
+      '<ul class="wiki-paginas">' +
+      PAGINAS.slice(0, 300).map((p) => `<li>${fmt.esc(p)}</li>`).join('') +
+      '</ul>' +
+      (PAGINAS.length > 300 ? '<p class="caption">…e mais. A lista completa será processada.</p>' : '');
+  } catch (e) {
+    aviso((e.payload && e.payload.error) || 'Não deu para ler a wiki.');
+  } finally {
+    $('btn-descobrir').disabled = false;
+  }
+}
+
+async function ingerir() {
+  const forcar = $('chk-forcar').checked;
+  const ok = await confirmar({
+    titulo: 'Trazer a wiki para o assistente',
+    corpo: `<p>${PAGINAS.length} página(s) serão lidas e guardadas de forma
+            pesquisável.</p>` +
+           (forcar
+             ? '<p><strong>Reprocessar tudo</strong> está marcado: até as páginas ' +
+               'que não mudaram serão refeitas. Leva bem mais tempo.</p>'
+             : '<p>Páginas que não mudaram serão puladas.</p>'),
+    acao: 'Trazer',
+  });
+  if (!ok) return;
+
+  try {
+    const r = await hub.post('/wiki/ingerir', { paginas: PAGINAS, forcar });
+    showToast(r.aviso || 'Ingestão iniciada.', 'ok');
+    acompanhar();
+  } catch (e) {
+    aviso((e.payload && e.payload.error) || 'Não deu para iniciar.');
+  }
+}
+
+function acompanhar() {
+  if (TIMER) clearInterval(TIMER);
+  TIMER = setInterval(atualizarProgresso, 3000);
+  atualizarProgresso();
+}
+
+async function atualizarProgresso() {
+  let d;
+  try { d = await hub.get('/wiki/status'); } catch { return; }
+
+  const s = d.status;
+  if (!s) { $('wiki-progresso').hidden = true; return; }
+
+  $('wiki-progresso').hidden = false;
+  const pct = s.total ? Math.round((s.concluidos / s.total) * 100) : 0;
+  $('wiki-barra').style.width = pct + '%';
+
+  if (s.estado === 'rodando') {
+    $('wiki-progresso-txt').textContent =
+      `${s.concluidos} de ${s.total} páginas · ${s.ok} guardadas · ${s.falhas} com erro`;
+  } else if (s.estado === 'concluido') {
+    $('wiki-progresso-txt').textContent =
+      `Concluído: ${s.ok} de ${s.total} páginas guardadas` +
+      (s.falhas ? `, ${s.falhas} com erro` : '') +
+      (s.duracao_s ? ` · ${s.duracao_s}s` : '');
+    if (TIMER) { clearInterval(TIMER); TIMER = null; }
+    carregarIndice();
+  } else if (s.estado === 'erro') {
+    $('wiki-progresso-txt').textContent = 'Falhou: ' + (s.erro || '');
+    if (TIMER) { clearInterval(TIMER); TIMER = null; }
+  }
+}
+
+function aviso(msg) {
+  const el = $('wiki-aviso');
+  if (!msg) { el.hidden = true; el.textContent = ''; return; }
+  el.hidden = false;
+  el.textContent = msg;
+}
+
+/* Limpeza do que entrou sem assunto definido. Conta antes de apagar, e o
+   número mostrado é o da mesma consulta que remove — não uma estimativa. */
+async function limpar() {
+  let prévia;
+  try { prévia = await hub.post('/wiki/limpar', { doc_type: 'geral', confirmar: false }); }
+  catch (e) { aviso((e.payload && e.payload.error) || 'Não deu para consultar.'); return; }
+
+  if (!prévia.total) { showToast('Não há nada sem assunto definido.', 'ok'); return; }
+
+  const ok = await confirmar({
+    titulo: 'Limpar o que está sem assunto',
+    corpo: `<p><strong>${prévia.total} trecho(s)</strong> sem assunto definido serão
+            removidos do que o assistente conhece.</p>
+            <p>Faça isso <em>depois</em> de trazer a wiki: o conteúdo sem assunto
+            costuma ser a mesma página, ingerida antes de existir a classificação.
+            Removê-lo antes deixa o assistente sem essa informação até a próxima
+            ingestão.</p>`,
+    acao: 'Remover',
+  });
+  if (!ok) return;
+
+  try {
+    const r = await hub.post('/wiki/limpar', { doc_type: 'geral', confirmar: true });
+    showToast(`${r.removidos} trecho(s) removidos.`, 'ok');
+    carregarIndice();
+  } catch (e) {
+    aviso((e.payload && e.payload.error) || 'Não deu para remover.');
+  }
+}
+
+$('btn-descobrir').addEventListener('click', descobrir);
+$('btn-ingerir').addEventListener('click', ingerir);
+$('btn-limpar').addEventListener('click', limpar);
+
+carregarIndice();
+atualizarProgresso();
+</script>
+
+<style>
+.wiki-view { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+.wiki-estado__card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+.wiki-indice { display: flex; flex-direction: column; gap: var(--sp-2); }
+.wiki-indice__linha { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+
+.wiki-bar { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.wiki-forcar { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
+
+.wiki-progresso {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+.wiki-progresso__barra { background: var(--surface-2); border-radius: 999px; height: 8px; overflow: hidden; }
+.wiki-progresso__barra > div { background: var(--accent-strong); height: 100%; width: 0; transition: width .4s ease; }
+
+.wiki-lista { max-height: 420px; overflow-y: auto; }
+.wiki-paginas {
+  list-style: none; margin: var(--sp-2) 0 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 2px;
+  font-size: 0.8125rem; opacity: .85;
+}
+</style>
+{% endblock %}

@@ -77,7 +77,7 @@ function _loadPrefs() {
     if (p.size)     { S.size    = p.size;    $('cv-size').value    = p.size;    $v('cv-sizeval',  p.size);  }
     if (p.overlap)  { S.overlap = p.overlap; $('cv-overlap').value = p.overlap; $v('cv-ovlapval', p.overlap); }
     if (p.strategy) { S.strategy = p.strategy; $('cv-strategy').value = p.strategy; }
-    if (p.docType)  { S.docType  = p.docType; }
+    if (p.docType)  { S.docType  = p.docType; $('cv-doctype').value = p.docType; }
     if (p.parser)   { S.parser = p.parser; $('cv-parser').value = p.parser; $v('cv-parserhint', PARSER_HINTS[p.parser] || ''); }
     if (p.eixo)   { S.eixo   = p.eixo;   $('cv-eixo').value   = p.eixo;   }
     if (p.setor)  { S.setor  = p.setor;  $('cv-setor').value  = p.setor;  }
@@ -342,9 +342,29 @@ async function fetchUrl() {
     S.fileId = d.file_id; S.fileName = url;
     S.text = d.text;
     S.ingestMode = 'all';
+
+    // O servidor decide o assunto pelo domínio da URL (wiki da CTIC → wiki
+    // da CTIC; qualquer outra → web). Refletir isso na tela evita o erro mais
+    // caro desta página: ingerir a wiki como "geral" e o conteúdo ficar fora
+    // das buscas do menu, que procuram por assunto.
+    if (d.doc_type) {
+      S.docType = d.doc_type;
+      const sel = $('cv-doctype');
+      if (sel && [...sel.options].some(o => o.value === d.doc_type)) sel.value = d.doc_type;
+      _savePrefs();
+    }
+
     _updateIngestButton();
     _updateSrcStats();
-    $v('cv-urlmeta', `${d.title || url} · ${d.total_chars.toLocaleString()} chars`);
+
+    // A taxonomia (sistema/módulo) vem resolvida do grafo de links da wiki e
+    // segue junto na ingestão — mostrar aqui é o que permite conferir antes
+    // de gravar.
+    const wm = d.wiki_metadata || {};
+    const taxonomia = [wm.sistema, wm.modulo].filter(Boolean).join(' › ');
+    $v('cv-urlmeta',
+       `${d.title || url} · ${d.total_chars.toLocaleString()} chars` +
+       (taxonomia ? ` · ${taxonomia}` : ''));
     badge('ok', 'Scraping OK');
     _schedSim();
   } catch(e) {
@@ -358,6 +378,11 @@ function sizeChanged(v)    { S.size    = +v; $v('cv-sizeval',  v); _savePrefs();
 function overlapChanged(v) { S.overlap = +v; $v('cv-ovlapval', v); _savePrefs(); _schedSim(); }
 function settingChanged()  {
   S.strategy = $('cv-strategy').value;
+  // Sem esta linha o `doc_type` ficava travado em 'geral' — o seletor não
+  // existia na tela, e todo documento ingerido caía fora das buscas do menu,
+  // que procuram em `wiki_ctic` e `contatos` (achado de 2026-09-10: o índice
+  // inteiro estava como 'geral' e nenhuma pergunta encontrava resposta).
+  S.docType  = $('cv-doctype').value;
   S.eixo     = $('cv-eixo').value;
   S.setor    = $('cv-setor').value;
   S.campus   = $('cv-campus').value;

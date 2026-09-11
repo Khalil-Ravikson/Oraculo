@@ -1,10 +1,20 @@
-
-
-> **Fonte oficial de arquitetura técnica** (ver `docs/README.md`). Revisado
-> em 2026-08-25 (tabelas de filas Celery e model-routing corrigidas contra o
-> código real — ver marcações ⚠️ abaixo); **§12 (Hub Admin v2) e a cadeia de
-> migrations adicionadas em 2026-08-31.** Para regras de negócio (não
-> técnicas), a fonte oficial é `docs/business/regras_negocio_oraculo.md`.
+> **Fonte oficial de arquitetura técnica.** §1, §3, §4.3, §5 e a cadeia de
+> migrations foram **reescritos em 2026-09-09** (item A2 do plano de
+> recuperação): descreviam `dispatcher.processar()`, `orchestrate()`, o
+> Planner e a flag `FEATURE_LANGGRAPH_NATIVE_ROUTES`, nada disso existindo
+> desde a ADR 0008, e paravam na migration 020.
+>
+> Para **escopo do produto, estado das flags e o que é morto**, a fonte é
+> [`docs/ESTADO_ATUAL.md`](../ESTADO_ATUAL.md), que vence em caso de
+> contradição.
+>
+> Para regras de negócio (não técnicas), a fonte é
+> `docs/business/regras_negocio_oraculo.md` — §0 reescrita para a liderança
+> (item A7); o resto é anexo histórico.
+>
+> Histórico: revisado em 2026-08-25 (filas Celery e model-routing conferidos
+> contra o código); §12 (Hub Admin v2) e a cadeia de migrations em
+> 2026-08-31.
 
 ---
 
@@ -12,7 +22,20 @@
 
 ## 1. Visão Geral
 
-**Oráculo UEMA v5.1** — assistente acadêmico via WhatsApp (Evolution API) + portal admin FastAPI. Pipeline principal: **Router (Supervisor) → Agents → Capabilities** (multi-agente assíncrono sobre Celery + Redis Streams), sucessor do antigo `OracleChain` monolítico e do God Object `CognitiveOS` (decomposto na refatoração Supervisor — ver seção 3).
+**Oráculo UEMA** — assistente da CTIC/UEMA por WhatsApp (Evolution API) mais
+um portal admin em FastAPI.
+
+**Pipeline:** webhook → Celery → **orquestrador único**
+(`application/orchestration/entrypoint.py`) → `StateGraph` do LangGraph →
+nó da rota → resposta. Assíncrono sobre Celery e Redis Streams.
+
+No **v1** quem decide a rota é um **menu determinístico**
+(`application/menu/`), não um classificador: navegar o menu custa zero token
+e o LLM só entra na síntese de uma resposta de RAG. Escopo, flags e
+checklist de produção: [`docs/ESTADO_ATUAL.md`](../ESTADO_ATUAL.md).
+
+"Agents" aqui significa módulos especialistas por domínio, chamados
+estaticamente — **não** um framework multiagente plugável. Ver §3.2.
 
 **Stack:** Python 3.12, FastAPI, Celery, PostgreSQL 16 (SQLAlchemy async), Redis Stack (RediSearch + RedisVL), Google Gemini (`google-genai`), LangChain (embeddings apenas). **Frontend admin:** Jinja2 + HTMX + Alpine.js, sem build step (ver §12).
 
@@ -36,80 +59,129 @@ Implementada em `src/memory/services/redis_memory_service.py` — `CognitiveMemo
 
 ---
 
-## 3. Arquitetura de Três Camadas (Router → Agents → Capabilities) + Clean Architecture
+## 3. Camadas e organização do código
 
-Desde a refatoração Supervisor (`PLANO_REFATORACAO_SUPERVISOR.md`, Fases 0-7), o antigo God Object `cognitive_os.py` e as três(+uma) implementações concorrentes de roteamento foram decompostos em três pacotes de topo-nível, ortogonais às camadas Clean Architecture:
+> Reescrita em 2026-09-09 (item A2). A versão anterior descrevia
+> `dispatcher.py`, o Planner e `langgraph_experiment/` — os três foram
+> **deletados** pela ADR 0008 — e carregava três caixas de "⚠️ correção"
+> empilhadas, cada uma desmentindo a anterior. O texto abaixo descreve o
+> código que existe. Escopo do produto: `docs/ESTADO_ATUAL.md`.
 
-- **`router/`** — o Supervisor. Único ponto de decisão de "qual agente chamar" (5 camadas: regex → heurística → regex seeded → KNN Redis → fallback LLM). Nunca importa uma classe de agente diretamente — resolve por nome via `agents/registry.py`.
-- **`agents/`** — especialistas (`academic_knowledge`, `sigaa`, `conversation`, `tickets`), cada um implementando `BaseAgent`/`AgentContext` (`agents/base.py`) e registrado em `agents/registry.py`. Contém a lógica de decisão/negócio de cada domínio.
-- **`capabilities/`** — adapters de negócio atômicos e burros (scraping SIGAA, RAG/embeddings, mensageria Evolution, persistência SQL), consumidos pelos agentes. Não decidem nada.
+O processamento de mensagem tem **um** orquestrador
+(`application/orchestration/entrypoint.py`, ADR 0008) sobre um `StateGraph`
+do LangGraph cuja topologia é dado (`GraphSpec`). Em volta dele, o código se
+organiza em pacotes de topo ortogonais às camadas de Clean Architecture:
+
+- **`application/orchestration/`** — o orquestrador e o grafo. Entrypoint,
+  builder, nós, estado, spec, routers de aresta. É aqui que mora toda
+  decisão de "para onde esta mensagem vai".
+- **`router/`** — o Supervisor (`rotear()`, 5 camadas: regex → heurística →
+  regex semeada no Redis → KNN → Gemini Flash) e o `gatekeeper` (pré-filtro).
+  **No v1 o Supervisor sai do caminho crítico:** quem decide a rota é o motor
+  de menu, e o Supervisor só roda em degradação. Ver §3.1.
+- **`application/menu/`** — o motor de menu do v1: menu como dado, posição do
+  usuário no Redis, e um resolver que é função pura.
+- **`rag/`** — tudo de RAG: embeddings, ingestão e, em `rag/knowledge/`, a
+  busca e a síntese que respondem a uma pergunta. É o único domínio no
+  caminho crítico do v1.
+- **`domain_services/`** — os domínios fora do v1 (`sigaa`, `tickets`,
+  `conversation`), desligados por kill-switch.
+- **`capabilities/`** — adapters de negócio atômicos, sem decisão: scraping
+  do SIGAA, embeddings, mensageria, persistência.
+- **`graph_studio/`** — biblioteca de componentes do Hub e sandbox do Graph
+  Studio. **Não é o grafo de produção** e não tem consumidor no caminho de
+  mensagem (TD-020, congelado).
 
 ```
 Oraculo/
 ├── src/
-│   ├── api/                    # Apresentação — FastAPI routers, SSE, middleware JWT
-│   │   ├── routers/web/hub.py
-│   │   ├── routers/admin/
-│   │   ├── chain_sse.py
-│   │   └── middleware/
-│   ├── router/                 # Supervisor: decide o agente, sem IO pesada nem regra de negócio
-│   │   ├── supervisor.py        # rotear() — 5 camadas
-│   │   ├── llm_fallback.py       # fallback Gemini Flash (classificação + orchestrate)
-│   │   ├── contracts.py          # ROTAS_VALIDAS, RouterDecision
-│   │   └── gatekeeper.py         # MessageRouter — gate de entrada regex puro
-│   ├── agents/                  # Especialistas — decisão de negócio por domínio
-│   │   ├── academic_knowledge/    # RAG + synthesis + planning + memory_summarizer
-│   │   ├── sigaa/                 # elegibilidade, auth_flow HITL, orquestra scraping
-│   │   ├── conversation/          # saudação, onboarding, funil de cadastro
-│   │   ├── tickets/               # abertura/consulta de chamados GLPI
-│   │   ├── base.py                # BaseAgent (contrato) + AgentContext
-│   │   └── registry.py            # AgentRegistry (resolve por nome)
-│   ├── capabilities/             # Adapters de negócio atômicos, sem decisão
-│   │   ├── sigaa/                  # scraping cru (Playwright)
-│   │   ├── rag/                    # retrieval, embeddings, reranker
-│   │   ├── messaging/               # Evolution API, Gmail tool
-│   │   └── persistence/             # redis_state, admin_config, repositories SQL
-│   ├── application/            # Orquestração fina — runtime, workers, pipeline IA
-│   │   ├── runtime/             # dispatcher.py (processar/_despachar_workers — ex cognitive_os)
-│   │   ├── chain/               # guardrails, planner (whitelist migrada p/ router/contracts.py)
-│   │   ├── workers/             # worker_*.py + registry.py (autodiscovery)
-│   │   ├── tasks/               # Celery tasks (process_message, ingestion, beat)
+│   ├── api/                      # FastAPI — routers web/admin, SSE, middleware JWT
+│   ├── application/
+│   │   ├── orchestration/        # ★ ORQUESTRADOR ÚNICO (ADR 0008)
+│   │   │   ├── entrypoint.py     #   processar() — o caminho de toda mensagem
+│   │   │   ├── builder.py        #   GraphSpec → StateGraph compilado
+│   │   │   ├── nodes.py          #   classify_node + um nó por rota
+│   │   │   ├── routers.py        #   funções de aresta condicional
+│   │   │   ├── spec.py           #   GraphSpec + validate_topology()
+│   │   │   ├── node_manifest.py  #   os 16 tipos de nó
+│   │   │   ├── loader.py         #   spec ativa: Redis → Postgres → default
+│   │   │   └── specs/default.json
+│   │   ├── menu/                 # ★ MOTOR DE MENU do v1 (item B2)
+│   │   │   ├── spec.py           #   menu como dado + validação + render
+│   │   │   ├── resolver.py       #   a decisão, função pura sem I/O
+│   │   │   ├── state.py          #   posição no Redis (menu:{session_id})
+│   │   │   ├── loader.py         #   menu ativo: Redis → Postgres → default
+│   │   │   └── menus/default.json  #  editável por /hub/menu (item C2.5)
+│   │   ├── workers/              # worker_*.py (Celery)
+│   │   ├── tasks/                # process_message, ingestão, beat
 │   │   ├── webhook/              # webhook_controller.py
-│   │   ├── commands/             # Comandos admin WhatsApp (!status, !cache clear)
+│   │   ├── commands/             # comandos admin por WhatsApp
 │   │   └── use_cases/
-│   ├── domain/                 # Entidades, enums, ports (ILLMProvider, vector_store)
-│   ├── infrastructure/         # Adapters técnicos genéricos — DB, Redis, Gemini, Evolution
-│   │   ├── adapters/           # gemini_provider, evolution_adapter, parsers
-│   │   ├── database/           # models.py, session.py (async + NullPool)
-│   │   ├── repositories/
-│   │   ├── services/           # audio, db_connector, graph_extractor, ingestion (services de infra remanescentes)
-│   │   ├── redis_client.py     # índices RedisVL, busca_hibrida (sync p/ Celery)
-│   │   ├── celery_app.py
-│   │   └── message_stream.py   # Redis Streams journal
-│   ├── memory/                 # Ports + adapters da memória (legado + cognitiva)
-│   ├── rag/                    # embeddings, ingestion pipeline
-│   └── main.py                 # Entry point FastAPI
-├── migrations/                 # Alembic (async)
-├── templates/hub/              # Jinja2 admin
-├── static/                     # JS/CSS hub
-├── tests/                      # unit, e2e, eval
-├── observability/              # prometheus.yml, alert_rules.yml
-├── docker-compose.yml
-└── Dockerfile
+│   ├── router/                   # supervisor.py, llm_fallback.py, gatekeeper.py
+│   ├── domain_services/          # sigaa/, tickets/, conversation/ — fora do v1
+│   ├── capabilities/             # sigaa/, rag/, messaging/, persistence/, tools/
+│   ├── graph_studio/             # componentes do Hub + sandbox (NÃO é produção)
+│   ├── domain/                   # entidades, enums, ports (ILLMProvider...)
+│   ├── infrastructure/           # adapters técnicos, DB, Redis, Celery, observabilidade
+│   ├── memory/                   # ports + adapters da memória cognitiva
+│   ├── rag/                      # embeddings, ingestão
+│   │   └── knowledge/            #   busca + síntese — o RAG do v1
+│   └── main.py
+├── migrations/                   # Alembic — 027 migrations (ver §6.2)
+├── templates/hub/ · static/      # portal admin
+├── tests/                        # unit, integration, e2e, eval
+├── observability/                # prometheus.yml, alert_rules.yml
+└── docker-compose.yml · Dockerfile
 ```
 
-**Fluxo de decisão:** `application/tasks/process_message_task.py` → `router.supervisor.rotear()` (retorna nome do agente) → `agents.registry.resolve(nome)` → `agent.execute(context)` → `application/runtime/dispatcher.dispatch(...)` (monta chain Celery). Ver `PLANO_REFATORACAO_SUPERVISOR.md` para o histórico completo da migração (Fases 0-7).
+### 3.1 Quem decide a rota
 
-⚠️ **Correção (2026-08-25, plano de integração LangGraph/REST/MCP, Decisão
-01):** o orquestrador real de produção hoje é `application/runtime/dispatcher_langgraph.py`
-(`langgraph_experiment/graph.py` — StateGraph), não `dispatcher.py`
-diretamente — este último fica como motor interno (chamado por dentro do
-outro pras rotas que o grafo ainda não cobre) e caminho de debug/eval
-(SSE/`hub.py`/`eval_api.py`). Migração em andamento pra portar
-SIGAA/MEDIA_DOWNLOAD/GREETING/CHECK_STATUS pro grafo (branch
-`integration/langgraph-rest-mcp`), atrás de `settings.FEATURE_LANGGRAPH_NATIVE_ROUTES`.
-Uma reescrita completa desta seção fica pra quando a migração fechar (não
-antes) — ver `docs/decisions/0001-langgraph-nao-aprovado-para-main.md`.
+Duas configurações, e a diferença é o v1 inteiro:
+
+| `FEATURE_MENU_BOT` | Quem decide | Custo de decidir |
+|---|---|---|
+| `true` (default, v1) | `application/menu/resolver.py`, no passo 0.5 do entrypoint. O grafo é invocado já com `route` e `rota` preenchidos, e `classify_node` não faz nada. | Zero token |
+| `false` (rollback) | `router/supervisor.py::rotear()`, chamado pelo `classify_node` dentro do grafo. | Até uma chamada de Gemini Flash por mensagem |
+
+Com o menu ligado, navegar, ler um texto fixo e pedir atendente **nem chegam
+ao grafo**. Só uma folha de "tirar dúvida" invoca o grafo, e aí a rota e o
+`doc_type` vêm da tecla que o usuário apertou — não de um palpite sobre o
+texto dele.
+
+### 3.2 Não existe resolução dinâmica de agente
+
+O mecanismo `AgentRegistry` / `BaseAgent.execute(AgentContext)` **foi
+removido em 2026-09-10**. Ele prometia que "o roteador nunca importa uma
+classe de agente, sempre resolve por nome" — e isso nunca aconteceu:
+`resolve()` só era chamado pelo painel `/hub/agents` e por uma checagem de
+nome no `route_registry`, ambos querendo apenas a lista de nomes válidos.
+
+Um Protocol, um registro em memória, um bootstrap assíncrono e quatro classes
+adaptadoras para entregar quatro strings custavam mais do que rendiam, e o
+custo era concreto: a arquitetura *parecia* ter um framework multiagente
+plugável, e a documentação repetiu isso por meses.
+
+No lugar ficou `domain/agentes.py` — o conjunto fechado de nomes e a
+descrição de partida. "Agente" aqui significa **um domínio de conhecimento
+que pode ser ligado ou desligado inteiro** pelo painel, não um processo
+autônomo.
+
+Cada nó ou worker importa a classe de serviço do domínio direto:
+`worker_sigaa.py` → `SigaaService`; o RAG → `RAGSearchService` e
+`SynthesisService`; `process_message_task.py` → `RegistrationFunnel`.
+
+**Descrição honesta da arquitetura:** roteador determinístico (menu no v1,
+Supervisor antes dele) + módulos de serviço especializados chamados
+estaticamente por rota. Não há agente autônomo decidindo chamadas de
+ferramenta em loop. O LLM generativo entra em três pontos, e no v1 só o
+segundo continua no caminho crítico:
+
+1. Fallback de classificação (camada 5 do Supervisor) — **fora do v1**.
+2. Síntese da resposta a partir dos chunks do RAG.
+3. Extração de fatos para a memória de longo prazo (job noturno, opcional).
+
+O `AgentRegistry` continua correto para o que faz hoje: registro central para
+o painel admin. O que não existe é a ponte entre ele e a execução.
 
 ---
 
@@ -167,82 +239,100 @@ def create_app() -> FastAPI:
 
 ### 4.3 Gemini (papéis no pipeline)
 
-> ⚠️ **Correção (2026-08-25):** esta tabela descrevia um roteamento de modelo
-> por componente (Flash para uns, Pro para outros) que **não existe no
-> código**. O código real usa uma única `settings.GEMINI_MODEL` para todos os
-> componentes abaixo — não há diferenciação Flash/Pro automática. O erro já
-> tinha sido identificado em `docs/historico/analise_custo_real_llm.md` §2 e
-> é citado em `notas.md` §9.8/§13; a tabela nunca tinha sido corrigida aqui
-> até agora.
+> Reescrita em 2026-09-09 (item A2). A versão anterior tinha uma caixa de
+> correção admitindo que a tabela descrevia um roteamento de modelo que não
+> existia. A tabela abaixo é o código.
 
-| Componente         | Modelo (settings)                                                               | Papel                                                    |
-| ------------------ | -------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `GeminiProvider`   | `settings.GEMINI_MODEL` (uma única var, usada por todos os componentes abaixo) | Geração texto, structured output                         |
-| Embeddings         | `models/gemini-embedding-001`               | 3072d, ingestão + busca vetorial                         |
-| Semantic Router L5 | `GEMINI_MODEL`                       | Classificação de intent (~50 tokens)                     |
-| LLM Orchestrator   | `GEMINI_MODEL`                       | `call_rag`, `call_sigaa`, `reply_direct`, `check_status` |
-| Planner            | `GEMINI_MODEL` (via `planning.py`)                        | Gera DAG JSON de workers                                 |
-| Synthesis Worker   | `GEMINI_MODEL`                         | Resposta final grounded no RAG                           |
-| LLMFactExtractor   | `GEMINI_MODEL`                       | Extração de fatos L4                                     |
+Um único modelo (`settings.GEMINI_MODEL`, hoje `gemini-2.5-flash`) atende
+todos os componentes. Não há escolha automática Flash/Pro por papel. O que
+existe é `LLM_MODEL_FAST`: quando preenchido, os passos baratos e de alto
+volume usam esse modelo, e a **síntese da resposta ao aluno sempre usa o
+modelo forte**. Vazio (o default) significa "o mesmo para tudo".
 
-Além de Gemini, o sistema suporta **DeepSeek e Groq** como providers
-alternativos (troca em runtime via `/hub/llm-custo`, sem restart) — ver
-`src/infrastructure/adapters/llm_factory.py::get_llm_provider()` e
-`src/infrastructure/adapters/openai_compatible_provider.py`. Isso não estava
-documentado nesta seção antes; ver `notas.md` §13 para o histórico completo.
+| Componente | Modelo | Papel | No v1 |
+|---|---|---|---|
+| Embeddings | `models/gemini-embedding-001` | 3072d, ingestão e busca vetorial | Ativo |
+| Síntese (`SynthesisService`) | `GEMINI_MODEL` | Resposta final, ancorada nos chunks do RAG | **Ativo — é a única chamada de LLM do caminho crítico** |
+| Supervisor, camada 5 | `GEMINI_MODEL` (ou `LLM_MODEL_FAST`) | Classificação de intenção, ~50 tokens | **Fora do caminho** — quem roteia é o menu |
+| `QueryTransformService` (Flash) | `GEMINI_MODEL` (ou `LLM_MODEL_FAST`) | Reescreve a query antes da busca | **Desligado** (`FEATURE_QUERY_TRANSFORM_LLM=false`, item B6) |
+| `LLMFactExtractor` | `GEMINI_MODEL` (ou `LLM_MODEL_FAST`) | Extração de fatos para a memória L4 | Só no job noturno, opcional |
 
-Adapter: `src/infrastructure/adapters/gemini_provider.py` — SDK `google.genai`, retry exponencial (tenacity), implementa `ILLMProvider`.
+Componentes que a tabela antiga listava e **não existem mais**: o `Planner`
+(gerava um DAG JSON de workers) e o `LLM Orchestrator` (`orchestrate()`),
+ambos deletados pela ADR 0008 Fase 3.
+
+Além do Gemini, há **DeepSeek e Groq** como providers alternativos, trocáveis
+em runtime por `/hub/llm-custo` sem restart — `llm_factory.py::get_llm_provider()`
+e `openai_compatible_provider.py`. Providers adicionais compatíveis com a API
+da OpenAI podem ser cadastrados pelo painel (ADR 0007), sem deploy.
+
+Adapter: `adapters/gemini_provider.py` — SDK `google.genai`, retry exponencial
+com tenacity, implementa `ILLMProvider`. **Não chame `genai.Client` direto:**
+`get_llm_provider()` é o único ponto que grava telemetria em `metricas_llm`.
 
 ---
 
 ## 5. Fluxo End-to-End (WhatsApp → Resposta)
 
+> Reescrito em 2026-09-09 (item A2). O fluxo anterior descrevia
+> `dispatcher.processar()`, `orchestrate()`, o Planner e o polling do stream
+> `final_responses` — nada disso existe desde a ADR 0008.
+
 ```
 Evolution API
     │ POST /webhook/evolution
     ▼
-FastAPI (200 imediato)
+FastAPI — responde 200 imediatamente
     │ processar_mensagem_whatsapp.delay()
     ▼
-Celery [queue: default]
-    │ MessageRouter → comandos admin / funnel cadastro / chat
+Celery [fila: default]
     │ XADD oraculo:stream:messages (durabilidade)
     ▼
-processar_mensagem_task
-    │ 1. Porteiro: PessoaRepository → PostgreSQL (telefone, status, RBAC)
-    │ 2. Lock: lock:msg:{phone} (TTL 90s)
-    │ 3. MemoryService.carregar_contexto()
+process_message_task
+    │ 1. Porteiro: PessoaRepository → Postgres (telefone, status, RBAC)
+    │ 2. Lock por telefone: lock:msg:{phone}, TTL 90s
+    │ 3. MemoryService.carregar_contexto() — histórico L1 + fatos L4
     ▼
-application/runtime/dispatcher.processar()   # ex CognitiveOS.processar()
-    │ Guardrails input
-    │ HITL intercept (hitl:session:{sid}) → agents/sigaa/auth_flow.py
-    │ router.llm_fallback.orchestrate() (LN) OU router.supervisor.rotear() (comandos !@$)
-    │   Supervisor 5 camadas: regex L1 → heurística L2 → regex seeded L3 → KNN L4 → Flash L5
-    │ SemanticCache (cosine > 0.92)
-    │ Planner (agents/academic_knowledge/planning.py) → DAG JSON
-    │ WorkerRegistry.dispatch() → Celery workers especializados
-    │ Poll Redis Stream final_responses (timeout 15s)
-    │ Guardrails output
+application/orchestration/entrypoint.py::processar()   ← ORQUESTRADOR ÚNICO
+    │ -3. Sessão em atendimento humano? (handoff:session:*) → silêncio
+    │ -2. Fast-path de áudio (STT)
+    │ -1. Fast-path de mídia sem legenda · labs REST/MCP
+    │  0a. Guardrails de entrada · HITL legado do SIGAA
+    │  0b. Retomada de interrupt() pendente (funil de ticket/CRUD)
+    │  0.5 MOTOR DE MENU (v1) ─┬─ menu ou texto fixo → responde aqui, 0 token
+    │                          ├─ handoff → grafo, nó human_handoff
+    │                          └─ pergunta → grafo, rota e doc_type já decididos
     ▼
-EvolutionAdapter.enviar_mensagem()
-    │ XACK stream
+StateGraph (builder.py, topologia = GraphSpec ativa)
+    │ classify_node — não faz nada quando o menu já decidiu;
+    │                 classifica + aplica circuit-breaker quando não
     ▼
-WhatsApp (grupo homologado ALLOWED_GROUP_ID)
+nó terminal da rota
+    │ rag → busca híbrida (2× FT.SEARCH + RRF + rerank) → síntese
+    │ greeting · human_handoff · check_status · media_download · sigaa
+    │ funis de ticket/CRUD (nós travados, com interrupt())
+    ▼
+entrypoint anexa a tela "Isso ajudou?" quando a resposta veio do RAG
+    │ Guardrails de saída
+    ▼
+EvolutionAdapter.enviar_mensagem() → XACK → WhatsApp
 ```
 
-**Workers registrados** (`registry.py` autodiscovery `worker_*.py`):
+**Onde o LLM entra:** só no nó `rag`, na síntese. Todo o resto do diagrama é
+determinístico.
 
+**Workers Celery e suas filas** (containers em `docker-compose.yml`):
 
-| Worker                                                             | Fila       | Função                            |
-| ------------------------------------------------------------------ | ---------- | --------------------------------- |
-| `rag_search`                                                       | rag_search | Busca híbrida Redis + rerank CPU  |
-| `synthesis`                                                        | synthesis  | Gemini Pro → resposta final       |
-| `reranker`                                                         | rag_search | Cross-encoder local               |
-| `sigaa_`*                                                          | default    | Scraping SIGAA (Playwright agent) |
-| `audio_to_text`, `text_to_audio`, `ytb_download`, `insta_download` | media      | Multimídia                        |
-| `graph_extractor`                                                  | graph      | Extração grafo institucional      |
-| `memory_manager`, `db_connector`, `action`, `greeting`             | default    | Auxiliares                        |
+| Worker | Fila | Função | Estado |
+|---|---|---|---|
+| `worker_rag_search` | `rag_search` | Busca híbrida + rerank | Ocioso — `FEATURE_LANGGRAPH_CELERY_DISPATCH=false`, o RAG roda in-process |
+| `worker_synthesis` | `synthesis` | Síntese da resposta | Ocioso, mesmo motivo |
+| `worker_sigaa` | `default` | Scraping do SIGAA (Playwright) | Fora do v1 |
+| `worker_audio_to_text`, `worker_text_to_audio` | `media` | STT e TTS | Ativos |
+| `worker_media_download` | `media` | Download de mídia | Fora do v1 |
+| ~~`worker_graph_extractor`, `worker_db_connector`, `worker_memory_manager`, `worker_reranker`~~ | — | — | **Deletados** em 2026-09-09 (item A8b) — não tinham chamador nenhum |
 
+O worker `graph` (fila `graph`) está desligado desde 2026-07-31.
 
 ---
 
@@ -276,7 +366,34 @@ WhatsApp (grupo homologado ALLOWED_GROUP_ID)
 018 canais             (instância de comunicação criada pelo painel)
 019 mcp_servers +cols  (auth_tipo/auth_env/latency_ms/last_checked/tools_expostas)
 020 config: FEATURE_GRAPH_EXECUTOR_PILOTO   (default false, nada lê no hot path)
+── Orquestrador único (ADR 0008) ──
+021 graph_topology_gatilho          (coluna de gatilho na topologia do Graph Studio)
+022 route_registry: ESCALAR_HUMANO  (rota + nó terminal human_handoff, Fase 2)
+023 orquestrador_unico_langgraph    (Fase 3: owner='langgraph' em TODAS as rotas;
+                                     remove route_registry.planner_steps — o DAG do
+                                     Planner — e a flag FEATURE_LANGGRAPH_NATIVE_ROUTES)
+024 graph_spec                      (Fase 5: topologia do grafo como dado, com
+                                     versão, histórico e revert)
+── Bot de menu (v1) ──
+025 menu_config                     (o menu do bot como dado: telas, opções e
+                                     respostas prontas, editáveis por /hub/menu,
+                                     com versão, histórico e revert)
+026 config_rate_limit               (RATE_LIMIT_MSGS / RATE_LIMIT_WINDOW_S na
+                                     config dinâmica — limite por pessoa
+                                     ajustável sem reiniciar)
+027 telemetria_llm                  (metricas_llm ganha tokens de cache/
+                                     reasoning, custo aberto por componente em
+                                     numeric, origem do preço, status do custo
+                                     e request_id idempotente)
 ```
+
+`alembic upgrade head` deve chegar em **027**. A listagem anterior parava em
+020, o que dava a impressão de que as migrations da ADR 0008 não existiam.
+
+`menu_config` nasce **vazia**, de propósito: enquanto ninguém editar o menu
+pelo painel, vale o JSON embutido em `application/menu/menus/default.json`.
+Um seed ali viraria uma "versão 1 oficial" competindo com o arquivo a cada
+atualização de código.
 
 Toda tabela de config/registro nasce com `tenant_id UUID NULL` + índice único
 `(tenant_id, chave/nome)` `NULLS NOT DISTINCT` — precondição de multi-tenancy
@@ -372,13 +489,86 @@ celery_app = Celery(
 
 **Ingestão:** `src/rag/ingestion/pipeline.py` → parser (PyMuPDF/RapidOCR) → chunker → embedding Gemini → `salvar_chunk()` Redis.
 
-**Retrieval:** `agents/academic_knowledge/service.py` (`RAGSearchService.buscar()`, decisão) + `capabilities/rag/retrieval.py` (mecânica de busca/RRF):
+**Retrieval:** `rag/knowledge/service.py` (`RAGSearchService.buscar()`, decisão) + `capabilities/rag/retrieval.py` (mecânica de busca/RRF):
 
 1. Query transform (Gemini Flash, opcional).
 2. `busca_hibrida()` — BM25 + KNN + RRF.
 3. Filtros metadata (`ano=2026`, `tipo_doc`).
 4. Rerank cross-encoder local (CPU).
 5. Registro opcional em `document_chunks` (Postgres).
+
+### 8.1 Como um trecho é guardado — e por que o formato importa
+
+> Achado de 2026-09-11, durante a primeira ingestão real da wiki da CTIC.
+> Registrado com detalhe porque o sintoma não apontava para a causa, e a
+> conta que resolveu é reaproveitável.
+
+**Cada trecho é um HASH do Redis**, com o texto, a taxonomia e o embedding
+como **float32 binário** (3072 dimensões × 4 bytes = 12.288 bytes exatos). O
+índice `idx:rag:chunks` declara `storage_type: hash`.
+
+#### O sintoma
+
+A ingestão da wiki (1383 páginas) foi ao ar e, por volta da página 600, o
+Redis começou a recusar toda escrita:
+
+```
+redis.exceptions.OutOfMemoryError:
+command not allowed when used memory > 'maxmemory'
+```
+
+O efeito foi bem além da ingestão: **o bot parou**. Sem escrita no Redis não
+há posição de menu, não há cache, não há checkpoint de conversa. Uma tarefa de
+carga de conteúdo derrubou o produto.
+
+Antes disso, um sintoma mais sutil já tinha aparecido e sido mal interpretado:
+o índice de busca "esvaziou" sozinho depois de um restart. A leitura correta é
+que a pressão de memória com a política `volatile-lru` derruba o que tem
+prazo de validade, e o índice ficou inconsistente com o keyspace.
+
+#### A causa
+
+O `salvar_chunk` gravava o documento com `r.json().set()`, e o embedding ia
+como **array JSON de 3072 números em texto**. Cada número vira algo como
+`0.023841857910156250` — cerca de 20 caracteres. O vetor sozinho ocupava
+aproximadamente 60 KB de texto para representar 12 KB de dados.
+
+Medido no ambiente real, com amostragem completa (`MEMORY USAGE ... SAMPLES 0`;
+a amostragem padrão subestima HASH com campos de tamanhos muito diferentes):
+
+| formato | por trecho | wiki inteira (~16.500 trechos) |
+|---|---|---|
+| JSON (antes) | **81,2 KB** | ~1,34 GB |
+| HASH binário (agora) | **15,5 KB** | ~256 MB |
+
+**Redução de 81%.** O índice vetorial em si nunca foi o problema: ele já
+guardava float32 e custava ~98 MB para 7.169 trechos. O desperdício estava
+inteiro no documento de origem.
+
+#### Por que a troca é segura
+
+A dúvida legítima era se a busca do menu sobreviveria: ela faz KNN vetorial
+**com filtro de TAG** (`doc_type`, e `sistema` para separar SIGAA de SIPAC).
+Antes de migrar, os dois formatos foram medidos lado a lado em índices
+paralelos, com a mesma consulta — `(@doc_type:{wiki_ctic} @sistema:{SIPAC})
+=>[KNN 5 @embedding $v]` — e devolveram resultados equivalentes. O RediSearch
+trata vetor binário em HASH como cidadão de primeira classe.
+
+#### O que mudou junto
+
+* `maxmemory` do Redis: 768 MB → **1536 MB**, e o `mem_limit` do container
+  1 GB → 2 GB. Não é o conserto — é a folga que faltava depois dele. Com o
+  formato antigo, aumentar memória só adiaria o mesmo estouro.
+* `volatile-lru` foi **mantida**. A política está certa: sob pressão, evictar
+  só o que tem TTL protege os trechos do RAG e os checkpoints. Foi ela que
+  transformou o problema num erro explícito em vez de corrupção silenciosa.
+
+#### A lição, em uma frase
+
+Representação de vetor não é detalhe de implementação: em base vetorial, é a
+diferença entre caber e não caber. E `MEMORY USAGE` sem `SAMPLES 0` mente
+sobre HASH com campos heterogêneos — foi o que quase fez esta análise
+subestimar o ganho.
 
 ---
 
@@ -398,7 +588,18 @@ migration          → alembic upgrade head (one-shot)
 
 ## 10. Pontos de Atenção Técnicos
 
-1. **Modelo Gemini:** `.env.example` usa `gemini-2.5-flash-lite`; README referencia `gemini-2.0-flash`. Código default: `settings.GEMINI_MODEL = "gemini-2.5-flash"`.
+> ⚠️ **Esta seção é um registro cronológico, não uma descrição do sistema
+> atual.** Vários itens abaixo citam `dispatcher.py::processar()` — o arquivo
+> foi deletado pela ADR 0008 e o que ele fazia hoje está em
+> `application/orchestration/entrypoint.py`. O achado de cada item continua
+> válido; só o endereço mudou. Para o estado atual, ver §3, §5 e
+> [`docs/ESTADO_ATUAL.md`](../ESTADO_ATUAL.md).
+
+1. **Modelo Gemini:** hoje os três lugares concordam em `gemini-2.5-flash`
+   (default de `settings.py`, `.env.example`, seed da migration 009). O item
+   original apontava divergência entre `.env.example` (`gemini-2.5-flash-lite`)
+   e o README (`gemini-2.0-flash`); foi resolvido. Falta só conferir o valor
+   gravado em runtime em `config_dinamica`, que tem precedência — ver TD-010.
 2. **Sync vs Async Redis:** funções em `redis_client.py` são síncronas para Celery; async (`redis.asyncio`) só no FastAPI/Cognitive OS.
 3. **Grupo WhatsApp:** webhook filtra `ALLOWED_GROUP_ID` — ambiente homologado.
 4. **Identidade obrigatória:** usuário não cadastrado/inativo é bloqueado antes de qualquer chamada LLM (economia de tokens).

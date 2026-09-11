@@ -11,6 +11,20 @@ logger = logging.getLogger(__name__)
 from src.application.orchestration.state import OraculoState
 
 
+def _rota_ativa(rota: str) -> bool:
+    """A rota está no escopo do v1? (item B3)
+
+    Lê `settings.ROTAS_ATIVAS` a cada chamada em vez de cachear num set de
+    módulo: a lista é config, e config que só vale depois de um restart é
+    exatamente o tipo de coisa que já mordeu este projeto antes
+    (`llm_factory._providers_validos`, ADR 0007). Lista vazia = sem
+    restrição."""
+    from src.infrastructure.settings import settings
+
+    ativas = {r.strip().upper() for r in settings.ROTAS_ATIVAS.split(",") if r.strip()}
+    return not ativas or rota.upper() in ativas
+
+
 async def classify_node(state: OraculoState) -> dict:
     """ÚNICO ponto de classificação do sistema (ADR 0008 Fase B) — chama o
     Supervisor real (`router/supervisor.py::rotear()`, 5 camadas) e aplica o
@@ -25,9 +39,19 @@ async def classify_node(state: OraculoState) -> dict:
     corria no branch de invocação nova de `processar()`, depois do check de
     `state.next` — ver `entrypoint.py`).
 
-    `if state.route:` é só pro REPL (`scripts/graph_repl.py`) testar um nó
-    isolado sem passar pelo Supervisor completo — em produção `state.route`
-    nunca chega preenchido aqui (o `entrypoint.py` não classifica mais)."""
+    `if state.route:` era só pro REPL (`scripts/graph_repl.py`) testar um nó
+    isolado sem passar pelo Supervisor completo. **No v1 (bot de menu) esse
+    passa a ser o caminho NORMAL:** o motor de menu resolve a rota de forma
+    determinística no `entrypoint.py` e o grafo chega aqui com `route` e
+    `rota` já preenchidos, então este nó não faz nada. É assim que navegar o
+    menu custa zero token — ver `docs/ESTADO_ATUAL.md` §1.
+
+    Chegar aqui SEM `route` com o menu ligado significa que o motor de menu
+    não conseguiu resolver (Redis fora, config corrompida) e o
+    `entrypoint.py` degradou de propósito para o Supervisor — ver
+    `_resolver_menu`. Nesse caso classificar de verdade é o comportamento
+    certo: uma resposta paga é melhor que uma resposta errada. Não curto-
+    circuitar aqui, sob risco de a degradação virar um bug silencioso."""
     if state.route:
         return {}
 
@@ -36,6 +60,25 @@ async def classify_node(state: OraculoState) -> dict:
     decision = await rotear(state.message, state.session_id, state.user_context)
 
     from src.infrastructure import route_registry
+
+    # ── Kill-switch por ROTA (v1, item B3) ────────────────────────────────
+    # Segunda tranca das rotas fora do escopo do v1. A primeira é o próprio
+    # menu, que nunca as escolhe; esta pega o caminho de degradação (menu
+    # falhou, Supervisor classificou CALENDARIO) e qualquer entrada que não
+    # passe pelo menu. É por ROTA e não por agente porque cinco rotas
+    # dividem o agente `academic_knowledge` — ver `settings.ROTAS_ATIVAS`.
+    if not _rota_ativa(decision.rota):
+        logger.info("🚧 [ORCH] rota %s fora do escopo do v1 (session=%s)",
+                    decision.rota, state.session_id)
+        return {
+            "rota": decision.rota, "route": "", "cancelado": False,
+            "answer": (
+                "Ainda não sei responder sobre isso. 😕\n\n"
+                "Escreva *menu* para ver o que eu já faço, "
+                "ou *0* para falar com um atendente da CTIC."
+            ),
+            "plan_id": "rota_fora_do_v1", "status": "ok", "early_exit": True,
+        }
 
     rr = route_registry.get(decision.rota)
 
@@ -138,11 +181,16 @@ async def responder_rag_direto(
             mensagem, rota=rota, history=history, fatos=fatos, session_id=session_id,
         )
 
-    from src.agents.academic_knowledge.service import RAGSearchService
-    from src.agents.academic_knowledge.synthesis import SynthesisService
+    from src.rag.knowledge.service import RAGSearchService
+    from src.rag.knowledge.synthesis import SynthesisService
 
     doc_type, k = _rag_params_para_rota(rota, mensagem)
     rag = RAGSearchService()
+    # Taxonomia estrita quando foi o USUÁRIO quem a escolheu (apertou a tecla
+    # do menu), e não um classificador. Ver a nota no passo 7 de
+    # `RAGSearchService.buscar`. Com o menu desligado (rollback), o
+    # `doc_type` volta a ser palpite do Supervisor e o comportamento amplo
+    # de antes é o certo.
     result = await rag.buscar(
         mensagem,
         doc_type=doc_type,
@@ -150,6 +198,7 @@ async def responder_rag_direto(
         rota=rota,
         fatos=fatos,
         historico=history,
+        taxonomia_estrita=settings.FEATURE_MENU_BOT and doc_type != "geral",
     )
     if not result.ok or not result.data.get("found"):
         return result.message or "Não encontrei informações sobre isso nos documentos da UEMA."
@@ -359,11 +408,11 @@ async def media_download_node(state: OraculoState) -> dict:
 
 async def sigaa_node(state: OraculoState) -> dict:
     """Rota SIGAA — reaproveita start_or_continue_sigaa() (fatorado em
-    agents/sigaa/auth_flow.py). A continuação do HITL (CPF/senha) não passa
+    domain_services/sigaa/auth_flow.py). A continuação do HITL (CPF/senha) não passa
     por aqui — é interceptada antes de rotear, por handle_hitl_continuation
     no entrypoint; este node só cobre o INÍCIO do fluxo (1ª mensagem
     classificada como SIGAA)."""
-    from src.agents.sigaa.auth_flow import start_or_continue_sigaa
+    from src.domain_services.sigaa.auth_flow import start_or_continue_sigaa
     from src.infrastructure.redis_client import get_redis_text
     from src.router.contracts import RouterDecision
 
@@ -395,8 +444,17 @@ async def sigaa_node(state: OraculoState) -> dict:
 # ESCALAR_HUMANO — nó terminal (ADR 0008 Fase 2). Silencia o bot pra a sessão
 # por 24h (`handoff:session:{id}`), registra na fila `handoff:queue` e avisa
 # um grupo/número de suporte. `gate`/`entrypoint` checam `handoff:session:*`
-# no topo e não respondem nada enquanto durar. Sai do modo com `$voltar <jid>`
-# (admin) ou o TTL.
+# no topo e não respondem nada enquanto durar.
+#
+# TRÊS saídas, e a terceira existe por um beco real (2026-09-10):
+#   1. o TTL de 24h;
+#   2. `$voltar <jid>` — comando de admin, só pelo WhatsApp;
+#   3. a página `/hub/handoffs` do painel.
+#
+# Sem a (3), quem testava pelo simulador de chat do painel ficava presa: o
+# simulador não passa pelo gatekeeper de comandos, então a saída (2) era
+# inalcançável de lá. Aconteceu de verdade — uma sessão do painel ficou muda
+# por 22h.
 # ─────────────────────────────────────────────────────────────────────────────
 
 _HANDOFF_TTL_S = 86400
@@ -435,7 +493,9 @@ async def human_handoff_node(state: OraculoState) -> dict:
         f"Pessoa: {nome}\n"
         f"Última mensagem: {state.message[:200]}\n"
         + (f"\n_Histórico recente:_\n{hist_curto}" if hist_curto else "")
-        + f"\n\nO bot está pausado para esta conversa por 24h. Reativar: `$voltar {session_id}`"
+        + "\n\nO bot está pausado para esta conversa por 24h."
+        + f"\nPara devolver antes do prazo: `$voltar {session_id}` aqui pelo "
+        + "WhatsApp, ou o botão em *Atendimento humano* no painel."
     )
 
     try:
@@ -504,7 +564,7 @@ _CATEGORIA_SINONIMOS: dict[int, re.Pattern] = {
 
 
 def validar_categoria(texto: str) -> tuple[bool, str | None]:
-    from src.agents.tickets.ticket_flow import SEED_CATEGORIAS
+    from src.domain_services.tickets.constantes import SEED_CATEGORIAS
 
     categoria_por_id = {c["id"]: c["nome"] for c in SEED_CATEGORIAS}
     t = texto.strip()
@@ -627,7 +687,7 @@ async def ticket_ask_tipo(state: OraculoState) -> dict:
     # Roda no topo do node de ENTRADA do funil: LangGraph reexecuta o corpo
     # do node do início a cada resume, então isso é rechecado a cada turno
     # (leitura pura, sem side effect — idempotente, ok repetir).
-    from src.agents.tickets.rbac import checar_permissao_chamado
+    from src.domain_services.tickets.rbac import checar_permissao_chamado
 
     autorizado, msg_bloqueio, _ = await checar_permissao_chamado(state.session_id)
     if not autorizado:
@@ -654,7 +714,7 @@ def _tipo_valido(state: OraculoState) -> str:
 
 
 async def ticket_ask_categoria(state: OraculoState) -> dict:
-    from src.agents.tickets.ticket_flow import SEED_CATEGORIAS
+    from src.domain_services.tickets.constantes import SEED_CATEGORIAS
 
     lista = "\n".join(f"{c['id']}. {c['nome']}" for c in SEED_CATEGORIAS)
     pergunta = _com_erro(
@@ -742,7 +802,7 @@ async def ticket_save(state: OraculoState) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # Funil de CRUD de cadastro — mesmo padrão do ticket (1 interrupt por node,
 # validação com re-pergunta, save separado do confirm). Escopo igual ao
-# crud_tool.py original (src/agents/tickets/crud_tool.py): só setor/telefone.
+# crud_tool.py original (src/domain_services/tickets/crud_tool.py): só setor/telefone.
 # Reaproveita a mesma função de escrita real
 # (ticket_repository.atualizar_setor_e_telefone) e o mesmo gate
 # settings.DEV_TEST_NO_DB_WRITE — nenhuma lógica de persistência nova.
@@ -752,7 +812,7 @@ async def ticket_save(state: OraculoState) -> dict:
 async def crud_ask_campo(state: OraculoState) -> dict:
     # RBAC — mesma checagem do fluxo real (crud_tool.py), portada pra cá.
     # Mesmo motivo/idempotência do ticket_ask_tipo (ver comentário lá).
-    from src.agents.tickets.rbac import checar_permissao_chamado
+    from src.domain_services.tickets.rbac import checar_permissao_chamado
 
     autorizado, msg_bloqueio, _ = await checar_permissao_chamado(state.session_id)
     if not autorizado:

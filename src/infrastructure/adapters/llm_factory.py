@@ -131,6 +131,22 @@ def get_llm_provider(
     return MonitoredLLMProvider(provider, rota_hint=rota)
 
 
+def _trace_id_atual() -> str:
+    """Id do span ativo do OpenTelemetry, se o tracing estiver ligado.
+
+    Vazio quando desligado (o default) — o `trace_id` liga a linha de
+    telemetria ao trace distribuído quando ele existe, e não é obrigatório."""
+    try:
+        from opentelemetry import trace
+
+        contexto = trace.get_current_span().get_span_context()
+        if contexto and contexto.is_valid:
+            return format(contexto.trace_id, "032x")
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 class MonitoredLLMProvider:
     """Envolve qualquer ILLMProvider real e registra telemetria (Postgres
     `metricas_llm` + Prometheus) a cada chamada — ponto único de
@@ -234,44 +250,85 @@ class MonitoredLLMProvider:
 
     # ─── Telemetria (nunca deve derrubar a resposta ao usuário) ───────────────
 
+    def _montar_uso(
+        self, tokens_in: int, tokens_out: int, ms: int, user_id: str, rota: str,
+        *, tokens_cache: int = 0, tokens_reasoning: int = 0,
+    ):
+        """Evento normalizado da chamada, com o custo já resolvido.
+
+        Centraliza o que antes estava duplicado entre o caminho async e o
+        sync, e substitui `pricing.calcular_custo_usd` — que devolvia `0.0`
+        tanto para "de graça" quanto para "não sei o preço". Ver
+        `observability/usage.py`."""
+        from src.infrastructure.observability import pricing_resolver
+        from src.infrastructure.observability.usage import TokenCountStatus, UsoLLM
+
+        # Os três providers em uso devolvem uso real. Zero em AMBOS os
+        # sentidos, porém, é sinal de que a resposta veio sem `usage` — não
+        # de uma chamada que não gastou nada.
+        contagem = (
+            TokenCountStatus.REAL
+            if (tokens_in or tokens_out)
+            else TokenCountStatus.DESCONHECIDO
+        )
+
+        uso = UsoLLM(
+            provider=self.provider_name, model=self.model,
+            input_tokens=tokens_in or 0, output_tokens=tokens_out or 0,
+            cached_input_tokens=tokens_cache or 0,
+            reasoning_tokens=tokens_reasoning or 0,
+            token_count_status=contagem,
+            user_id=user_id, rota=rota, latencia_ms=ms,
+            trace_id=_trace_id_atual(),
+        )
+
+        preco = pricing_resolver.resolver_preco(self.provider_name, self.model)
+        uso.custo = pricing_resolver.calcular_custo(
+            preco=preco,
+            input_tokens=uso.input_tokens, output_tokens=uso.output_tokens,
+            cached_input_tokens=uso.cached_input_tokens,
+            reasoning_tokens=uso.reasoning_tokens,
+            token_count_status=uso.token_count_status,
+        )
+        return uso
+
     async def _registrar_async(self, tokens_in: int, tokens_out: int, ms: int, user_id: str, rota: str) -> None:
-        custo = pricing.calcular_custo_usd(self.provider_name, self.model, tokens_in, tokens_out)
+        uso = self._montar_uso(tokens_in, tokens_out, ms, user_id, rota)
         try:
             from src.infrastructure.database.session import AsyncSessionLocal
             from src.infrastructure.repositories.observability_repository import ObservabilityRepository
 
             async with AsyncSessionLocal() as session:
-                repo = ObservabilityRepository(session)
-                await repo.salvar_metrica_llm(
-                    user_id=user_id, rota=rota,
-                    tokens_entrada=tokens_in, tokens_saida=tokens_out,
-                    latencia_ms=ms, custo_usd=custo,
-                    modelo=self.model, provider=self.provider_name,
-                )
+                await ObservabilityRepository(session).salvar_uso_llm(uso)
         except Exception as exc:
             logger.warning("⚠️ [MONITORED_LLM] falha ao gravar metricas_llm: %s", exc)
-        self._prometheus(tokens_in, tokens_out, custo, ms, rota)
+        self._prometheus_uso(uso)
 
     def _registrar_sync(self, tokens_in: int, tokens_out: int, ms: int, user_id: str, rota: str) -> None:
-        custo = pricing.calcular_custo_usd(self.provider_name, self.model, tokens_in, tokens_out)
+        uso = self._montar_uso(tokens_in, tokens_out, ms, user_id, rota)
         try:
-            from src.infrastructure.repositories.observability_repository import salvar_metrica_sync
-            salvar_metrica_sync(
-                user_id=user_id, rota=rota,
-                tokens_entrada=tokens_in, tokens_saida=tokens_out,
-                latencia_ms=ms, custo_usd=custo,
-                modelo=self.model, provider=self.provider_name,
-            )
+            from src.infrastructure.repositories.observability_repository import salvar_uso_llm_sync
+            salvar_uso_llm_sync(uso)
         except Exception as exc:
             logger.warning("⚠️ [MONITORED_LLM] falha ao gravar metricas_llm (sync): %s", exc)
-        self._prometheus(tokens_in, tokens_out, custo, ms, rota)
+        self._prometheus_uso(uso)
 
-    def _prometheus(self, tokens_in: int, tokens_out: int, custo: float, ms: int, rota: str) -> None:
+    def _prometheus_uso(self, uso) -> None:
+        """Métricas do evento. Custo desconhecido entra como zero no
+        contador de dinheiro (não há como somar o que não se sabe), mas o
+        contador de fallback registra que aconteceu — é assim que o painel
+        mostra "quanto do gasto é estimativa"."""
         try:
             from src.infrastructure.observability.metrics import PrometheusMetrics
+
+            total = uso.custo.total
             PrometheusMetrics().record_llm_usage(
-                input_tokens=tokens_in, output_tokens=tokens_out, cost_usd=custo,
-                latency_ms=ms, provider=self.provider_name, modelo=self.model, rota=rota,
+                input_tokens=uso.input_tokens, output_tokens=uso.output_tokens,
+                cost_usd=float(total) if total is not None else 0.0,
+                latency_ms=uso.latencia_ms, provider=uso.provider,
+                modelo=uso.model, rota=uso.rota,
+                pricing_source=uso.custo.origem.value,
+                cost_status=uso.custo.status.value,
             )
         except Exception as exc:
             logger.warning("⚠️ [MONITORED_LLM] falha ao registrar Prometheus: %s", exc)

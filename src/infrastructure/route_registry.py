@@ -296,13 +296,10 @@ def validar_campos(campos: dict) -> dict:
             )
 
     if out.get("agente"):
-        nomes = set()
-        try:
-            from src.agents.registry import registry
-            nomes = {a.name for a in registry.all()}
-        except Exception:
-            pass
-        nomes = nomes or {"academic_knowledge", "sigaa", "tickets", "conversation"}
+        # Conjunto fechado do domínio. Antes vinha de `registry.all()`, com um
+        # `except: pass` e a mesma lista hardcoded como fallback — ou seja, a
+        # lista literal já era a fonte de verdade na prática.
+        from src.domain.agentes import NOMES as nomes
         if out["agente"] not in nomes:
             raise CamposInvalidos(f"agente '{out['agente']}' não existe no registry: {sorted(nomes)}")
     elif "agente" in out and not out["agente"]:

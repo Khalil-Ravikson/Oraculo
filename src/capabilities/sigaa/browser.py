@@ -7,7 +7,7 @@ PLANO_REFATORACAO_SUPERVISOR.md, seção 2.3).
 Automação Playwright pura do portal SIGAA (JSF) — SEM decisão de negócio.
 Cada `fluxo_*` devolve um `SIGAAResult` com dados crus; quem decide QUE
 MENSAGEM mostrar ao usuário (formatação, elegibilidade, cache) é
-`agents/sigaa/service.py`.
+`domain_services/sigaa/service.py`.
 
 Achados da varredura desta fase (não presentes no levantamento original):
   - `limpar_dom()`, `SYSTEM_PROMPT` e `ERROR_RECOVERY_PROMPT` eram código
@@ -17,7 +17,7 @@ Achados da varredura desta fase (não presentes no levantamento original):
   - A elegibilidade de matrícula (comparar histórico x estrutura curricular)
     NÃO estava duplicada aqui — vivia inteira dentro de
     `application/workers/worker_sigaa.py`, duplicada entre `_run_historico`
-    e `_run_turmas`. Consolidada em `agents/sigaa/eligibility.py`.
+    e `_run_turmas`. Consolidada em `domain_services/sigaa/eligibility.py`.
 """
 from __future__ import annotations
 

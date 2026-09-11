@@ -27,7 +27,7 @@ nenhuma camada intermediária.
    vira facade fino, `mcp_lab/router.py`/`run_test.py` não mudaram.
 2. Adicionar `enviar_midia_por_url()` a
    `src/capabilities/messaging/evolution_tool.py` — a mesma capability que
-   `agents/conversation/registration.py` já usa pra outra finalidade
+   `domain_services/conversation/registration.py` já usa pra outra finalidade
    (`enviar_botoes_confirmacao`). `buscar_imagem()` passa a chamar essa
    capability em vez de instanciar `EvolutionAdapter` direto.
 

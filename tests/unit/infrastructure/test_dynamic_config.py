@@ -34,6 +34,7 @@ SEED_TODAS = [
         SEED_009
         + _load_seed("011_config_parser.py")
         + _load_seed("020_config_graph_executor.py")
+        + _load_seed("026_config_rate_limit.py")
     )
     if row[0] not in _REMOVIDAS
 ]

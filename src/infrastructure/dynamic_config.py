@@ -56,6 +56,8 @@ ALLOWED_DYNAMIC_KEYS: dict[str, str] = {
     "PARSER_PDF_PRIORIDADE":             "str",   # Fase 4
     "PARSER_DESABILITADOS":              "str",   # Fase 4
     "FEATURE_GRAPH_EXECUTOR_PILOTO":     "bool",  # Hub v2 Sprint 8 — nada lê no hot path ainda
+    "RATE_LIMIT_MSGS":                   "int",   # v1 — limite por pessoa, só p/ perguntas
+    "RATE_LIMIT_WINDOW_S":               "int",   # v1 — janela do limite, em segundos
 }
 
 _VERDADEIROS = {"1", "true", "t", "yes", "on", "sim"}

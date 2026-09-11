@@ -24,6 +24,6 @@ class CmdAtualizarEmail(BaseCommand):
         if not await is_agent_enabled(ctx.r, "tickets"):
             return "🚧 Essa função está temporariamente desativada."
 
-        from src.agents.tickets.service import TicketService
+        from src.domain_services.tickets.service import TicketService
         resultado = await TicketService().atualizar_meu_email(ctx.sender_jid, novo_email)
         return resultado["mensagem"]

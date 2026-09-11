@@ -18,15 +18,19 @@
       percorre depois de classificada. É dado versionado (não código): dá pra
       criar um fluxo novo, ver o histórico e reverter. O esqueleto (classificação,
       chamado, cadastro) fica travado; você adiciona <em>rotas terminais</em>.</p>
-    <p><strong>Laboratório</strong> — um rascunho visual livre com os componentes
-      de infraestrutura (LLM, STT, busca…). Não afeta produção; serve pra
-      esboçar e testar peças isoladas.</p>
+    <p><strong>Sandbox (experimental)</strong> — um rascunho visual livre com
+      os componentes de infraestrutura (modelos, leitura de áudio, busca…).
+      <strong>Nada do que você desenhar aqui entra em produção</strong>, nem
+      agora nem depois de salvar: é um desenho isolado, para esboçar e testar
+      peças soltas. O que roda de verdade é a aba “Grafo de produção”.</p>
+    <p class="caption">Esta área está congelada — não recebe funcionalidade
+      nova. Se você precisa mudar o que o bot faz, use “Grafo de produção”.</p>
   </div>
 </div>
 
 <div class="tabs" role="tablist" x-data="{ t: 'prod' }">
   <button class="tab" role="tab" :aria-selected="t === 'prod'" @click="t = 'prod'; window.studioPane && window.studioPane('prod')">Grafo de produção</button>
-  <button class="tab" role="tab" :aria-selected="t === 'editor'" @click="t = 'editor'; window.studioPane && window.studioPane('editor')">Laboratório</button>
+  <button class="tab" role="tab" :aria-selected="t === 'editor'" @click="t = 'editor'; window.studioPane && window.studioPane('editor')">Sandbox (experimental)</button>
 </div>
 
 <div id="pane-editor" hidden>
