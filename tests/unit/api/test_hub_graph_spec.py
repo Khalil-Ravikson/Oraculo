@@ -58,8 +58,10 @@ def test_nova_rota_greeting_passa_da_validacao_de_entrypoint(client, auth):
     """Regressão do bug reportado: criar um fluxo `greeting` chamado TESTE não
     pode falhar em 'entrypoint_node deve ser um nó do grafo'. Sem Postgres o
     endpoint falha na transação (erro genérico) — mas a validação pré-banco
-    tem que passar."""
-    with patch("src.api.routers.web.hub.get_admin_auth", return_value=auth):
+    tem que passar. Roda com a escrita destravada — a validação em si não
+    depende do congelamento de 2026-09-14 (ver test_escrita_congelada_*)."""
+    with patch("src.api.routers.web.hub.get_admin_auth", return_value=auth), \
+         patch("src.api.routers.web.hub.GRAPH_SPEC_ESCRITA_CONGELADA", False):
         client.cookies.set("admin_token", "t")
         r = client.post("/hub/graph-studio/spec/nova-rota", json={
             "rota": "TESTE", "node_type": "greeting", "gatilho": "teste",
@@ -70,7 +72,8 @@ def test_nova_rota_greeting_passa_da_validacao_de_entrypoint(client, auth):
 
 
 def test_nova_rota_rejeita_tipo_invalido(client, auth):
-    with patch("src.api.routers.web.hub.get_admin_auth", return_value=auth):
+    with patch("src.api.routers.web.hub.get_admin_auth", return_value=auth), \
+         patch("src.api.routers.web.hub.GRAPH_SPEC_ESCRITA_CONGELADA", False):
         client.cookies.set("admin_token", "t")
         r = client.post("/hub/graph-studio/spec/nova-rota", json={
             "rota": "TESTE2", "node_type": "ticket_ask_tipo",
@@ -79,7 +82,20 @@ def test_nova_rota_rejeita_tipo_invalido(client, auth):
 
 
 def test_nova_rota_rejeita_nome_de_rota_fixa(client, auth):
-    with patch("src.api.routers.web.hub.get_admin_auth", return_value=auth):
+    with patch("src.api.routers.web.hub.get_admin_auth", return_value=auth), \
+         patch("src.api.routers.web.hub.GRAPH_SPEC_ESCRITA_CONGELADA", False):
         client.cookies.set("admin_token", "t")
         r = client.post("/hub/graph-studio/spec/nova-rota", json={"rota": "GERAL"})
     assert "fixa" in r.json().get("error", "").lower()
+
+
+def test_escrita_congelada_recusa_nova_rota(client, auth):
+    """2026-09-14: criar/remover/reverter fluxo fica bloqueado até o
+    hot-reload dos workers existir — hoje a rota é gravada no Postgres mas
+    não tem efeito nenhum até um restart manual, o que parecia bug."""
+    with patch("src.api.routers.web.hub.get_admin_auth", return_value=auth):
+        client.cookies.set("admin_token", "t")
+        r = client.post("/hub/graph-studio/spec/nova-rota", json={
+            "rota": "TESTE3", "node_type": "greeting", "gatilho": "teste",
+        })
+    assert r.status_code == 423

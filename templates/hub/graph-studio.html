@@ -134,7 +134,16 @@
     <p class="caption">Cria a rota (com gatilho de classificação) <em>e</em> o nó
       terminal + as ligações no grafo, numa transação só. Entra em vigor no
       próximo restart dos workers.</p>
-    <form id="spec-nova-rota" class="spec-form">
+    <div class="info-banner" data-open="true" style="margin-bottom:var(--space-3)">
+      <div class="info-banner__body" style="display:block;padding:var(--space-3)">
+        <p><strong>Temporariamente desativado.</strong> Criar/remover/reverter
+          fluxo grava no Postgres, mas só entra em vigor num restart manual
+          dos workers — sem botão pra isso no Hub ainda, o que faz a edição
+          parecer não ter efeito nenhum. Volta a ficar editável quando o
+          hot-reload for resolvido.</p>
+      </div>
+    </div>
+    <form id="spec-nova-rota" class="spec-form" inert>
       <label>Nome da rota
         <input class="input" name="rota" placeholder="ex: FAQ_BIBLIOTECA" required
                pattern="[A-Za-z][A-Za-z0-9_]{2,23}" title="3–24 caracteres, letras/dígitos/_">
@@ -157,7 +166,7 @@
         </label>
       </div>
       <div class="spec-form__actions">
-        <button type="submit" class="btn btn--primary btn--sm">Criar fluxo</button>
+        <button type="submit" class="btn btn--primary btn--sm" disabled>Criar fluxo (desativado)</button>
         <span id="spec-nova-msg" class="caption"></span>
       </div>
     </form>
@@ -169,6 +178,7 @@
 
 {% block scripts %}
 <script src="/static/js/vendor/konva.min.js"></script>
+<script src="/static/js/vendor/mermaid.min.js"></script>
 <script type="module" src="/static/js/pages/graph-studio.js"></script>
 <script type="module" src="/static/js/pages/graph-spec.js"></script>
 {% endblock %}

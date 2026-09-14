@@ -252,3 +252,34 @@ def diagrama_producao() -> dict:
             ],
         }]
     }
+
+
+def _mermaid_escape(texto: str) -> str:
+    """Livra um rótulo de caracteres que quebram a sintaxe do Mermaid."""
+    return texto.replace('"', "'").replace("|", "/").replace("\n", " ")
+
+
+def mermaid_producao() -> str:
+    """O grafo de produção como texto Mermaid (`flowchart TD`), pronto pra
+    renderizar com `mermaid.js` no Hub. Mesma fonte de dado que
+    `diagrama_producao()` — camadas por BFS a partir de `__start__` — só que
+    o layout/desenho fica por conta do Mermaid, não de coordenadas manuais."""
+    diagrama = diagrama_producao()["fluxos"][0]
+
+    linhas = ["flowchart TD"]
+    for n in diagrama["nodes"]:
+        rotulo = _mermaid_escape(n["label"])
+        if n["id"] == "__start__":
+            linhas.append(f'    {n["id"]}(["{rotulo}"])')
+        elif n["id"] == "__end__":
+            linhas.append(f'    {n["id"]}(["{rotulo}"])')
+        else:
+            linhas.append(f'    {n["id"]}["{rotulo}"]')
+
+    for e in diagrama["edges"]:
+        if e["rotulo"]:
+            linhas.append(f'    {e["de"]} -->|"{_mermaid_escape(e["rotulo"])}"| {e["para"]}')
+        else:
+            linhas.append(f'    {e["de"]} --> {e["para"]}')
+
+    return "\n".join(linhas)
