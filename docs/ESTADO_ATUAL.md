@@ -422,6 +422,41 @@ Ver TD-028.
 
 ---
 
+## 4.9 A wiki da CTIC é maior que SIGAA e SIPAC (medido em 2026-09-11)
+
+A wiki tem **1383 páginas** e se organiza, pela própria página inicial, em
+**sete áreas de topo**. O menu do v1 cobre duas delas explicitamente.
+
+| área | como o menu trata hoje |
+|---|---|
+| SIPAC — administrativo | opção própria |
+| SIGAA — acadêmico | opção própria |
+| **SIGRH — servidores** | sem caminho visível |
+| **Office (Microsoft)** | sem caminho visível |
+| **LibreOffice** | sem caminho visível |
+| Tira-dúvida | sem caminho visível |
+| Arquivos importantes | sem caminho visível |
+
+Classificar por nome de página cobre só 40%: SIGAA 19%, SIPAC 14%, Office 4%,
+e **60% não dizem no título a que sistema pertencem**. É por isso que a
+taxonomia é deduzida do grafo de links, não do nome.
+
+**A capacidade já existe, a descoberta é que não.** A opção "Não sei qual
+sistema / outro assunto" busca na wiki inteira, sem filtro — uma pergunta
+sobre Excel seria respondida por ali hoje. O que falta é a pessoa saber que
+pode perguntar, e isso é rótulo de menu, não código.
+
+**O que mudou nesta rodada:** o mapa de taxonomia foi de 10 para 43 hubs,
+cobrindo os seis sistemas, e a normalização de identificador passou a remover
+acento — sem isso, cinco dos oito módulos do SIPAC perdiam a taxonomia
+(TD-032). O efeito só aparece numa reingestão.
+
+**Restrição de produto registrada:** o público inclui pessoas que não têm
+familiaridade com tecnologia. Os rótulos do menu precisam ser simples e
+explícitos, não jargão de sistema.
+
+---
+
 ## 5. Checklist "pronto para produção"
 
 Nada vai ao ar com um item aberto. Detalhamento do item B8 do plano.

@@ -46,6 +46,7 @@
 | [TD-029](#td-029--chunkviz-não-deixava-escolher-o-assunto-do-documento) | ✅ FECHADA — ingestão fixava `geral`; o RAG do menu nunca achava nada | Alta |
 | [TD-030](#td-030--embedding-guardado-como-texto-json-5x-a-memória-necessária) | ✅ FECHADA — embedding como array JSON custava 81 KB por trecho; estourou o Redis e parou o bot | Alta |
 | [TD-031](#td-031--filtro-de-jailbreak-burlável-por-omissão-de-acento) | ✅ FECHADA — bastava escrever sem acento para atravessar o filtro de injection inteiro | Alta |
+| [TD-032](#td-032--taxonomia-da-wiki-perdida-por-acento-e-mapa-incompleto) | ✅ FECHADA — acento no page_id derrubava a taxonomia; mapa cobria 2 de 7 áreas da wiki | Alta |
 
 ---
 
@@ -833,5 +834,59 @@ isso levantou a suspeita.
 **Travado por:** `tests/unit/application/test_guardrail_acentos.py` — 15
 casos, incluindo seis perguntas legítimas sem acento, para a normalização não
 virar excesso de bloqueio.
+
+**Prioridade:** —
+
+---
+
+## TD-032 — Taxonomia da wiki perdida por acento, e mapa incompleto
+
+> ✅ **FECHADA na descoberta** (2026-09-11).
+
+Dois defeitos que se somavam para o mesmo efeito: quase todo trecho da wiki
+ficava com `sistema="Geral"`, e o filtro por sistema do menu não tinha o que
+filtrar.
+
+**Defeito 1 — acento no identificador de página.** `_normalize_page_id`
+baixava a caixa e trocava espaço por `_`, mas **não removia acento**. A
+DokuWiki remove. Um link `[[Catálogo de Materiais]]` virava o id
+`catálogo_de_materiais`, enquanto a página real é `catalogo_de_materiais`. O
+grafo de pais (`hierarchy.py`) era gravado numa chave inexistente, e
+`resolver_taxonomia()` não achava o hub.
+
+Dos 8 módulos do SIPAC, só `almoxarifado`, `contratos` e `protocolo` não têm
+acento — e eram exatamente os três que funcionavam. Medido na ingestão
+parcial: 317 trechos como SIPAC contra 4744 como "Geral".
+
+**É a terceira armadilha de acento da mesma rodada**, depois do filtro de
+jailbreak (TD-031) e do resolver de menu. O `.claude.md` já registrava a
+regra para plural; acento é a mesma classe.
+
+**Defeito 2 — mapa cobrindo 2 de 7 áreas.** `KNOWN_SYSTEM_HUBS` tinha 10
+entradas, todas de SIPAC e SIGUEMA. A página `start` da wiki lista **sete**
+áreas de topo, e três delas não tinham taxonomia nenhuma:
+
+| área | situação antes |
+|---|---|
+| SIPAC | mapeado |
+| SIGAA | **ausente** |
+| SIGRH (servidores) | **ausente** |
+| Office (Microsoft) | **ausente** |
+| LibreOffice | **ausente** |
+| Tira-dúvida | ausente |
+| Arquivos importantes | ausente |
+
+**Correção:** normalização passa a remover acento, e o mapa foi de 10 para
+**43 hubs**, cobrindo seis sistemas. Levantado a partir da estrutura da
+própria wiki (a página `start` e cada hub), não por adivinhação de nome. Cada
+uma das 43 chaves foi conferida contra a lista completa de `?do=index` —
+quatro entradas que não existiam como página foram removidas, porque chave
+morta aqui não dá erro: devolve "Geral" em silêncio.
+
+**Travado por:** `tests/unit/infrastructure/test_taxonomia_wiki.py` — 24
+casos.
+
+**Ainda aberto:** o efeito real só aparece numa reingestão. A taxonomia é
+resolvida na hora do scraping.
 
 **Prioridade:** —
