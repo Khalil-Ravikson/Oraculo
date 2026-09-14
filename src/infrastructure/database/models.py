@@ -563,6 +563,29 @@ class Canal(Base):
     atualizado_por = Column(String(100), nullable=True)
 
 
+class WikiTaxonomia(Base):
+    """Classificação (Sistema, Módulo) de um page_id da wiki CTIC, editável
+    pelo painel (migration 028). Substitui o dict hardcoded
+    `hierarchy.KNOWN_SYSTEM_HUBS`. Nasce vazia — sem linha para um page_id,
+    `resolver_taxonomia()` cai no default ("Geral"/"Geral"). `tenant_id`
+    sempre NULL."""
+    __tablename__ = "wiki_taxonomia"
+    __table_args__ = (
+        Index(
+            "ux_wiki_taxonomia_tenant_page", "tenant_id", "page_id",
+            unique=True, postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id             = Column(Integer, primary_key=True)
+    page_id        = Column(String(200), nullable=False)
+    sistema        = Column(String(100), nullable=False)
+    modulo         = Column(String(100), nullable=False)
+    tenant_id      = Column(PGUUID(as_uuid=True), nullable=True)
+    atualizado_em  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    atualizado_por = Column(String(100), nullable=True)
+
+
 class LlmProvider(Base):
     """Provedor de LLM cadastrado pelo painel (migration 017, Hub v2). A
     chave de API NUNCA fica aqui — `api_key_env` guarda só o nome da

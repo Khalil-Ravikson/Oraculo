@@ -56,11 +56,13 @@
 <script type="module">
 import { hub } from '/static/js/core/api-client.js';
 import { showToast } from '/static/js/core/toast.js';
-import { confirmar } from '/static/js/core/modal.js';
+import { confirmar, formModal } from '/static/js/core/modal.js';
 import { fmt } from '/static/js/core/format.js';
 
 const $ = (id) => document.getElementById(id);
 let PAGINAS = [];
+let CLASSIFICADAS = new Map(); // page_id -> {sistema, modulo}
+let ORIGEM = '';
 let TIMER = null;
 
 /* Nome humano de cada assunto. A tela nunca mostra o identificador interno,
@@ -100,25 +102,80 @@ async function carregarIndice() {
   }).join('');
 }
 
+async function carregarClassificadas() {
+  try {
+    const d = await hub.get('/wiki/taxonomia/data');
+    CLASSIFICADAS = new Map((d.classificadas || []).map((t) => [t.page_id, t]));
+  } catch { CLASSIFICADAS = new Map(); }
+}
+
 async function descobrir() {
   $('btn-descobrir').disabled = true;
   aviso(null);
   try {
-    const d = await hub.get('/wiki/descobrir');
+    const [d] = await Promise.all([hub.get('/wiki/descobrir'), carregarClassificadas()]);
     if (d.error) { aviso(d.error); return; }
 
     PAGINAS = d.paginas || [];
+    ORIGEM = d.origem || '';
     $('btn-ingerir').disabled = PAGINAS.length === 0;
-    $('wiki-lista').innerHTML =
-      `<p class="caption">${PAGINAS.length} página(s) encontradas em ${fmt.esc(d.origem)}.</p>` +
-      '<ul class="wiki-paginas">' +
-      PAGINAS.slice(0, 300).map((p) => `<li>${fmt.esc(p)}</li>`).join('') +
-      '</ul>' +
-      (PAGINAS.length > 300 ? '<p class="caption">…e mais. A lista completa será processada.</p>' : '');
+    renderLista(ORIGEM);
   } catch (e) {
     aviso((e.payload && e.payload.error) || 'Não deu para ler a wiki.');
   } finally {
     $('btn-descobrir').disabled = false;
+  }
+}
+
+/* Sem classificação primeiro — é o que falta fazer. Ordena só para exibição;
+   a ingestão sempre processa a lista completa, não só o que aparece aqui. */
+function renderLista(origem) {
+  const semClass = PAGINAS.filter((p) => !CLASSIFICADAS.has(p));
+  const comClass = PAGINAS.filter((p) => CLASSIFICADAS.has(p));
+  const ordenada = [...semClass, ...comClass];
+
+  $('wiki-lista').innerHTML =
+    `<p class="caption">${PAGINAS.length} página(s) encontradas em ${fmt.esc(origem)} — ` +
+    `${comClass.length} classificada(s), ${semClass.length} sem classificação.</p>` +
+    '<ul class="wiki-paginas">' +
+    ordenada.slice(0, 300).map((p) => {
+      const t = CLASSIFICADAS.get(p);
+      return `<li class="wiki-pagina">
+        <span class="mono">${fmt.esc(p)}</span>
+        ${t
+          ? `<span class="badge badge--ok">${fmt.esc(t.sistema)} / ${fmt.esc(t.modulo)}</span>`
+          : `<button class="btn btn--sm btn--ghost" data-classificar="${fmt.esc(p)}">Classificar</button>`}
+      </li>`;
+    }).join('') +
+    '</ul>' +
+    (ordenada.length > 300 ? '<p class="caption">…e mais. A lista completa será processada.</p>' : '');
+
+  $('wiki-lista').querySelectorAll('[data-classificar]').forEach((b) => {
+    b.onclick = () => classificar(b.dataset.classificar);
+  });
+}
+
+async function classificar(pageId) {
+  const corpo = document.createElement('div');
+  corpo.innerHTML = `
+    <div class="field"><label class="field__label">page_id</label><input class="input" name="page_id" value="${fmt.esc(pageId)}" readonly></div>
+    <div class="field"><label class="field__label">Sistema</label><input class="input" name="sistema" placeholder="ex: SIPAC" required></div>
+    <div class="field"><label class="field__label">Módulo</label><input class="input" name="modulo" placeholder="ex: Almoxarifado" required></div>`;
+
+  const r = await formModal({
+    titulo: `Classificar "${pageId}"`, corpo, acao: 'Salvar',
+    onSubmit: async (form) => {
+      const d = Object.fromEntries(new FormData(form));
+      if (!d.sistema || !d.modulo) throw new Error('Preencha sistema e módulo');
+      return hub.post('/wiki/taxonomia', { page_id: pageId, sistema: d.sistema, modulo: d.modulo });
+    },
+  });
+  if (r && !r.error) {
+    showToast(`"${pageId}" classificada`);
+    CLASSIFICADAS.set(pageId, r);
+    renderLista(ORIGEM);
+  } else if (r && r.error) {
+    showToast(r.error, 'error');
   }
 }
 
@@ -245,11 +302,16 @@ atualizarProgresso();
 .wiki-progresso__barra { background: var(--surface-2); border-radius: 999px; height: 8px; overflow: hidden; }
 .wiki-progresso__barra > div { background: var(--accent-strong); height: 100%; width: 0; transition: width .4s ease; }
 
-.wiki-lista { max-height: 420px; overflow-y: auto; }
+.wiki-lista { max-height: 480px; overflow-y: auto; }
 .wiki-paginas {
   list-style: none; margin: var(--sp-2) 0 0; padding: 0;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 2px;
-  font-size: 0.8125rem; opacity: .85;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 4px;
+  font-size: 0.8125rem;
 }
+.wiki-pagina {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: 2px 4px; border-radius: 4px;
+}
+.wiki-pagina:hover { background: var(--surface-2); }
 </style>
 {% endblock %}

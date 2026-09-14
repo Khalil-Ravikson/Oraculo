@@ -224,6 +224,7 @@ def build_default_scraping_service(
     redis_client: Any | None = None,
     amqp_url: str | None = None,
     ingest_to_rag: bool = True,
+    wiki_hubs: dict[str, tuple[str, str]] | None = None,
 ) -> ScrapingService:
     """
     Fábrica que monta o ScrapingService com todos os scrapers registrados.
@@ -272,5 +273,6 @@ def build_default_scraping_service(
     service.register(_mk(GenericHTTPScraper), fallback=True)
     service.register(DokuWikiScraper(
         anti_block=anti_block, retry_policy=retry, cache=cache, graph_store=graph_store,
+        hubs=wiki_hubs,
     ))
     return service

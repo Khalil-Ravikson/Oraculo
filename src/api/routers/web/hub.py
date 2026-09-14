@@ -43,6 +43,24 @@ router    = APIRouter(prefix="/hub", tags=["Portal Admin"])
 templates = Jinja2Templates(directory="templates")
 
 
+# Congelamento temporário da escrita da GraphSpec pela GUI (2026-09-14):
+# criar/remover/reverter fluxo grava no Postgres mas só entra em vigor no
+# próximo restart dos workers Celery — não há hot-reload nem botão pra
+# disparar o restart a partir do Hub. Até isso ser resolvido, editar por aqui
+# passa a sensação de "não funciona" (ver docs/architecture/graph-studio-sandbox.md
+# para o precedente do mesmo tipo de congelamento em `graph_studio/`).
+GRAPH_SPEC_ESCRITA_CONGELADA = True
+
+
+def _spec_congelada() -> JSONResponse:
+    return JSONResponse({
+        "error": "Edição do grafo de produção temporariamente desativada: "
+                 "fluxo novo só entra em vigor com restart manual dos "
+                 "workers, sem botão pra isso no Hub ainda. Reativa quando "
+                 "o hot-reload for resolvido.",
+    }, status_code=423)
+
+
 def _nao_autorizado() -> JSONResponse:
     """Resposta padrão para request sem cookie admin válido nas rotas JSON.
     HTTP 401 (não 200) — o front continua tratando via `d.error`, mas agora
@@ -1883,7 +1901,7 @@ async def graph_studio_spec(request: Request):
         return _nao_autorizado()
 
     from src.application.orchestration import node_manifest, routers, spec_editor
-    from src.application.orchestration.builder import diagrama_producao
+    from src.application.orchestration.builder import diagrama_producao, mermaid_producao
     from src.application.orchestration.loader import carregar_spec_ativa
     from src.infrastructure.database.session import AsyncSessionLocal
     from src.infrastructure.repositories.graph_spec_repository import GraphSpecRepository
@@ -1903,6 +1921,7 @@ async def graph_studio_spec(request: Request):
         "versao": versao,
         "atualizado_por": atualizado_por,
         "diagrama": diagrama_producao(),
+        "mermaid": mermaid_producao(),
         "rotas_editaveis": spec_editor.rotas_editaveis(spec),
         "tipos_adicionaveis": list(spec_editor.TIPOS_ADICIONAVEIS),
         "tipos": node_manifest.manifest(),
@@ -1946,6 +1965,8 @@ async def graph_studio_spec_save(request: Request, data: GraphSpecSaveRequest):
     payload = _verificar_cookie(request)
     if not payload:
         return _nao_autorizado()
+    if GRAPH_SPEC_ESCRITA_CONGELADA:
+        return _spec_congelada()
 
     from src.application.orchestration.spec import GraphSpec
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -1990,6 +2011,8 @@ async def graph_studio_spec_reverter(request: Request, data: GraphSpecReverterRe
     payload = _verificar_cookie(request)
     if not payload:
         return _nao_autorizado()
+    if GRAPH_SPEC_ESCRITA_CONGELADA:
+        return _spec_congelada()
 
     from src.application.orchestration.spec import spec_valida_ou_erro
     from src.infrastructure.database.session import AsyncSessionLocal
@@ -2034,6 +2057,8 @@ async def graph_studio_nova_rota(request: Request, data: NovaRotaGrafoRequest):
     payload = _verificar_cookie(request)
     if not payload:
         return _nao_autorizado()
+    if GRAPH_SPEC_ESCRITA_CONGELADA:
+        return _spec_congelada()
 
     from src.application.orchestration import spec_editor
     from src.application.orchestration.loader import carregar_spec_ativa
@@ -2121,6 +2146,8 @@ async def graph_studio_remover_rota(request: Request, data: RemoverRotaGrafoRequ
     payload = _verificar_cookie(request)
     if not payload:
         return _nao_autorizado()
+    if GRAPH_SPEC_ESCRITA_CONGELADA:
+        return _spec_congelada()
     node_id = data.node_id
 
     from src.application.orchestration import spec_editor
@@ -2506,6 +2533,93 @@ async def wiki_indice(request: Request):
             continue
 
     return {"por_assunto": por_assunto, "total": sum(por_assunto.values())}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Taxonomia da wiki — classificação Sistema/Módulo por page_id, editável pelo
+# painel (migration 028). Substitui `hierarchy.KNOWN_SYSTEM_HUBS`, que era
+# hardcoded em código. Nasce vazia (decisão do dono, 2026-09-14): sem linha
+# aqui, uma página cai em "Geral" na ingestão — ver `wiki_ingest_tasks.py`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/wiki/taxonomia", response_class=HTMLResponse)
+async def wiki_taxonomia_page(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return RedirectResponse("/hub/login", status_code=302)
+    return templates.TemplateResponse(
+        request=request, name="hub/wiki-taxonomia.html",
+        context={"request": request, "username": payload.sub},
+    )
+
+
+@router.get("/wiki/taxonomia/data")
+async def wiki_taxonomia_data(request: Request):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.services import taxonomia_store
+
+    try:
+        async with AsyncSessionLocal() as session:
+            classificadas = await taxonomia_store.listar(session)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao ler taxonomia: %s", exc)
+        return {"classificadas": [], "error": "Falha ao ler o Postgres."}
+
+    return {"classificadas": classificadas}
+
+
+class WikiTaxonomiaRequest(BaseModel):
+    page_id: str
+    sistema: str
+    modulo: str
+
+
+@router.post("/wiki/taxonomia")
+async def wiki_taxonomia_criar(request: Request, data: WikiTaxonomiaRequest):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.services import taxonomia_store
+
+    try:
+        async with AsyncSessionLocal() as session:
+            registro = await taxonomia_store.criar(
+                session, data.page_id, data.sistema, data.modulo, admin=payload.sub,
+            )
+            await session.commit()
+    except (taxonomia_store.PageIdDuplicadoError, taxonomia_store.ConfigInvalidaError) as exc:
+        return {"error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao criar taxonomia: %s", exc)
+        return {"error": "Falha ao gravar no Postgres."}
+
+    return registro
+
+
+@router.post("/wiki/taxonomia/{taxonomia_id}/remover")
+async def wiki_taxonomia_remover(request: Request, taxonomia_id: int):
+    payload = _verificar_cookie(request)
+    if not payload:
+        return _nao_autorizado()
+
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.services import taxonomia_store
+
+    try:
+        async with AsyncSessionLocal() as session:
+            ok = await taxonomia_store.remover(session, taxonomia_id)
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("⚠️  [HUB] Falha ao remover taxonomia: %s", exc)
+        return {"error": "Falha ao gravar no Postgres."}
+
+    return {"ok": ok}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

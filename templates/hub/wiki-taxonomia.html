@@ -1,0 +1,42 @@
+{% extends "hub/_shell.html" %}
+{% block nav_active %}wiki-tax{% endblock %}
+{% block page_title %}Taxonomia da Wiki{% endblock %}
+
+{% block content %}
+<div class="tax-view">
+
+<div class="info-banner" x-data="infoBanner('wiki-taxonomia')" :data-open="aberto">
+  <button class="info-banner__head" @click="toggle()" :aria-expanded="aberto">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+    O que é esta página
+    <svg class="info-banner__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div class="info-banner__body" x-show="aberto" x-cloak>
+    <p>Diz a que Sistema e Módulo cada página da wiki pertence — é o que o
+      assistente usa para filtrar por assunto na hora de responder.</p>
+    <p>Começou <strong>zerada</strong> de propósito: em vez de herdar uma
+      classificação antiga, você vai preenchendo aqui aos poucos. Página sem
+      classificação cai em "Geral" — não quebra nada, só não é filtrada por
+      assunto específico até ser classificada.</p>
+    <p>O <code>page_id</code> é o identificador da página na wiki (o que vem
+      depois de <code>?id=</code> na URL), não o título.</p>
+  </div>
+</div>
+
+<section class="section">
+  <div class="section__head">
+    <span class="eyebrow">classificações</span>
+    <button class="btn btn--primary btn--sm" id="btn-nova">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      Classificar página
+    </button>
+  </div>
+  <div id="tax" class="table-wrap"><span class="caption">Carregando…</span></div>
+</section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/wiki-taxonomia.js"></script>
+{% endblock %}

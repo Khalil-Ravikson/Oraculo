@@ -19,6 +19,8 @@ SINTAXE DOKUWIKI RELEVANTE:
 """
 from __future__ import annotations
 
+import unicodedata
+
 import re
 from dataclasses import dataclass, field
 from typing import Callable
@@ -105,8 +107,23 @@ def _extract_media(
 
 
 def _normalize_page_id(target: str) -> str:
-    """DokuWiki normaliza nomes de página: minúsculas, espaços viram '_'."""
-    return target.strip().lower().replace(" ", "_")
+    """DokuWiki normaliza nomes de página: minúsculas, espaços viram `_`, e
+    **acentos são removidos**.
+
+    A remoção de acento faltava até 2026-09-11, e o efeito era silencioso mas
+    grande: um link `[[Catálogo de Materiais]]` virava o id
+    `catálogo_de_materiais`, enquanto a página real é
+    `catalogo_de_materiais`. O grafo de pais (`hierarchy.py`) era então
+    registrado numa chave que não existe, e `resolver_taxonomia()` não achava
+    o hub — o trecho caía em `sistema="Geral"`.
+
+    Dos 8 módulos do SIPAC, só `almoxarifado`, `contratos` e `protocolo` não
+    têm acento. Eram exatamente os três que resolviam; os outros cinco
+    perdiam a taxonomia inteira.
+    """
+    sem_espaco = target.strip().lower().replace(" ", "_")
+    decomposto = unicodedata.normalize("NFKD", sem_espaco)
+    return "".join(c for c in decomposto if not unicodedata.combining(c))
 
 
 def _extract_links(text: str) -> tuple[str, list[str]]:

@@ -95,7 +95,19 @@ async def _ingerir(page_ids: list[str], url_base: str, forcar: bool) -> dict[str
     except Exception:  # noqa: BLE001 — sem cache a ingestão ainda roda
         redis_client = None
 
-    servico = build_default_scraping_service(redis_client=redis_client, ingest_to_rag=True)
+    from src.infrastructure.database.session import AsyncSessionLocal
+    from src.infrastructure.services import taxonomia_store
+
+    wiki_hubs: dict[str, tuple[str, str]] = {}
+    try:
+        async with AsyncSessionLocal() as session:
+            wiki_hubs = await taxonomia_store.listar_hubs_dict(session)
+    except Exception as exc:  # noqa: BLE001 — sem taxonomia, tudo cai em "Geral"
+        logger.warning("⚠️  [WIKI] Falha ao carregar taxonomia: %s", exc)
+
+    servico = build_default_scraping_service(
+        redis_client=redis_client, ingest_to_rag=True, wiki_hubs=wiki_hubs,
+    )
     pedidos = montar_requests(url_base, page_ids)
     for pedido in pedidos:
         pedido.force_refresh = forcar

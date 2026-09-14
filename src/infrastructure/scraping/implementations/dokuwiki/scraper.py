@@ -48,9 +48,13 @@ def _export_raw_url(url: str) -> str:
 class DokuWikiScraper(BaseScraper):
     """Scraper especializado para o DokuWiki do CTIC/UEMA."""
 
-    def __init__(self, *args, graph_store: hierarchy.GraphStore | None = None, **kwargs) -> None:
+    def __init__(
+        self, *args, graph_store: hierarchy.GraphStore | None = None,
+        hubs: dict[str, tuple[str, str]] | None = None, **kwargs,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._graph_store = graph_store or hierarchy.InMemoryGraphStore()
+        self._hubs = hubs
 
     @property
     def source_name(self) -> str:
@@ -80,7 +84,7 @@ class DokuWikiScraper(BaseScraper):
         converted = wikitext.convert(raw_content, media_url_builder=media_url_builder)
 
         hierarchy.registrar_links(page_id, converted.internal_links, self._graph_store)
-        taxonomia = hierarchy.resolver_taxonomia(page_id, self._graph_store)
+        taxonomia = hierarchy.resolver_taxonomia(page_id, self._graph_store, hubs=self._hubs)
 
         parsed = urlparse(url)
         doku_php_base = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
